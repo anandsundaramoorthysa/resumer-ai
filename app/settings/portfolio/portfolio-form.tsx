@@ -2,7 +2,17 @@
 
 import { useActionState, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { connectRepo, syncNow, disconnectRepo, type ActionResult } from './actions';
+import { connectRepo, disconnectRepo, type ActionResult } from './actions';
+
+interface StepState {
+  jobId: string;
+  step: number;
+  totalSteps: number;
+  status: 'running' | 'done' | 'error';
+  message: string;
+  done: boolean;
+  error?: string;
+}
 
 export function PortfolioForm({
   currentRepo,
@@ -23,11 +33,49 @@ export function PortfolioForm({
   >(connectRepo, null);
 
   const [syncResult, setSyncResult] = useState<ActionResult | null>(null);
+  const [progress, setProgress] = useState<StepState | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const runSync = () => {
+  /**
+   * Drives the sync one step per request. Reading a portfolio takes minutes, which no
+   * serverless function will hold open — stepping it keeps every request short and
+   * turns the wait into visible progress instead of a spinner that may just die.
+   */
+  const runSync = async () => {
     setSyncResult(null);
-    startTransition(async () => setSyncResult(await syncNow()));
+    setSyncing(true);
+    try {
+      let state: StepState | null = null;
+      for (let guard = 0; guard < 40; guard++) {
+        const res = await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(state ? { jobId: state.jobId } : {}),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          setSyncResult({ ok: false, message: json.error ?? 'Sync failed.' });
+          return;
+        }
+        state = json as StepState;
+        setProgress(state);
+        if (state.done) {
+          setSyncResult({
+            ok: state.status === 'done',
+            message: state.error ?? state.message,
+          });
+          if (state.status === 'done') window.location.reload();
+          return;
+        }
+      }
+      setSyncResult({ ok: false, message: 'Sync took too many steps and was stopped.' });
+    } catch (err) {
+      setSyncResult({ ok: false, message: (err as Error).message });
+    } finally {
+      setSyncing(false);
+      setProgress(null);
+    }
   };
 
   const runDisconnect = () => {
@@ -104,10 +152,10 @@ export function PortfolioForm({
             <button
               type="button"
               onClick={runSync}
-              disabled={pending}
+              disabled={pending || syncing}
               className="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
             >
-              {pending ? 'Syncing…' : 'Sync now'}
+              {syncing ? 'Syncing…' : 'Sync now'}
             </button>
             {flaggedCount > 0 ? (
               <Link
@@ -133,6 +181,23 @@ export function PortfolioForm({
               Disconnect
             </button>
           </div>
+
+          {progress && !progress.done ? (
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>{progress.message}</span>
+                <span className="font-mono tabular">
+                  {progress.step}/{progress.totalSteps}
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line">
+                <div
+                  className="h-full rounded-full bg-brand transition-all"
+                  style={{ width: `${(progress.step / progress.totalSteps) * 100}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
 
           {syncResult ? (
             <p

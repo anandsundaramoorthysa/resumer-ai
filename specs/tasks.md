@@ -20,8 +20,8 @@ Checkable work items grouped by phase (matching `PLAN.md`'s roadmap). Each task 
 
 ## Phase 1 — Profile Dashboard
 
-- [ ] 1.1 Build CRUD UI for Skill, Experience Bullet, Project, Education/Cert, Achievement — *REQ-1.1*
-- [ ] 1.2 Implement `source` + `contentHash` fields on every record, hidden from manual-entry UI but populated correctly — *REQ-1.2*
+- [x] 1.1 Build CRUD UI for Skill, Experience Bullet, Project, Education/Cert, Achievement — *REQ-1.1*
+- [x] 1.2 Implement `source` + `contentHash` fields on every record, hidden from manual-entry UI but populated correctly — *REQ-1.2*
 - [ ] 1.3 Add reserved (unused) Application-Form Fields section to the schema and a hidden/disabled form section — *REQ-1.3*
 - [x] 1.4 Build responsive stacked-card layout for the dashboard below `md` breakpoint — *REQ-8.2, NFR-3*
 - [x] 1.5 Build first-run flow: post-signup redirect straight to "Connect GitHub" or "Upload resume" choice — *REQ-8.3*
@@ -40,7 +40,7 @@ Checkable work items grouped by phase (matching `PLAN.md`'s roadmap). Each task 
 - [x] 3.3 Implement AI extraction pass for hardcoded component content — *REQ-2.3*
 - [x] 3.4 Implement live-site fallback fetch for unresolvable content — *REQ-2.3*
 - [x] 3.5 Implement reconciliation logic: add/update/flag-removed by content hash, manual records untouched — *REQ-2.4*
-- [ ] 3.6 Build "flagged for removal" review UI in the dashboard
+- [x] 3.6 Build "flagged for removal" review UI in the dashboard
 - [ ] 3.7 Add daily Vercel Cron sync job
 - [x] 3.8 Add optional GitHub push webhook route to invalidate cached SHA — *REQ-2.5*
 - [ ] 3.9 Write reconciliation fixture tests (before/after mock repo content) — *design.md §6*

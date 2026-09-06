@@ -83,6 +83,12 @@ const SKIP_PATTERNS = [
   /(^|\/)public\//,
   /(^|\/)dist\//,
   /\.(png|jpe?g|gif|svg|webp|ico|woff2?|ttf|mp4|pdf|lock)$/i,
+  // Long-form writing and social feeds match the content patterns but contain no
+  // resume facts — they were the largest files in the corpus and pure cost.
+  /blog/i,
+  /(^|\/)linkedinPosts\./i,
+  /(^|\/)posts?Data\./i,
+  /(^|\/)testimonials?\./i,
 ];
 
 const MAX_FILES = 40;
@@ -104,22 +110,39 @@ export async function fetchPortfolioFiles(
     .filter((n) => CONTENT_PATTERNS.some((p) => p.test(n.path)))
     .slice(0, MAX_FILES);
 
+  // Fetched with bounded concurrency rather than one at a time: sequential blob
+  // fetches measured ~5s for a dozen files, almost all of it waiting on the network.
+  // The cap keeps us well inside GitHub's rate limits.
+  const CONCURRENCY = 6;
   const files: RepoFile[] = [];
-  for (const node of candidates) {
-    try {
-      const blob = await gh<{ content: string; encoding: string }>(
-        `/repos/${ref.owner}/${ref.repo}/git/blobs/${node.sha}`,
-        token,
-      );
-      const content =
-        blob.encoding === 'base64'
-          ? Buffer.from(blob.content, 'base64').toString('utf8')
-          : blob.content;
-      files.push({ path: node.path, content });
-    } catch {
-      // One unreadable file must not fail the whole sync.
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < candidates.length) {
+      const node = candidates[cursor++];
+      try {
+        const blob = await gh<{ content: string; encoding: string }>(
+          `/repos/${ref.owner}/${ref.repo}/git/blobs/${node.sha}`,
+          token,
+        );
+        const content =
+          blob.encoding === 'base64'
+            ? Buffer.from(blob.content, 'base64').toString('utf8')
+            : blob.content;
+        files.push({ path: node.path, content });
+      } catch {
+        // One unreadable file must not fail the whole sync.
+      }
     }
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, candidates.length) }, worker),
+  );
+
+  // Stable order regardless of which worker finished first, so the corpus (and the
+  // content hashes derived from it) don't churn between syncs.
+  files.sort((a, b) => a.path.localeCompare(b.path));
   return files;
 }
 

@@ -25,13 +25,8 @@ import type {
   RoleRecord,
 } from '@/lib/types';
 import type { PipelineOutput } from '@/lib/pipeline/run';
-import {
-  fetchLiveSite,
-  fetchPortfolioFiles,
-  latestCommitSha,
-  parseRepoRef,
-} from '@/lib/sync/github';
-import { parsePortfolio } from '@/lib/sync/parse';
+import { latestCommitSha, parseRepoRef } from '@/lib/sync/github';
+import type { ParseResult } from '@/lib/sync/parse';
 import { hashContent, reconcile, summarizePlan } from '@/lib/sync/reconcile';
 
 export interface LoadedProfile {
@@ -110,8 +105,12 @@ async function githubTokenFor(userId: string): Promise<string | null> {
 }
 
 /**
- * Builds the pre-draft sync step (REQ-2.2). Returns undefined when the user hasn't
- * connected a repo yet, so drafting still works from a manually-entered profile.
+ * Pre-draft sync check — REQ-2.2.
+ *
+ * Deliberately only the cheap half: compare the latest commit SHA against the last one
+ * synced. A full extraction measured 1-3 minutes, which must not be wedged into the
+ * front of a draft request; if the repo has moved on, the user is told so and can run a
+ * sync (lib/sync/stepped.ts) rather than having the draft silently block on it.
  */
 export function buildSyncStep(userId: string) {
   return async (): Promise<{ summary: string; records?: ProfileRecord[] }> => {
@@ -126,124 +125,103 @@ export function buildSyncStep(userId: string) {
       return { summary: 'GitHub not connected — using your saved profile.' };
     }
 
-    // --- The cheap gate (NFR-7): one API call decides everything else ---------
     const sha = await latestCommitSha(ref, token);
     if (sha === user.lastSyncedSha) {
-      return { summary: 'Already up to date — no changes since your last draft.' };
+      return { summary: 'Already up to date — no changes since your last sync.' };
     }
 
-    const files = await fetchPortfolioFiles(ref, token, sha);
-    const [contactRow] = await db
-      .select()
-      .from(contactInfo)
-      .where(eq(contactInfo.userId, userId))
-      .limit(1);
-    const liveText = contactRow?.portfolioUrl
-      ? await fetchLiveSite(contactRow.portfolioUrl)
-      : null;
+    return {
+      summary:
+        'Your portfolio has new commits. Drafting from your last synced profile — run a sync to pull the changes in.',
+    };
+  };
+}
 
-    const parsed = await parsePortfolio(files, liveText);
-    const existing = (
-      await db.select().from(profileRecords).where(eq(profileRecords.userId, userId))
-    ).map(rowToRecord);
+/**
+ * Writes a parsed portfolio into the profile, applying the reconciliation policy:
+ * add and update automatically, flag disappearances for review, never touch a manual
+ * record (REQ-2.4).
+ */
+export async function applyParsedProfile(
+  userId: string,
+  parsed: ParseResult,
+  sha: string | null,
+): Promise<string> {
+  const existing = (
+    await db.select().from(profileRecords).where(eq(profileRecords.userId, userId))
+  ).map(rowToRecord);
 
-    const plan = reconcile(existing, parsed.records);
+  const plan = reconcile(existing, parsed.records);
 
-    // --- Apply: add + update automatically, flag removals for review ----------
-    for (const rec of plan.toInsert) {
-      const { type, tags, contentHash, ...data } = rec as unknown as Record<string, unknown> & {
-        type: string;
-        tags: string[];
-        contentHash: string;
-      };
-      await db
-        .insert(profileRecords)
-        .values({
-          userId,
-          type,
-          source: 'github-sync',
-          contentHash,
-          tags,
-          data: data as Record<string, unknown>,
-        })
-        .onConflictDoNothing();
-      await audit(userId, null, 'create', 'github-sync', { type });
-    }
+  for (const rec of plan.toInsert) {
+    const { type, tags, contentHash, ...data } = rec as unknown as Record<string, unknown> & {
+      type: string;
+      tags: string[];
+      contentHash: string;
+    };
+    await db
+      .insert(profileRecords)
+      .values({
+        userId,
+        type,
+        source: 'github-sync',
+        contentHash,
+        tags: tags ?? [],
+        data: data as Record<string, unknown>,
+      })
+      .onConflictDoNothing();
+    await audit(userId, null, 'create', 'github-sync', { type });
+  }
 
-    for (const { id, parsed: rec } of plan.toUpdate) {
-      const { type, tags, contentHash, ...data } = rec as unknown as Record<string, unknown> & {
-        type: string;
-        tags: string[];
-        contentHash: string;
-      };
-      await db
-        .update(profileRecords)
-        .set({
-          contentHash,
-          tags,
-          data: data as Record<string, unknown>,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(eq(profileRecords.id, id), eq(profileRecords.source, 'github-sync')),
-        );
-      await audit(userId, id, 'update', 'github-sync', { type });
-    }
+  for (const { id, parsed: rec } of plan.toUpdate) {
+    const { type, tags, contentHash, ...data } = rec as unknown as Record<string, unknown> & {
+      type: string;
+      tags: string[];
+      contentHash: string;
+    };
+    await db
+      .update(profileRecords)
+      .set({
+        contentHash,
+        tags: tags ?? [],
+        data: data as Record<string, unknown>,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(profileRecords.id, id), eq(profileRecords.source, 'github-sync')));
+    await audit(userId, id, 'update', 'github-sync', { type });
+  }
 
-    for (const { id, reason } of plan.toFlag) {
-      await db
-        .update(profileRecords)
-        .set({ flaggedForRemoval: true, updatedAt: new Date() })
-        .where(
-          and(eq(profileRecords.id, id), eq(profileRecords.source, 'github-sync')),
-        );
-      await audit(userId, id, 'flag-removed', 'github-sync', { reason });
-    }
+  for (const { id, reason } of plan.toFlag) {
+    await db
+      .update(profileRecords)
+      .set({ flaggedForRemoval: true, updatedAt: new Date() })
+      .where(and(eq(profileRecords.id, id), eq(profileRecords.source, 'github-sync')));
+    await audit(userId, id, 'flag-removed', 'github-sync', { reason });
+  }
 
-    // Roles referenced by parsed bullets.
-    for (const role of parsed.roles) {
-      await db
-        .insert(rolesTable)
-        .values({
-          userId,
-          title: role.title,
-          company: role.company,
-          startDate: role.startDate,
-          endDate: role.endDate,
-          source: 'github-sync',
-          contentHash: role.contentHash,
-        })
-        .onConflictDoNothing();
-    }
+  for (const role of parsed.roles) {
+    await db
+      .insert(rolesTable)
+      .values({
+        userId,
+        title: role.title,
+        company: role.company,
+        startDate: role.startDate,
+        endDate: role.endDate,
+        source: 'github-sync',
+        contentHash: role.contentHash,
+      })
+      .onConflictDoNothing();
+  }
 
-    // Contact details discovered in the portfolio, only filling blanks.
-    if (parsed.contact) {
-      await db
-        .insert(contactInfo)
-        .values({
-          userId,
-          fullName: parsed.contact.fullName ?? '',
-          email: parsed.contact.email ?? '',
-          phone: parsed.contact.phone,
-          location: parsed.contact.location,
-          portfolioUrl: parsed.contact.portfolioUrl,
-          githubUrl: parsed.contact.githubUrl,
-          linkedinUrl: parsed.contact.linkedinUrl,
-        })
-        .onConflictDoNothing();
-    }
-
+  if (sha) {
     await db
       .update(users)
       .set({ lastSyncedSha: sha, lastSyncedAt: new Date() })
       .where(eq(users.id, userId));
+  }
 
-    const fresh = (
-      await db.select().from(profileRecords).where(eq(profileRecords.userId, userId))
-    ).map(rowToRecord);
-
-    return { summary: summarizePlan(plan), records: fresh };
-  };
+  return summarizePlan(plan);
 }
 
 /* ------------------------------------------------------------- persistence -- */

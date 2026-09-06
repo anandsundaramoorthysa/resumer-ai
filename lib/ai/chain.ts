@@ -54,7 +54,18 @@ export interface CallOptions {
   budget?: DraftBudget;
   temperature?: number;
   maxRetriesPerProvider?: number;
+  /**
+   * Per-attempt wall-clock cap. Without one, a single slow provider can consume the
+   * whole request budget while four healthy fallbacks sit unused — measured as the
+   * dominant cost in portfolio extraction. Abandoning a slow attempt and moving to the
+   * next provider is almost always faster than waiting it out.
+   */
+  timeoutMs?: number;
 }
+
+const DEFAULT_ATTEMPT_TIMEOUT_MS = Number(
+  process.env.AI_ATTEMPT_TIMEOUT_MS ?? 25_000,
+);
 
 interface Attempt {
   provider: string;
@@ -72,7 +83,12 @@ export async function generateStructured<T>(args: {
   options?: CallOptions;
 }): Promise<{ data: T; provider: string }> {
   const { schema, system, prompt, options = {} } = args;
-  const { tier = 'standard', budget, temperature = 0.2 } = options;
+  const {
+    tier = 'standard',
+    budget,
+    temperature = 0.2,
+    timeoutMs = DEFAULT_ATTEMPT_TIMEOUT_MS,
+  } = options;
   const providers = availableProviders();
   const attempts: Attempt[] = [];
 
@@ -88,6 +104,7 @@ export async function generateStructured<T>(args: {
         prompt,
         temperature,
         maxRetries: options.maxRetriesPerProvider ?? 1,
+        abortSignal: AbortSignal.timeout(timeoutMs),
       });
       budget?.record(result.usage?.totalTokens ?? 0);
       return { data: result.object as T, provider: cfg.label };
@@ -111,6 +128,7 @@ export async function generateStructured<T>(args: {
         prompt: `${prompt}\n\nReturn JSON matching this shape:\n${describeSchema(schema)}`,
         temperature,
         maxRetries: options.maxRetriesPerProvider ?? 1,
+        abortSignal: AbortSignal.timeout(timeoutMs),
       });
       budget?.record(result.usage?.totalTokens ?? 0);
 
@@ -174,7 +192,12 @@ export async function generatePlainText(args: {
   options?: CallOptions;
 }): Promise<{ text: string; provider: string }> {
   const { system, prompt, options = {} } = args;
-  const { tier = 'standard', budget, temperature = 0.3 } = options;
+  const {
+    tier = 'standard',
+    budget,
+    temperature = 0.3,
+    timeoutMs = DEFAULT_ATTEMPT_TIMEOUT_MS,
+  } = options;
   const providers = availableProviders();
   const attempts: Attempt[] = [];
 
@@ -187,6 +210,7 @@ export async function generatePlainText(args: {
         prompt,
         temperature,
         maxRetries: options.maxRetriesPerProvider ?? 1,
+        abortSignal: AbortSignal.timeout(timeoutMs),
       });
       budget?.record(result.usage?.totalTokens ?? 0);
       return { text: result.text, provider: cfg.label };

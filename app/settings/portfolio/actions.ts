@@ -6,7 +6,6 @@ import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { parseRepoRef, latestCommitSha } from '@/lib/sync/github';
-import { buildSyncStep } from '@/lib/server/profile';
 import { accounts } from '@/lib/db/schema';
 import { and } from 'drizzle-orm';
 
@@ -83,23 +82,7 @@ export async function connectRepo(
   };
 }
 
-/** Runs the same sync the pipeline runs before a draft, on demand. */
-export async function syncNow(): Promise<ActionResult> {
-  const userId = await requireUserId();
-  try {
-    const result = await buildSyncStep(userId)();
-    revalidatePath('/settings/portfolio');
-    revalidatePath('/profile');
-    revalidatePath('/');
-    return { ok: true, message: result.summary };
-  } catch (err) {
-    return {
-      ok: false,
-      message: `Sync failed: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
-    };
-  }
-}
-
+/** Clears the connection. Records already pulled in are left alone. */
 export async function disconnectRepo(): Promise<ActionResult> {
   const userId = await requireUserId();
   await db

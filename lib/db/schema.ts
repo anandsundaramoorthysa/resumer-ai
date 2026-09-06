@@ -239,3 +239,36 @@ export const aiUsageDaily = pgTable(
   },
   (t) => [primaryKey({ columns: [t.userId, t.day] })],
 );
+
+/**
+ * Sync jobs — REQ-2.2/2.3 executed across multiple short requests.
+ *
+ * Portfolio extraction measured 1-3 minutes, which no serverless function tolerates
+ * (Netlify caps at 60s, Vercel at 300s). Rather than race a limit, the work is split
+ * into steps that each run in one short request, with progress kept here so the client
+ * can drive it and show honest progress. Also survives a page refresh mid-sync.
+ */
+export const syncJobs = pgTable(
+  'sync_job',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('running'), // running | done | error
+    step: integer('step').notNull().default(0),
+    totalSteps: integer('total_steps').notNull().default(7),
+    message: text('message').notNull().default('Starting…'),
+    sha: text('sha'),
+    /** Fetched corpus, carried between steps so it isn't re-downloaded each time. */
+    corpus: jsonb('corpus').$type<Array<{ path: string; content: string }>>(),
+    /** Accumulated extraction output, merged at the final step. */
+    partials: jsonb('partials').$type<Record<string, unknown>[]>().notNull().default([]),
+    error: text('error'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => [index('syncjob_user_idx').on(t.userId, t.createdAt)],
+);

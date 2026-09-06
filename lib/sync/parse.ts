@@ -98,49 +98,169 @@ export interface ParseResult {
   usedAi: boolean;
 }
 
-export async function parsePortfolio(
-  files: RepoFile[],
-  liveSiteText: string | null,
-  budget?: DraftBudget,
-): Promise<ParseResult> {
-  const corpus = buildCorpus(files, liveSiteText);
-  if (!corpus.trim()) {
-    return { records: [], roles: [], contact: undefined, usedAi: false };
-  }
+/**
+ * Extraction runs as several focused calls in parallel, each with a SMALL schema.
+ *
+ * The measurements that led here:
+ *   one big call, one big schema      191s
+ *   chunked corpus, same big schema   133s
+ *   plus per-attempt timeouts         180s  (worse — see below)
+ *
+ * The schema was the bottleneck, not the corpus. A seven-branch nested schema fails on
+ * most open-weight models, so every call walked the entire provider chain before
+ * succeeding; adding timeouts just made each doomed walk cost a predictable maximum
+ * instead of finishing sooner. Splitting into single-purpose schemas means each call
+ * succeeds on the first provider, which is both far faster and far more reliable.
+ */
+const CHUNK_CHAR_BUDGET = 14_000;
+const MAX_CHUNKS = 6;
 
-  const { data } = await generateStructured({
-    schema: ExtractionSchema,
-    system: SYSTEM,
-    prompt: `Extract the profile from these portfolio files.\n\n${corpus}`,
-    options: { budget, temperature: 0.1 },
-  });
+const SkillsOnly = z.object({ skills: ExtractionSchema.shape.skills });
+const ProjectsOnly = z.object({ projects: ExtractionSchema.shape.projects });
+const ExperienceOnly = z.object({ experience: ExtractionSchema.shape.experience });
+const CredentialsOnly = z.object({
+  education: ExtractionSchema.shape.education,
+  certifications: ExtractionSchema.shape.certifications,
+  achievements: ExtractionSchema.shape.achievements,
+});
+const ContactOnly = z.object({ contact: ExtractionSchema.shape.contact });
 
-  return toRecords(data);
+export interface ExtractionPass {
+  key: string;
+  label: string;
+  schema: z.ZodType<Partial<ExtractedProfile>>;
+  ask: string;
 }
 
-function buildCorpus(files: RepoFile[], liveSiteText: string | null): string {
-  const MAX_TOTAL = 60_000;
-  let used = 0;
-  const chunks: string[] = [];
+/** One pass per category. Small schemas succeed on the first provider; the combined
+ *  schema did not, which is what made the original single call take minutes. */
+export const EXTRACTION_PASSES: ExtractionPass[] = [
+  {
+    key: 'skills',
+    label: 'skills',
+    schema: SkillsOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
+    ask: 'every concrete technology, tool, language and named competency',
+  },
+  {
+    key: 'experience',
+    label: 'work experience',
+    schema: ExperienceOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
+    ask: 'every job or role, with its bullets split into action / scale / outcome',
+  },
+  {
+    key: 'projects',
+    label: 'projects',
+    schema: ProjectsOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
+    ask: 'every project, with its stack, links and any stated impact',
+  },
+  {
+    key: 'credentials',
+    label: 'education and certifications',
+    schema: CredentialsOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
+    ask: 'education, certifications and achievements',
+  },
+  {
+    key: 'contact',
+    label: 'contact details',
+    schema: ContactOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
+    ask: 'the contact details - name, email, phone, location and profile URLs',
+  },
+];
 
-  for (const f of files) {
-    const body = f.content.slice(0, 8_000);
-    const chunk = `--- FILE: ${f.path} ---\n${body}\n`;
-    if (used + chunk.length > MAX_TOTAL) break;
-    chunks.push(chunk);
-    used += chunk.length;
+/** Runs a single extraction pass over the corpus. */
+export async function runPass(
+  pass: ExtractionPass,
+  files: RepoFile[],
+  budget?: DraftBudget,
+): Promise<Partial<ExtractedProfile>> {
+  const corpus = buildChunks(files, null).join('\n').slice(0, 45_000);
+  if (!corpus.trim()) return {};
+
+  const { data } = await generateStructured({
+    schema: pass.schema,
+    system: SYSTEM,
+    prompt: `From this portfolio source, extract ${pass.ask}. Return nothing for anything not actually present.
+
+${corpus}`,
+    options: { budget, temperature: 0.1 },
+  });
+  return data;
+}
+
+/** Merges per-chunk results, de-duplicating by the same identity the sync uses. */
+export function mergeExtractions(parts: ExtractedProfile[]): ExtractedProfile {
+  const merged: ExtractedProfile = {
+    contact: undefined,
+    skills: [],
+    projects: [],
+    experience: [],
+    education: [],
+    certifications: [],
+    achievements: [],
+  };
+
+  const seen = new Set<string>();
+  const once = <T>(key: string, value: T, into: T[]) => {
+    const k = key.toLowerCase().trim();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    into.push(value);
+  };
+
+  for (const p of parts) {
+    if (!p) continue;
+    // Contact details are filled in field by field: different chunks legitimately know
+    // different pieces, and an early chunk shouldn't block a later, fuller one.
+    if (p.contact) {
+      merged.contact = { ...(p.contact ?? {}), ...(merged.contact ?? {}) };
+      for (const [k, v] of Object.entries(p.contact)) {
+        const key = k as keyof NonNullable<ExtractedProfile['contact']>;
+        if (v && !merged.contact![key]) merged.contact![key] = v as string;
+      }
+    }
+    for (const s of p.skills ?? []) once(`skill:${s.name}`, s, merged.skills);
+    for (const pr of p.projects ?? []) once(`project:${pr.name}`, pr, merged.projects);
+    for (const e of p.experience ?? [])
+      once(`exp:${e.company}:${e.title}`, e, merged.experience);
+    for (const ed of p.education ?? [])
+      once(`edu:${ed.institution}:${ed.credential}`, ed, merged.education);
+    for (const c of p.certifications ?? [])
+      once(`cert:${c.name}`, c, merged.certifications);
+    for (const a of p.achievements ?? []) once(`ach:${a.title}`, a, merged.achievements);
   }
 
-  if (liveSiteText && used < MAX_TOTAL) {
+  return merged;
+}
+
+/** Packs files into chunks, keeping whole files together where possible. */
+function buildChunks(files: RepoFile[], liveSiteText: string | null): string[] {
+  const chunks: string[] = [];
+  let current = '';
+
+  const push = () => {
+    if (current.trim()) chunks.push(current);
+    current = '';
+  };
+
+  for (const f of files) {
+    if (chunks.length >= MAX_CHUNKS) break;
+    const body = f.content.slice(0, CHUNK_CHAR_BUDGET);
+    const piece = `--- FILE: ${f.path} ---\n${body}\n`;
+    if (current.length + piece.length > CHUNK_CHAR_BUDGET) push();
+    current += piece;
+  }
+  push();
+
+  if (liveSiteText && chunks.length < MAX_CHUNKS) {
     chunks.push(
-      `--- LIVE SITE TEXT (fallback) ---\n${liveSiteText.slice(0, MAX_TOTAL - used)}\n`,
+      `--- LIVE SITE TEXT (fallback) ---\n${liveSiteText.slice(0, CHUNK_CHAR_BUDGET)}\n`,
     );
   }
 
-  return chunks.join('\n');
+  return chunks.slice(0, MAX_CHUNKS);
 }
 
-function toRecords(data: ExtractedProfile): ParseResult {
+export function toRecords(data: ExtractedProfile): ParseResult {
   const records: ParsedRecord[] = [];
 
   for (const s of data.skills) {
