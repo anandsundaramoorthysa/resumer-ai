@@ -19,6 +19,7 @@ import {
 } from 'docx';
 import type { ResumeDocument } from '../types';
 import { coerceHeading } from './headings';
+import { rendersAsPlainLine } from './sections';
 
 const FONT = 'Arial';
 const BODY_SIZE = 21; // half-points => 10.5pt
@@ -117,7 +118,7 @@ export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
     );
 
     for (const item of section.items) {
-      if (section.key === 'skills') {
+      if (rendersAsPlainLine(section.key)) {
         children.push(
           new Paragraph({ children: [body(item.text)], spacing: { after: 40 } }),
         );

@@ -104,12 +104,19 @@ suite('chunking (task 2.2)', () => {
 function partial(over: Partial<ExtractedProfile>): ExtractedProfile {
   return {
     contact: undefined,
+    summary: undefined,
     skills: [],
     projects: [],
     experience: [],
     education: [],
     certifications: [],
     achievements: [],
+    publications: [],
+    writing: [],
+    awards: [],
+    languages: [],
+    volunteering: [],
+    interests: [],
     ...over,
   };
 }

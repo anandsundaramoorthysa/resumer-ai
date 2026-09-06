@@ -30,6 +30,7 @@ import {
 } from '@react-pdf/renderer';
 import type { ResumeDocument } from '../types';
 import { coerceHeading } from './headings';
+import { rendersAsPlainLine } from './sections';
 
 /**
  * Presentation mode's single accent, taken from the app's own palette (brand-dark).
@@ -257,7 +258,7 @@ function ResumePdf({ doc }: { doc: ResumeDocument }) {
             </Text>
 
             {section.items.map((item, i) =>
-              section.key === 'skills' ? (
+              rendersAsPlainLine(section.key) ? (
                 <Text key={i} style={styles.plainItem}>
                   {item.text}
                 </Text>

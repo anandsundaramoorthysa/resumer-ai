@@ -43,6 +43,21 @@ export function test(name: string, body: () => void): void {
   }
 }
 
+/**
+ * Async sibling of `suite`. It exists so that `report()` cannot run before the tests
+ * inside the group have finished — a sync `suite` wrapping `testAsync` calls returns
+ * immediately and the file reports a pass count taken before anything was asserted.
+ */
+export async function suiteAsync(
+  name: string,
+  body: () => Promise<void>,
+): Promise<void> {
+  currentSuite = name;
+  console.log(`\n${name}`);
+  await body();
+  currentSuite = '';
+}
+
 /** Async variant — awaited in order so output stays readable. */
 export async function testAsync(
   name: string,

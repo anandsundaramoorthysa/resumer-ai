@@ -153,14 +153,25 @@ export async function runDraftPipeline(
     throw err;
   }
 
+  // A section cut for space is reported, not silently omitted — otherwise the only way
+  // to discover that Languages is missing is to notice it isn't there.
+  const draftNotes = [
+    assembled.rewriteStats.rejected > 0
+      ? `kept your original wording on ${assembled.rewriteStats.rejected} bullet(s) where a rewrite would have added something not in your profile`
+      : '',
+    assembled.droppedForSpace.length > 0
+      ? `left off ${assembled.droppedForSpace.join(', ')} to keep it to the page`
+      : '',
+  ].filter(Boolean);
+
   emit({
     stage: 'draft',
     status: 'done',
     message:
-      assembled.rewriteStats.rejected > 0
-        ? `First draft ready · kept your original wording on ${assembled.rewriteStats.rejected} bullet(s) where a rewrite would have added something not in your profile`
+      draftNotes.length > 0
+        ? `First draft ready · ${draftNotes.join(' · ')}`
         : 'First draft ready',
-    detail: assembled.rewriteStats,
+    detail: { ...assembled.rewriteStats, droppedForSpace: assembled.droppedForSpace },
   });
 
   // ---------------------------------------------------------------- 5. score --

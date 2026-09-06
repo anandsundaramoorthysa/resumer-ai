@@ -78,6 +78,52 @@ const ResumeExtractionSchema = z.object({
   ),
   certifications: z.array(z.object({ name: z.string(), issuer: z.string() })),
   achievements: z.array(z.object({ title: z.string(), description: z.string() })),
+
+  // An uploaded resume already has these sections written out, so extracting them is
+  // strictly easier here than from portfolio source — and skipping them would silently
+  // discard the parts of someone's existing resume they most want carried over.
+  summary: z.string().optional(),
+  publications: z.array(
+    z.object({
+      title: z.string(),
+      venue: z.string(),
+      date: z.string().optional(),
+      doi: z.string().optional(),
+      status: z.enum(['published', 'under-review', 'preprint']).optional(),
+    }),
+  ),
+  writing: z.array(
+    z.object({
+      title: z.string(),
+      venue: z.string(),
+      date: z.string().optional(),
+      url: z.string().optional(),
+    }),
+  ),
+  awards: z.array(
+    z.object({
+      title: z.string(),
+      issuer: z.string().optional(),
+      date: z.string().optional(),
+    }),
+  ),
+  languages: z.array(
+    z.object({
+      name: z.string(),
+      proficiency: z
+        .enum(['native', 'fluent', 'professional', 'conversational', 'basic'])
+        .optional(),
+    }),
+  ),
+  volunteering: z.array(
+    z.object({
+      role: z.string(),
+      organization: z.string(),
+      date: z.string().optional(),
+      description: z.string().optional(),
+    }),
+  ),
+  interests: z.array(z.string()),
 });
 
 /** Compile-time proof that this stays interchangeable with the sync extraction. */

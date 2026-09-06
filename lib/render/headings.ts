@@ -20,7 +20,15 @@ export const HEADING_ALLOW_LIST: Record<SectionKey, string[]> = {
   projects: ['Projects', 'Selected Projects', 'Technical Projects'],
   education: ['Education'],
   certifications: ['Certifications', 'Certifications & Licenses'],
-  achievements: ['Achievements', 'Awards', 'Awards & Achievements'],
+  // Papers and articles share one heading on purpose. Parsers keep databases of
+  // recognised labels, and "Publications" is in all of them; a separate "Blog Posts"
+  // or "Writing" heading is not, and an unrecognised heading loses the whole section.
+  publications: ['Publications', 'Publications & Writing', 'Research'],
+  awards: ['Awards', 'Awards & Honors', 'Honors & Awards'],
+  achievements: ['Achievements', 'Achievements & Activities'],
+  volunteering: ['Volunteer Experience', 'Leadership & Volunteering', 'Leadership'],
+  languages: ['Languages'],
+  interests: ['Interests', 'Interests & Activities'],
 };
 
 /** Canonical heading used when nothing else is specified. */

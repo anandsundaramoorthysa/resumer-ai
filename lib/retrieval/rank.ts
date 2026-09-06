@@ -57,9 +57,49 @@ export function recordText(r: ProfileRecord): string {
     case 'achievement':
       parts.push(r.title, r.description);
       break;
+    case 'summary':
+      parts.push(r.text);
+      break;
+    case 'publication':
+    case 'writing':
+      parts.push(r.title, r.venue);
+      break;
+    case 'award':
+      parts.push(r.title, r.issuer ?? '', r.description ?? '');
+      break;
+    case 'volunteering':
+      parts.push(r.role, r.organization, r.description ?? '');
+      break;
+    case 'language':
+      parts.push(r.name, r.proficiency ?? '');
+      break;
+    case 'interest':
+      parts.push(r.name);
+      break;
   }
   return norm(parts.join(' '));
 }
+
+/**
+ * Types the relevance floor may never remove.
+ *
+ * The floor asks "is this on-domain?", and for these types the question does not apply.
+ * A language is not off-domain for an SEO role, it is a language; a degree does not stop
+ * being your degree because the posting never says "B.Sc."; a certification and an
+ * interest are the same. These are identity, not evidence to be matched against a job —
+ * so they are scored and ordered like everything else, but never filtered out. The floor
+ * still governs bullets, projects and skills, which is where it does its actual work.
+ */
+export const FLOOR_EXEMPT_TYPES = new Set<ProfileRecord['type']>([
+  'language',
+  'education',
+  'certification',
+  'interest',
+  // A summary is identity by the same argument as a degree, and a generic one ("engineer
+  // who ships services") carries no domain vocabulary at all — so without this it can be
+  // filtered off its own resume, taking the section research calls the most important.
+  'summary',
+]);
 
 /**
  * REQ-4.2 — domain fit, 0..1. A record with no on-domain vocabulary at all scores 0
@@ -135,6 +175,22 @@ export interface RankOptions {
  */
 const MIN_VIABLE_SURVIVORS = 12;
 
+/**
+ * Viability is proportional, not absolute.
+ *
+ * Capping the target at `records.length` looked safe and was not: on a five-record
+ * profile it demanded all five survive, so the floor relaxed to zero and filtered
+ * nothing at all. A small profile is exactly where a wrong bullet is most visible, so
+ * the target is a fraction of the corpus — enough to build from, never so much that
+ * filtering becomes impossible.
+ */
+const VIABLE_FRACTION = 0.4;
+
+function viabilityTarget(corpusSize: number): number {
+  if (corpusSize === 0) return 0;
+  return Math.max(1, Math.min(MIN_VIABLE_SURVIVORS, Math.ceil(corpusSize * VIABLE_FRACTION)));
+}
+
 export function rankRecords(
   records: ProfileRecord[],
   job: JobRequirement,
@@ -145,11 +201,18 @@ export function rankRecords(
   // relax until enough records survive to build a resume from; a slightly off-target
   // bullet is recoverable, an empty resume is not.
   const requested = options.relevanceFloor ?? RELEVANCE_FLOOR;
-  const target = Math.min(MIN_VIABLE_SURVIVORS, records.length);
+
+  // Only records the floor can actually filter count toward viability. Exempt types
+  // survive every floor by construction, so counting them would let eight languages and
+  // four certifications look like a viable resume while every bullet sat below the
+  // floor — the relaxation would never fire on exactly the profile that needs it.
+  const filterable = (r: ProfileRecord) => !FLOOR_EXEMPT_TYPES.has(r.type);
+  const target = viabilityTarget(records.filter(filterable).length);
 
   for (const floor of [requested, requested / 2, requested / 4, 0]) {
     const attempt = rankAtFloor(records, job, options, floor);
-    if (attempt.ranked.length >= target || floor === 0) return attempt;
+    const viable = attempt.ranked.filter((r) => filterable(r.record)).length;
+    if (viable >= target || floor === 0) return attempt;
   }
   return rankAtFloor(records, job, options, 0);
 }
@@ -170,9 +233,9 @@ function rankAtFloor(
       continue;
     }
 
-    // Stage 1 — the floor (REQ-4.2).
+    // Stage 1 — the floor (REQ-4.2), except on the identity types it cannot judge.
     const fit = domainFit(record, job);
-    if (fit < floor) {
+    if (fit < floor && !FLOOR_EXEMPT_TYPES.has(record.type)) {
       excluded.push(record);
       continue;
     }

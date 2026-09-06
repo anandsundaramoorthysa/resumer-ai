@@ -94,7 +94,17 @@ export function reconcile(
   return plan;
 }
 
-/** Stable identity for "same item, edited" detection. */
+/**
+ * Stable identity for "same item, edited" detection.
+ *
+ * Education needed more care than the rest. Extraction runs per file, and different
+ * files describe the same degree differently — "MSc" at "Loyola College" in one,
+ * "M.Sc. Data Science" at "Loyola College (Autonomous), Chennai" in another. Matching
+ * on the literal strings let all three through, and a real profile ended up listing the
+ * same Master's three times while the Bachelor's was missing entirely. The key now
+ * normalises the credential to its level and the institution to its leading words, so
+ * one degree is one record however it happens to be written.
+ */
 function identityKey(r: ProfileRecord): string {
   switch (r.type) {
     case 'skill':
@@ -102,15 +112,54 @@ function identityKey(r: ProfileRecord): string {
     case 'project':
       return `project:${r.name.toLowerCase().trim()}`;
     case 'education':
-      return `education:${r.institution.toLowerCase().trim()}:${r.credential.toLowerCase().trim()}`;
+      return `education:${institutionKey(r.institution)}:${credentialLevel(r.credential)}`;
     case 'certification':
       return `cert:${r.name.toLowerCase().trim()}`;
     case 'achievement':
       return `achievement:${r.title.toLowerCase().trim()}`;
+    case 'award':
+      return `award:${r.title.toLowerCase().trim()}`;
+    case 'publication':
+      return `publication:${r.title.toLowerCase().trim()}`;
+    case 'writing':
+      return `writing:${r.title.toLowerCase().trim()}`;
+    case 'language':
+      return `language:${r.name.toLowerCase().trim()}`;
+    case 'volunteering':
+      return `volunteering:${r.organization.toLowerCase().trim()}:${r.role.toLowerCase().trim()}`;
+    case 'interest':
+      return `interest:${r.name.toLowerCase().trim()}`;
+    case 'summary':
+      // Only one summary is ever used, so every candidate collapses onto one key and
+      // the most recent extraction wins.
+      return 'summary';
     case 'experience-bullet':
       // Bullets have no natural key; first 40 chars of the action is a decent proxy.
       return `bullet:${r.action.toLowerCase().trim().slice(0, 40)}`;
   }
+}
+
+/** "M.Sc.", "MSc", "M.Sc. Data Science" all reduce to the same level. */
+function credentialLevel(credential: string): string {
+  const c = credential.toLowerCase().replace(/[.\s]/g, '');
+  if (/^(msc|ms|mtech|meng|ma|mba|mca|master)/.test(c)) return 'masters';
+  if (/^(bsc|be|btech|beng|ba|bba|bca|bachelor)/.test(c)) return 'bachelors';
+  if (/^(phd|dphil|doctor)/.test(c)) return 'doctorate';
+  if (/^(hsc|12th|intermediate|highschool|diploma)/.test(c)) return 'secondary';
+  return c.slice(0, 24) || 'other';
+}
+
+/** Leading words of an institution, so parenthetical and city suffixes don't split it. */
+function institutionKey(institution: string): string {
+  return institution
+    .toLowerCase()
+    .replace(/\(.*?\)/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .slice(0, 3)
+    .join(' ');
 }
 
 function sameTags(a: string[], b: string[]): boolean {

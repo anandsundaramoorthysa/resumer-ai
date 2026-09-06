@@ -71,6 +71,58 @@ const ExtractionSchema = z.object({
   ),
   certifications: z.array(z.object({ name: z.string(), issuer: z.string() })),
   achievements: z.array(z.object({ title: z.string(), description: z.string() })),
+
+  /** A written professional summary, if the source states one. Never composed here. */
+  summary: z.string().optional(),
+
+  publications: z.array(
+    z.object({
+      title: z.string(),
+      venue: z.string().describe('Conference, journal or publisher'),
+      date: z.string().optional(),
+      doi: z.string().optional(),
+      status: z.enum(['published', 'under-review', 'preprint']).optional(),
+    }),
+  ),
+
+  /** Articles and blog posts — evidence of communication, not of research. */
+  writing: z.array(
+    z.object({
+      title: z.string(),
+      venue: z.string().describe('Where it was published, e.g. Medium'),
+      date: z.string().optional(),
+      url: z.string().optional(),
+    }),
+  ),
+
+  /** Competitive wins and formal recognition, kept apart from softer achievements. */
+  awards: z.array(
+    z.object({
+      title: z.string(),
+      issuer: z.string().optional(),
+      date: z.string().optional(),
+    }),
+  ),
+
+  languages: z.array(
+    z.object({
+      name: z.string(),
+      proficiency: z
+        .enum(['native', 'fluent', 'professional', 'conversational', 'basic'])
+        .optional(),
+    }),
+  ),
+
+  volunteering: z.array(
+    z.object({
+      role: z.string(),
+      organization: z.string(),
+      date: z.string().optional(),
+      description: z.string().optional(),
+    }),
+  ),
+
+  interests: z.array(z.string()).describe('Hobbies and personal interests'),
 });
 
 export type ExtractedProfile = z.infer<typeof ExtractionSchema>;
@@ -82,7 +134,15 @@ Rules:
 - Ignore UI copy, navigation labels, button text, and boilerplate — you want the person's real professional facts.
 - For experience bullets, split "action", "scale" and "outcome" only when the text genuinely contains them. Leave scale/outcome empty rather than inventing them.
 - Skills should be concrete technologies, tools, or named competencies — not adjectives.
-- If a category has nothing in the source, return an empty array for it.`;
+- If a category has nothing in the source, return an empty array for it.
+
+Category boundaries that are easy to get wrong:
+- A language certificate ("Certification in Hindi Proficiency") is a LANGUAGE, not education. Education means academic degrees and diplomas only.
+- A conference or journal paper is a publication. A blog post or article is writing. Do not merge them.
+- A competition win or formal honour is an award. An achievement is a broader accomplishment that is not a prize.
+- "Currently seeking a role", availability notes and career goals are not achievements. Skip them.
+- Record every degree the source mentions, including earlier ones stated only in passing (a "previousDegree" field, or a sentence naming a bachelor's before a master's).
+- Take the summary verbatim from the source if one exists. Never write one yourself.`;
 
 export interface ParseResult {
   records: ParsedRecord[];
@@ -249,12 +309,19 @@ ${body}`,
 export function mergeExtractions(parts: Array<Partial<ExtractedProfile>>): ExtractedProfile {
   const merged: ExtractedProfile = {
     contact: undefined,
+    summary: undefined,
     skills: [],
     projects: [],
     experience: [],
     education: [],
     certifications: [],
     achievements: [],
+    publications: [],
+    writing: [],
+    awards: [],
+    languages: [],
+    volunteering: [],
+    interests: [],
   };
 
   const seen = new Set<string>();
@@ -285,6 +352,19 @@ export function mergeExtractions(parts: Array<Partial<ExtractedProfile>>): Extra
     for (const c of p.certifications ?? [])
       once(`cert:${c.name}`, c, merged.certifications);
     for (const a of p.achievements ?? []) once(`ach:${a.title}`, a, merged.achievements);
+    for (const pb of p.publications ?? []) once(`pub:${pb.title}`, pb, merged.publications);
+    for (const w of p.writing ?? []) once(`writ:${w.title}`, w, merged.writing);
+    for (const aw of p.awards ?? []) once(`awd:${aw.title}`, aw, merged.awards);
+    for (const l of p.languages ?? []) once(`lang:${l.name}`, l, merged.languages);
+    for (const v of p.volunteering ?? [])
+      once(`vol:${v.organization}:${v.role}`, v, merged.volunteering);
+    for (const i of p.interests ?? []) once(`int:${i}`, i, merged.interests);
+
+    // The fullest summary wins rather than the first seen: different files describe the
+    // person at different lengths, and the longer one is invariably the written bio.
+    if (p.summary && p.summary.length > (merged.summary?.length ?? 0)) {
+      merged.summary = p.summary;
+    }
   }
 
   return merged;
@@ -378,6 +458,90 @@ export function toRecords(data: ExtractedProfile): ParseResult {
       description: a.description,
       tags: deriveTags(`${a.title} ${a.description}`),
       contentHash: hashContent(['achievement', a.title]),
+      source: 'github-sync',
+    } as ParsedRecord);
+  }
+
+  if (data.summary?.trim()) {
+    records.push({
+      type: 'summary',
+      text: data.summary.trim(),
+      tags: deriveTags(data.summary),
+      contentHash: hashContent(['summary', data.summary]),
+      source: 'github-sync',
+    } as ParsedRecord);
+  }
+
+  for (const p of data.publications ?? []) {
+    records.push({
+      type: 'publication',
+      title: p.title,
+      venue: p.venue,
+      date: p.date,
+      doi: p.doi,
+      status: p.status,
+      tags: deriveTags(`${p.title} ${p.venue}`),
+      contentHash: hashContent(['publication', p.title]),
+      source: 'github-sync',
+    } as ParsedRecord);
+  }
+
+  for (const w of data.writing ?? []) {
+    records.push({
+      type: 'writing',
+      title: w.title,
+      venue: w.venue,
+      date: w.date,
+      url: w.url,
+      tags: deriveTags(w.title),
+      contentHash: hashContent(['writing', w.title]),
+      source: 'github-sync',
+    } as ParsedRecord);
+  }
+
+  for (const a of data.awards ?? []) {
+    records.push({
+      type: 'award',
+      title: a.title,
+      issuer: a.issuer,
+      date: a.date,
+      tags: deriveTags(`${a.title} ${a.issuer ?? ''}`),
+      contentHash: hashContent(['award', a.title]),
+      source: 'github-sync',
+    } as ParsedRecord);
+  }
+
+  for (const l of data.languages ?? []) {
+    records.push({
+      type: 'language',
+      name: l.name,
+      proficiency: l.proficiency,
+      tags: [l.name.toLowerCase()],
+      contentHash: hashContent(['language', l.name]),
+      source: 'github-sync',
+    } as ParsedRecord);
+  }
+
+  for (const v of data.volunteering ?? []) {
+    records.push({
+      type: 'volunteering',
+      role: v.role,
+      organization: v.organization,
+      date: v.date,
+      description: v.description,
+      tags: deriveTags(`${v.role} ${v.organization} ${v.description ?? ''}`),
+      contentHash: hashContent(['volunteering', v.organization, v.role]),
+      source: 'github-sync',
+    } as ParsedRecord);
+  }
+
+  for (const i of data.interests ?? []) {
+    if (!i.trim()) continue;
+    records.push({
+      type: 'interest',
+      name: i.trim(),
+      tags: [i.toLowerCase().trim()],
+      contentHash: hashContent(['interest', i]),
       source: 'github-sync',
     } as ParsedRecord);
   }

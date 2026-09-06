@@ -91,13 +91,84 @@ export interface AchievementRecord extends ProfileRecordBase {
   date?: string;
 }
 
+/** A written professional summary. At most one is used; the newest wins. */
+export interface SummaryRecord extends ProfileRecordBase {
+  type: 'summary';
+  text: string;
+}
+
+/**
+ * Peer-reviewed or formally published work. Kept distinct from `writing` because the
+ * two carry different weight: a conference paper with a DOI is evidence of research,
+ * a blog post is evidence of communication. Both belong on a resume; conflating them
+ * would overstate the second and bury the first.
+ */
+export interface PublicationRecord extends ProfileRecordBase {
+  type: 'publication';
+  title: string;
+  venue: string;
+  date?: string;
+  doi?: string;
+  isbn?: string;
+  status?: 'published' | 'under-review' | 'preprint';
+  coAuthors?: string[];
+  url?: string;
+}
+
+/** Articles, blog posts, technical writing. */
+export interface WritingRecord extends ProfileRecordBase {
+  type: 'writing';
+  title: string;
+  venue: string;
+  date?: string;
+  url?: string;
+}
+
+/** Competitive wins and formal recognition — separated from softer achievements. */
+export interface AwardRecord extends ProfileRecordBase {
+  type: 'award';
+  title: string;
+  issuer?: string;
+  date?: string;
+  description?: string;
+}
+
+export interface LanguageRecord extends ProfileRecordBase {
+  type: 'language';
+  name: string;
+  proficiency?: 'native' | 'fluent' | 'professional' | 'conversational' | 'basic';
+  credential?: string;
+}
+
+/** Organised or volunteered-at events, community roles, leadership. */
+export interface VolunteeringRecord extends ProfileRecordBase {
+  type: 'volunteering';
+  role: string;
+  organization: string;
+  date?: string;
+  description?: string;
+}
+
+/** Interests and hobbies. Lowest-weight section; included only when space allows. */
+export interface InterestRecord extends ProfileRecordBase {
+  type: 'interest';
+  name: string;
+}
+
 export type ProfileRecord =
   | SkillRecord
   | ExperienceBulletRecord
   | ProjectRecord
   | EducationRecord
   | CertificationRecord
-  | AchievementRecord;
+  | AchievementRecord
+  | SummaryRecord
+  | PublicationRecord
+  | WritingRecord
+  | AwardRecord
+  | LanguageRecord
+  | VolunteeringRecord
+  | InterestRecord;
 
 /** Contact block — rendered in the document body, never a header/footer (REQ-6.1). */
 export interface ContactInfo {
@@ -146,7 +217,12 @@ export type SectionKey =
   | 'projects'
   | 'education'
   | 'certifications'
-  | 'achievements';
+  | 'publications'
+  | 'awards'
+  | 'achievements'
+  | 'volunteering'
+  | 'languages'
+  | 'interests';
 
 export interface ResumeItem {
   text: string;

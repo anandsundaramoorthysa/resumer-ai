@@ -10,13 +10,26 @@ import { FlaggedRecord } from './flagged-record';
 export const metadata = { title: 'Profile' };
 export const dynamic = 'force-dynamic';
 
+/**
+ * Every record type needs an entry here and a case in `describe()`. A type missing from
+ * either does not fail — it renders as a raw JSON blob under a heading like
+ * "volunteering", which is how a synced record becomes invisible to the person who is
+ * supposed to be reviewing it.
+ */
 const TYPE_LABELS: Record<string, string> = {
+  summary: 'Professional summary',
   skill: 'Skills',
   'experience-bullet': 'Experience bullets',
   project: 'Projects',
   education: 'Education',
   certification: 'Certifications',
+  publication: 'Publications',
+  writing: 'Articles & writing',
+  award: 'Awards',
   achievement: 'Achievements',
+  volunteering: 'Volunteering & leadership',
+  language: 'Languages',
+  interest: 'Interests',
 };
 
 /** One readable line per record, whatever its type. */
@@ -35,6 +48,30 @@ function describe(type: string, data: Record<string, unknown>): string {
       return [s('name'), s('issuer')].filter(Boolean).join(' · ');
     case 'achievement':
       return [s('title'), s('description')].filter(Boolean).join(' — ');
+    case 'summary':
+      return s('text');
+    case 'publication':
+      // Status is shown only when it isn't "published", so the line never implies a
+      // paper is out when the record says it is still under review.
+      return [
+        s('title'),
+        s('venue'),
+        s('date'),
+        s('doi') ? `DOI ${s('doi')}` : '',
+        s('status') && s('status') !== 'published' ? s('status') : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+    case 'writing':
+      return [s('title'), s('venue'), s('date')].filter(Boolean).join(' · ');
+    case 'award':
+      return [s('title'), s('issuer'), s('date')].filter(Boolean).join(' · ');
+    case 'volunteering':
+      return [s('role'), s('organization'), s('date')].filter(Boolean).join(' · ');
+    case 'language':
+      return s('proficiency') ? `${s('name')} — ${s('proficiency')}` : s('name');
+    case 'interest':
+      return s('name');
     default:
       return JSON.stringify(data).slice(0, 120);
   }
@@ -158,7 +195,9 @@ export default async function ProfilePage() {
                 <span className="font-mono text-xs text-muted tabular">{list.length}</span>
               </div>
 
-              {type === 'skill' ? (
+              {/* Chips for the one-word types; a bulleted list of single words reads
+                  as a much longer section than it is. */}
+              {type === 'skill' || type === 'language' || type === 'interest' ? (
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {list.map((r) => (
                     <span

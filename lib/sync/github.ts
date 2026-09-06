@@ -73,6 +73,8 @@ export interface RepoFile {
 const CONTENT_PATTERNS = [
   /(^|\/)(content|data|_data|config)\/.*\.(json|ya?ml|mdx?|ts|js)$/i,
   /(^|\/)(about|resume|cv|profile|experience|projects?|skills?|work)[^/]*\.(json|ya?ml|mdx?|tsx?|jsx?)$/i,
+  // Sections the resume needs that live in their own files.
+  /(^|\/)(research|publication|blog|engagement|award|honou?r|language|volunteer|interest|hobb)[^/]*\.(json|ya?ml|mdx?|tsx?|jsx?)$/i,
   /(^|\/)components?\/.*(about|resume|experience|projects?|skills?|hero|work)[^/]*\.(tsx?|jsx?)$/i,
   /(^|\/)app\/.*(about|resume|experience|projects?|skills?)[^/]*\/page\.(tsx?|jsx?)$/i,
 ];
@@ -83,12 +85,14 @@ const SKIP_PATTERNS = [
   /(^|\/)public\//,
   /(^|\/)dist\//,
   /\.(png|jpe?g|gif|svg|webp|ico|woff2?|ttf|mp4|pdf|lock)$/i,
-  // Long-form writing and social feeds match the content patterns but contain no
-  // resume facts — they were the largest files in the corpus and pure cost.
-  /blog/i,
+  // Social feeds carry no resume facts. Blog and research files DO — published
+  // articles are evidence of communication and papers are evidence of research —
+  // so only the raw post BODIES are skipped, while the metadata files that list
+  // titles, venues and dates are kept.
   /(^|\/)linkedinPosts\./i,
-  /(^|\/)posts?Data\./i,
   /(^|\/)testimonials?\./i,
+  /(^|\/)blogs?\/[^/]+\.(tsx?|jsx?|mdx?)$/i,
+  /blogContentsRegistry/i,
 ];
 
 const MAX_FILES = 40;

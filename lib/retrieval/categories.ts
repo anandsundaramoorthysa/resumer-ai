@@ -12,9 +12,23 @@
 
 import type { RoleCategory, SectionKey } from '../types';
 
+/**
+ * Every profile below orders the *whole* section set, not a subset.
+ *
+ * A key missing from a `sectionOrder` is a section that gets built and then silently
+ * dropped at assembly time, because assembly renders by walking this list. That is how
+ * a resume loses its Publications section without anything reporting a failure, so the
+ * orders are exhaustive and `missingFromSectionOrder()` asserts that in the suite rather
+ * than leaving it to review.
+ *
+ * The differences between them are about what a reader of that role scans for first.
+ * Everything below Experience is ordering by evidence strength for that domain; the
+ * bottom three are the same everywhere because that is the order assembly drops them in
+ * when the page runs out.
+ */
 export interface CategoryProfile {
   label: string;
-  /** Sections in render order; earlier = more prominent. */
+  /** Sections in render order; earlier = more prominent. Must cover every SectionKey. */
   sectionOrder: SectionKey[];
   /** Multiplier applied to a record's score when it carries these tags. */
   boostTags: string[];
@@ -25,7 +39,13 @@ export interface CategoryProfile {
 export const CATEGORY_PROFILES: Record<RoleCategory, CategoryProfile> = {
   seo: {
     label: 'SEO / Growth',
-    sectionOrder: ['summary', 'skills', 'experience', 'projects', 'certifications', 'education', 'achievements'],
+    // Published writing is the portfolio for this role — a hiring manager wants to read
+    // something you ranked, so it sits directly under Experience rather than near the
+    // bottom where it does on an engineering resume.
+    sectionOrder: [
+      'summary', 'skills', 'experience', 'publications', 'projects', 'certifications',
+      'achievements', 'education', 'awards', 'volunteering', 'languages', 'interests',
+    ],
     boostTags: ['seo', 'analytics', 'content', 'keyword research', 'growth', 'serp', 'ctr'],
     domainVocabulary: [
       'seo', 'sem', 'google analytics', 'ga4', 'search console', 'ahrefs', 'semrush',
@@ -36,7 +56,12 @@ export const CATEGORY_PROFILES: Record<RoleCategory, CategoryProfile> = {
   },
   'full-stack': {
     label: 'Full Stack Engineering',
-    sectionOrder: ['summary', 'skills', 'experience', 'projects', 'education', 'certifications', 'achievements'],
+    // Shipped work first, credentials after. Publications sit below Education here
+    // because writing is a bonus for this role rather than part of the job.
+    sectionOrder: [
+      'summary', 'skills', 'experience', 'projects', 'education', 'certifications',
+      'publications', 'awards', 'achievements', 'volunteering', 'languages', 'interests',
+    ],
     boostTags: ['react', 'node', 'typescript', 'api', 'database', 'next.js'],
     domainVocabulary: [
       'javascript', 'typescript', 'react', 'next.js', 'node', 'express', 'api', 'rest',
@@ -47,7 +72,13 @@ export const CATEGORY_PROFILES: Record<RoleCategory, CategoryProfile> = {
   },
   'ai-engineer': {
     label: 'AI / ML Engineering',
-    sectionOrder: ['summary', 'skills', 'projects', 'experience', 'education', 'certifications', 'achievements'],
+    // The only category that leads with Publications. In this field a paper is primary
+    // evidence rather than a footnote, and candidates are routinely screened on one —
+    // burying it under Experience would bury the strongest thing on the page.
+    sectionOrder: [
+      'summary', 'skills', 'publications', 'projects', 'experience', 'education',
+      'awards', 'certifications', 'achievements', 'volunteering', 'languages', 'interests',
+    ],
     boostTags: ['llm', 'rag', 'machine learning', 'embeddings', 'pytorch', 'ai'],
     domainVocabulary: [
       'machine learning', 'deep learning', 'llm', 'rag', 'embeddings', 'vector database',
@@ -58,7 +89,14 @@ export const CATEGORY_PROFILES: Record<RoleCategory, CategoryProfile> = {
   },
   'project-manager': {
     label: 'Project / Product Management',
-    sectionOrder: ['summary', 'experience', 'skills', 'achievements', 'projects', 'education', 'certifications'],
+    // Volunteering is promoted above Projects here and nowhere else: for a PM it is not
+    // a hobby line, it is the cheapest available evidence of running people and events,
+    // which is the thing being hired for. It is still the last of the three sections
+    // assembly will cut, so a full page loses it — but not before Projects.
+    sectionOrder: [
+      'summary', 'experience', 'skills', 'achievements', 'volunteering', 'projects',
+      'certifications', 'education', 'awards', 'publications', 'languages', 'interests',
+    ],
     boostTags: ['stakeholder', 'roadmap', 'agile', 'scrum', 'delivery', 'leadership'],
     domainVocabulary: [
       'roadmap', 'stakeholder', 'agile', 'scrum', 'kanban', 'jira', 'sprint', 'backlog',
@@ -69,7 +107,12 @@ export const CATEGORY_PROFILES: Record<RoleCategory, CategoryProfile> = {
   },
   data: {
     label: 'Data',
-    sectionOrder: ['summary', 'skills', 'experience', 'projects', 'education', 'certifications', 'achievements'],
+    // Education outranks Projects: data roles still screen on a quantitative degree far
+    // more often than engineering ones do, and published analysis reads as project work.
+    sectionOrder: [
+      'summary', 'skills', 'experience', 'education', 'projects', 'publications',
+      'certifications', 'awards', 'achievements', 'volunteering', 'languages', 'interests',
+    ],
     boostTags: ['sql', 'etl', 'analytics', 'dashboard', 'pipeline'],
     domainVocabulary: [
       'sql', 'python', 'etl', 'data warehouse', 'bigquery', 'snowflake', 'dbt', 'airflow',
@@ -79,7 +122,13 @@ export const CATEGORY_PROFILES: Record<RoleCategory, CategoryProfile> = {
   },
   design: {
     label: 'Design',
-    sectionOrder: ['summary', 'skills', 'projects', 'experience', 'education', 'achievements', 'certifications'],
+    // Portfolio-led, like AI, but the portfolio is the work itself — so Projects leads
+    // and Awards ranks high, because design awards are a recognised signal in this field
+    // in a way that certifications are not.
+    sectionOrder: [
+      'summary', 'skills', 'projects', 'experience', 'awards', 'education',
+      'publications', 'achievements', 'certifications', 'volunteering', 'languages', 'interests',
+    ],
     boostTags: ['figma', 'ui', 'ux', 'design system', 'prototyping'],
     domainVocabulary: [
       'figma', 'sketch', 'ui', 'ux', 'design system', 'prototyping', 'wireframe',
@@ -89,7 +138,12 @@ export const CATEGORY_PROFILES: Record<RoleCategory, CategoryProfile> = {
   },
   general: {
     label: 'General',
-    sectionOrder: ['summary', 'skills', 'experience', 'projects', 'education', 'certifications', 'achievements'],
+    // The conventional order, used when the category is unknown. Nothing here is a bet
+    // on a domain, because there isn't one to bet on.
+    sectionOrder: [
+      'summary', 'skills', 'experience', 'projects', 'education', 'certifications',
+      'publications', 'awards', 'achievements', 'volunteering', 'languages', 'interests',
+    ],
     boostTags: [],
     domainVocabulary: [],
   },
@@ -97,4 +151,30 @@ export const CATEGORY_PROFILES: Record<RoleCategory, CategoryProfile> = {
 
 export function profileFor(category: RoleCategory): CategoryProfile {
   return CATEGORY_PROFILES[category] ?? CATEGORY_PROFILES.general;
+}
+
+/**
+ * Every SectionKey as a runtime value. Built from a full `Record<SectionKey, true>` so
+ * that adding a section to the type without adding it here fails to compile, instead of
+ * producing an orders check that quietly stops checking the new section.
+ */
+export const ALL_SECTION_KEYS = Object.keys({
+  summary: true,
+  skills: true,
+  experience: true,
+  projects: true,
+  education: true,
+  certifications: true,
+  publications: true,
+  awards: true,
+  achievements: true,
+  volunteering: true,
+  languages: true,
+  interests: true,
+} satisfies Record<SectionKey, true>) as SectionKey[];
+
+/** Sections a given order forgot — anything here would be built and never rendered. */
+export function missingFromSectionOrder(order: SectionKey[]): SectionKey[] {
+  const present = new Set(order);
+  return ALL_SECTION_KEYS.filter((k) => !present.has(k));
 }
