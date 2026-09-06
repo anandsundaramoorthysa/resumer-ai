@@ -1,0 +1,98 @@
+@import 'tailwindcss';
+
+/**
+ * Tidewater v2 — the palette from PLAN.md §9, with every text color verified against
+ * WCAG AA (4.5:1) rather than assumed. The gold and warning shades are deliberately
+ * darker than they "look right" at a glance: the brighter versions measured 3.24:1 and
+ * 3.34:1 on white, which fails for normal text. `--color-gold-bright` exists for
+ * large/decorative use only and must never carry small standalone text.
+ */
+@theme {
+  --color-paper: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-ink: #14161c;
+  --color-muted: #5b6270;
+  --color-line: #e4e6eb;
+
+  --color-brand: #0e7c86;
+  --color-brand-dark: #0a5f67;
+  --color-brand-tint: #e4f1f1;
+
+  --color-gold: #96691d;
+  --color-gold-bright: #c9922f;
+  --color-gold-tint: #f6eedd;
+
+  --color-success: #197a42;
+  --color-success-tint: #e5f4eb;
+  --color-warning: #a85f12;
+  --color-warning-tint: #fbeedd;
+  --color-danger: #c43d3d;
+  --color-danger-tint: #fbeaea;
+
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-sans: 'General Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Spline Sans Mono', ui-monospace, 'Courier New', monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-paper: #14161c;
+    --color-surface: #1b1e26;
+    --color-ink: #eaebef;
+    --color-muted: #9ba1ac;
+    --color-line: #2b2f3a;
+
+    --color-brand: #2ba6af;
+    --color-brand-dark: #6fc9d0;
+    --color-brand-tint: #17313f;
+
+    --color-gold: #d8ae5e;
+    --color-gold-bright: #e0bc7c;
+    --color-gold-tint: #33291a;
+
+    --color-success: #4fbe81;
+    --color-success-tint: #16301f;
+    --color-warning: #e0994a;
+    --color-warning-tint: #33260f;
+    --color-danger: #e58080;
+    --color-danger-tint: #331a1a;
+  }
+}
+
+html {
+  font-family: var(--font-sans);
+}
+
+body {
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+
+.font-mono,
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Focus visibility — keyboard users get an unmistakable ring (NFR-4). */
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

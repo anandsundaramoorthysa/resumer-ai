@@ -1,0 +1,77 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# ---------------------------------------------------------------------------
+# Secrets — the important part.
+#
+# `.env*` covers .env, .env.local, .env.production and friends, so a real key
+# can't be committed by accident. The negation below re-includes the example
+# file, which contains only placeholders and belongs in the repo.
+#
+# Note the ordering: the negation MUST come after the pattern it overrides,
+# otherwise `.env*` wins and .env.example silently never gets committed.
+# ---------------------------------------------------------------------------
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+/.next/
+/out/
+/build
+*.tsbuildinfo
+next-env.d.ts
+
+# ---------------------------------------------------------------------------
+# Testing
+# ---------------------------------------------------------------------------
+/coverage
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dev.log
+
+# ---------------------------------------------------------------------------
+# Generated resume artifacts
+#
+# Exports are rendered on demand from a stored snapshot, so a stray PDF/DOCX in
+# the working tree is a local test artifact — and one that would contain real
+# personal details if committed.
+# ---------------------------------------------------------------------------
+/exports/
+/tmp/
+*.local.pdf
+*.local.docx
+
+# ---------------------------------------------------------------------------
+# Platform / editor / OS
+# ---------------------------------------------------------------------------
+.vercel
+.netlify
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+desktop.ini

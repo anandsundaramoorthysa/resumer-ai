@@ -1,0 +1,48 @@
+{
+  "name": "resumerai",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/deepinfra": "^2.0.78",
+    "@ai-sdk/fireworks": "^2.0.84",
+    "@ai-sdk/google": "^3.0.121",
+    "@ai-sdk/groq": "^3.0.64",
+    "@ai-sdk/togetherai": "^2.0.80",
+    "@auth/drizzle-adapter": "^1.11.3",
+    "@react-pdf/renderer": "^4.9.0",
+    "ai": "^7.0.93",
+    "docx": "^9.7.1",
+    "drizzle-orm": "^0.45.2",
+    "mammoth": "^1.12.2",
+    "nanoid": "^5.1.16",
+    "next": "16.3.4",
+    "next-auth": "^5.0.0-beta.32",
+    "pdf-parse": "^2.4.5",
+    "postgres": "^3.4.9",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.13",
+    "typescript": "^5"
+  }
+}

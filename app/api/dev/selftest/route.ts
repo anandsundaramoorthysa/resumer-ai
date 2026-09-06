@@ -1,0 +1,119 @@
+/**
+ * Dev-only render verification.
+ *
+ * Renders a fixture resume to PDF and DOCX inside the real Next runtime and parses both
+ * back to text, so the round-trip self-test (REQ-6.6) is exercised where it actually
+ * matters. `@react-pdf` ships ESM-only export conditions that standalone CJS runners
+ * can't resolve, so this route — not a script — is the honest place to check the PDF.
+ *
+ * 404s in production.
+ */
+
+import { renderResumePdf } from '@/lib/render/pdf';
+import { renderResumeDocx } from '@/lib/render/docx';
+import { selfTest } from '@/lib/render/selftest';
+import { resumeFileName } from '@/lib/render/filename';
+import { scoreFormatting } from '@/lib/quality/formatting';
+import type { ResumeDocument } from '@/lib/types';
+
+export const runtime = 'nodejs';
+
+const FIXTURE: ResumeDocument = {
+  id: 'fixture',
+  userId: 'fixture',
+  contact: {
+    fullName: 'Anand Sundaramoorthy',
+    email: 'hello@anandsundaramoorthy.com',
+    phone: '+91 90000 00000',
+    location: 'Chennai, India',
+    portfolioUrl: 'anandsundaramoorthy.com',
+    githubUrl: 'github.com/anandsundaramoorthy',
+  },
+  sections: [
+    {
+      key: 'skills',
+      heading: 'Skills',
+      items: [
+        {
+          text: 'Technical SEO, Google Analytics, Next.js, TypeScript, PostgreSQL, Node.js',
+          sourceRecordId: null,
+        },
+      ],
+    },
+    {
+      key: 'experience',
+      heading: 'Experience',
+      items: [],
+      groups: [
+        {
+          title: 'Full Stack Developer',
+          subtitle: 'Freelance',
+          dateRange: 'Jan 2022 – Present',
+          items: [
+            {
+              text: 'Optimized PostgreSQL queries serving 200K daily requests, cutting p95 latency 40%.',
+              sourceRecordId: 'b1',
+            },
+            {
+              text: 'Ran technical SEO audits that lifted organic traffic 32% across 4 client sites.',
+              sourceRecordId: 'b2',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'education',
+      heading: 'Education',
+      items: [{ text: 'B.E. Computer Science · Anna University · 2018 – 2022', sourceRecordId: 'e1' }],
+    },
+  ],
+  jobRequirement: null,
+  renderMode: 'ats-strict',
+  recordHashSnapshot: [],
+  createdAt: new Date(),
+};
+
+export async function GET() {
+  if (process.env.NODE_ENV === 'production') {
+    return new Response('Not found', { status: 404 });
+  }
+
+  const started = Date.now();
+  const [pdf, docx] = await Promise.all([
+    renderResumePdf(FIXTURE),
+    renderResumeDocx(FIXTURE),
+  ]);
+
+  const [pdfTest, docxTest] = await Promise.all([
+    selfTest(pdf, 'pdf', FIXTURE),
+    selfTest(docx, 'docx', FIXTURE),
+  ]);
+
+  const formatting = scoreFormatting(FIXTURE);
+
+  return Response.json({
+    ok: pdfTest.passed && docxTest.passed && formatting.violations.length === 0,
+    tookMs: Date.now() - started,
+    formatting: {
+      score: formatting.score,
+      violations: formatting.violations,
+    },
+    pdf: {
+      bytes: pdf.length,
+      passed: pdfTest.passed,
+      extractedChars: pdfTest.extractedChars,
+      issues: pdfTest.issues,
+      fileName: resumeFileName(FIXTURE, 'pdf'),
+      textPreview: pdfTest.extractedText.replace(/\s+/g, ' ').slice(0, 320),
+    },
+    docx: {
+      bytes: docx.length,
+      passed: docxTest.passed,
+      extractedChars: docxTest.extractedChars,
+      issues: docxTest.issues,
+      fileName: resumeFileName(FIXTURE, 'docx'),
+      textPreview: docxTest.extractedText.replace(/\s+/g, ' ').slice(0, 320),
+    },
+  });
+}
