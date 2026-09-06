@@ -26,6 +26,7 @@ import type {
 } from '@/lib/types';
 import type { PipelineOutput } from '@/lib/pipeline/run';
 import { latestCommitSha, parseRepoRef } from '@/lib/sync/github';
+import { roleIdentity, splitMergedTitles } from '@/lib/sync/roles';
 import type { ParseResult } from '@/lib/sync/parse';
 import type { ParsedRecord } from '@/lib/sync/reconcile';
 import { hashContent, reconcile, summarizePlan } from '@/lib/sync/reconcile';
@@ -291,16 +292,49 @@ async function syncRoles(
   roles: ParseResult['roles'],
 ): Promise<Map<string, string>> {
   const stored = await db
-    .select({ id: rolesTable.id, contentHash: rolesTable.contentHash })
+    .select({
+      id: rolesTable.id,
+      contentHash: rolesTable.contentHash,
+      title: rolesTable.title,
+      company: rolesTable.company,
+      startDate: rolesTable.startDate,
+      endDate: rolesTable.endDate,
+      location: rolesTable.location,
+    })
     .from(rolesTable)
     .where(eq(rolesTable.userId, userId));
 
   const idByHash = new Map(stored.map((r) => [r.contentHash, r.id]));
 
+  // Matching on content hash alone is what let 16 rows accumulate for 10 jobs: the same
+  // company spelled two ways hashes two ways. An identity index alongside it means a
+  // re-spelling updates the existing row instead of adding another.
+  const idByIdentity = new Map(
+    stored.map((r) => [roleIdentity(r.company, r.title), r.id]),
+  );
+
   const pending: ParseResult['roles'] = [];
   for (const role of roles) {
     if (idByHash.has(role.contentHash)) continue;
-    if (pending.some((r) => r.contentHash === role.contentHash)) continue;
+
+    // A merged title ("AI Intern / Full Stack Developer") is several jobs, and each
+    // half usually already exists as a correct row.
+    const titles = splitMergedTitles(role.title);
+    let matchedAll = true;
+    for (const title of titles) {
+      const existingId = idByIdentity.get(roleIdentity(role.company, title));
+      if (existingId) {
+        // Same job, better-spelled: point this parse at the row already there.
+        idByHash.set(role.contentHash, existingId);
+      } else {
+        matchedAll = false;
+      }
+    }
+    if (matchedAll && titles.length > 0) continue;
+
+    if (pending.some((r) => roleIdentity(r.company, r.title) === roleIdentity(role.company, role.title))) {
+      continue;
+    }
     pending.push(role);
   }
 
@@ -312,6 +346,7 @@ async function syncRoles(
           userId,
           title: role.title,
           company: role.company,
+          location: role.location ?? null,
           startDate: role.startDate,
           endDate: role.endDate,
           source: 'github-sync',
@@ -319,7 +354,9 @@ async function syncRoles(
         })),
       )
       .returning({ id: rolesTable.id, contentHash: rolesTable.contentHash });
-    for (const row of inserted) idByHash.set(row.contentHash, row.id);
+    for (const row of inserted) {
+      idByHash.set(row.contentHash, row.id);
+    }
   }
 
   return idByHash;

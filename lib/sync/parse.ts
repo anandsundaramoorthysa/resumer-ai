@@ -48,6 +48,7 @@ const ExtractionSchema = z.object({
     z.object({
       company: z.string(),
       title: z.string(),
+      location: z.string().optional().describe('City and country, or "Remote"'),
       startDate: z.string().describe("'YYYY-MM' or 'YYYY'"),
       endDate: z.string().describe("'YYYY-MM', 'YYYY', or 'present'"),
       bullets: z.array(
@@ -149,6 +150,7 @@ export interface ParseResult {
   roles: Array<{
     title: string;
     company: string;
+    location?: string;
     startDate: string;
     endDate: string;
     contentHash: string;
@@ -418,6 +420,7 @@ export function toRecords(data: ExtractedProfile): ParseResult {
     roles.push({
       title: e.title,
       company: e.company,
+      location: e.location,
       startDate: e.startDate,
       endDate: e.endDate || 'present',
       contentHash: roleHash,

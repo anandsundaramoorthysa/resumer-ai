@@ -130,6 +130,28 @@ Task 6.9 (Affinda/RChilli) is still open, so the strongest ATS check is unused.
 
 ---
 
+## Resolved since the audit
+
+- **#1 duplicate roles** — fixed. Roles now carry the same normalised identity education
+  has (`lib/sync/roles.ts`), and the live profile was cleaned 16 -> 10 rows, matching
+  `experienceData.ts` exactly. Three bullets were repointed at surviving rows before any
+  deletion rather than orphaned.
+- **#3 merged titles** — fixed. "AI Intern / Full Stack Developer / Project Manager"
+  splits and collapses onto the three real DiffuseAI rows instead of adding a fourth.
+- **#4 roles with no start date** — fixed as a consequence: the dateless rows merged into
+  their dated counterparts.
+- **#9 phone** — supplied by the user, stored as `+91 80124 84177`. International form is
+  deliberate: a bare ten-digit number gives a parser no country to attach it to.
+- **#10 per-role location** — fixed. The data was in the source all along
+  ("Chennai, Tamil Nadu, India · On-site", "Remote") and extraction was discarding it.
+
+### #2 is not a code defect
+Checked the source directly: `experienceData.ts` carries only title, company, location
+and period, and `Experience.tsx` is presentation. **No per-role accomplishment text
+exists anywhere in the portfolio.** The extractor was right not to invent any. This is
+fixed by writing bullets — in the portfolio, or by hand in the app — not by better
+parsing. Same for #5: the projects genuinely state no outcomes.
+
 ## Already fixed this session
 
 | Was | Now |
