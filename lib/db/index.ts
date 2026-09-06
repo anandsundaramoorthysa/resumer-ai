@@ -2,7 +2,28 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema';
 
-const connectionString = process.env.DATABASE_URL;
+/**
+ * A connection string is only usable if it actually parses. This matters at build time:
+ * some CI environments redact secret values (Netlify substitutes `***` during CLI
+ * builds), and handing that to postgres() throws ERR_INVALID_URL while Next is
+ * collecting page data — failing the whole build for a reason that has nothing to do
+ * with the code. An unusable value is treated as absent instead, which the setup screen
+ * already handles.
+ */
+function usableConnectionString(): string | undefined {
+  const raw = process.env.DATABASE_URL?.trim();
+  if (!raw) return undefined;
+  try {
+    const parsed = new URL(raw);
+    if (!/^postgres(ql)?:$/.test(parsed.protocol)) return undefined;
+    if (!parsed.hostname) return undefined;
+    return raw;
+  } catch {
+    return undefined;
+  }
+}
+
+const connectionString = usableConnectionString();
 
 /**
  * Deliberately no throw at import time. A missing DATABASE_URL must not break the build
