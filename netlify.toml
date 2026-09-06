@@ -1,0 +1,39 @@
+# Netlify configuration.
+#
+# Read this before deploying here: Netlify caps streaming functions at 60 seconds
+# (10s for non-streaming, 26s on paid plans). A draft runs job extraction, retrieval,
+# up to four scoring iterations, then PDF/DOCX rendering — so the app sets a 50s
+# internal deadline when NETLIFY is present and returns the best resume it has rather
+# than being killed mid-response. Vercel allows 300s and needs no such compromise.
+#
+# The trade-off is real: on Netlify a difficult draft may stop after 2-3 scoring
+# iterations instead of 4, and report that it did.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# The Next.js runtime handles routing, SSR, streaming and image optimization.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Give the long-running routes as much headroom as the plan allows. Netlify enforces
+# its own ceiling regardless; this just avoids being cut short below it.
+[functions]
+  node_bundler = "esbuild"
+  # These resolve worker files and fonts by path at runtime, so they must stay external
+  # rather than being bundled — the same reason they're in serverExternalPackages.
+  external_node_modules = [
+    "pdf-parse",
+    "pdfjs-dist",
+    "@react-pdf/renderer",
+    "docx",
+    "mammoth",
+  ]
+
+[dev]
+  command = "npm run dev"
+  targetPort = 3000

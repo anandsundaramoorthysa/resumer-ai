@@ -179,6 +179,23 @@ export async function runQualityGate(args: {
 
     if (iteration === MAX_ITERATIONS) break;
 
+    // Stop while we still have time to render and return something. A function killed
+    // mid-iteration produces nothing at all; stopping one iteration early produces the
+    // best resume we managed, plus an honest note about why it stopped there.
+    if (budget && !budget.hasTimeForAnotherIteration()) {
+      const chosen = best!;
+      chosen.breakdown.result.haltReason = 'budget-cap';
+      chosen.breakdown.result.haltExplanation = `Stopped after ${iteration} attempt(s) at ${chosen.breakdown.result.overall.toFixed(
+        1,
+      )}/10 — another revision pass wouldn't have finished inside this deployment's time limit. This is the best version produced so far.`;
+      return {
+        document: chosen.doc,
+        result: chosen.breakdown.result,
+        genuineGaps: chosen.breakdown.genuineGaps,
+        history,
+      };
+    }
+
     try {
       current = await revise(current, breakdown.result.critiques, budget);
     } catch (err) {

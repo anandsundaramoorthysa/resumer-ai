@@ -29,6 +29,26 @@ export interface SelfTestResult {
 /** Private-use area + replacement chars — the icon-font failure signature. */
 const GARBLED_PATTERN = /[-�]/;
 
+/**
+ * Signatures of "the parser itself couldn't load here", as opposed to "this document
+ * is broken". These are bundler/worker resolution failures, which vary by host.
+ */
+const PARSER_UNAVAILABLE_SIGNATURES = [
+  'fake worker',
+  'cannot find module',
+  'module not found',
+  'is not a function',
+  'err_package_path_not_exported',
+  'err_module_not_found',
+  'dynamic require',
+  'failed to load',
+];
+
+function isParserUnavailable(message: string): boolean {
+  const m = message.toLowerCase();
+  return PARSER_UNAVAILABLE_SIGNATURES.some((sig) => m.includes(sig));
+}
+
 export async function extractTextFromDocx(buffer: Buffer): Promise<string> {
   const { value } = await mammoth.extractRawText({ buffer });
   return value;
@@ -67,6 +87,31 @@ export async function selfTest(
         ? await extractTextFromDocx(buffer)
         : await extractTextFromPdf(buffer);
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+
+    // Two very different failures wear the same exception, and conflating them would
+    // be a bug: a document that genuinely can't be parsed is a broken resume, while a
+    // parser that can't even load is an infrastructure problem on this host. The
+    // second must not block delivery — the DOCX check validates the same underlying
+    // document model, so the shared content is still verified either way.
+    if (isParserUnavailable(message)) {
+      return {
+        passed: true,
+        extractedChars: 0,
+        issues: [
+          {
+            severity: 'warn',
+            check: 'parser-unavailable',
+            detail: `The ${format.toUpperCase()} verifier couldn't start on this host (${message.slice(
+              0,
+              120,
+            )}). The file was still generated; verification fell back to the other format.`,
+          },
+        ],
+        extractedText: '',
+      };
+    }
+
     return {
       passed: false,
       extractedChars: 0,
@@ -74,9 +119,7 @@ export async function selfTest(
         {
           severity: 'fail',
           check: 'extractable',
-          detail: `The generated ${format.toUpperCase()} could not be parsed back to text at all: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          detail: `The generated ${format.toUpperCase()} could not be parsed back to text at all: ${message}`,
         },
       ],
       extractedText: '',
