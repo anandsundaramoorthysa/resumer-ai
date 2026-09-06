@@ -54,6 +54,27 @@ export function scoreFormatting(doc: ResumeDocument): FormattingResult {
     });
   }
 
+  // --- The document must actually contain a resume ----------------------------
+  //
+  // Observed live: an over-aggressive relevance floor left a document holding one
+  // certification and nothing else, and it scored 9.7/10 because every rule it was
+  // measured against happened to hold. Formatting compliance means nothing on a page
+  // with no substance, so emptiness is itself a formatting failure.
+  const substantiveLines = doc.sections
+    .filter((s) => s.key === 'experience' || s.key === 'projects' || s.key === 'summary')
+    .reduce(
+      (n, s) => n + s.items.length + (s.groups ?? []).reduce((m, g) => m + g.items.length, 0),
+      0,
+    );
+
+  if (substantiveLines === 0) {
+    violations.push({
+      rule: 'has-substance',
+      detail:
+        'The resume has no experience, projects or summary content — there is nothing here for a recruiter or a parser to read.',
+    });
+  }
+
   // --- Contact block must be present in the body ------------------------------
   if (!doc.contact?.fullName?.trim() || !doc.contact?.email?.trim()) {
     violations.push({
@@ -131,7 +152,7 @@ export function scoreFormatting(doc: ResumeDocument): FormattingResult {
   // Score: each distinct violated RULE costs equally, so one repeated mistake does
   // not dominate the score more than a different single mistake.
   const distinctRules = new Set(violations.map((v) => v.rule)).size;
-  const TOTAL_RULES = 9;
+  const TOTAL_RULES = 10;
   const score = Math.max(0, (TOTAL_RULES - distinctRules) / TOTAL_RULES);
 
   return { score, violations };

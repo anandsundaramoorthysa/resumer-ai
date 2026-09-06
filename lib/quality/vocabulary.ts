@@ -26,7 +26,7 @@ function normalize(s: string): string {
 }
 
 /** Whole-phrase containment: `haystack` contains `needle` on word boundaries. */
-function containsPhrase(haystack: string, needle: string): boolean {
+export function containsPhrase(haystack: string, needle: string): boolean {
   if (haystack === needle) return true;
   const idx = haystack.indexOf(needle);
   if (idx === -1) return false;

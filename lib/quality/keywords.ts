@@ -10,6 +10,7 @@
  */
 
 import type { ResumeDocument } from '../types';
+import { containsPhrase } from './vocabulary';
 
 export const KEYWORD_GATE_THRESHOLD = 0.7;
 
@@ -23,23 +24,63 @@ function norm(s: string): string {
 }
 
 /**
- * Tolerant match: exact substring, or singular/plural and common suffix variance.
- * Deliberately NOT fuzzy-by-edit-distance — "React" should not match "reacts to" by
- * accident, and a false positive here inflates the score dishonestly.
+ * Whole-word match, with narrow spelling variance.
+ *
+ * The previous version's comment claimed "React" must not match "reacts to" — while the
+ * code did exactly that, testing raw substring containment AND generating a `${k}s`
+ * plural, so "React" matched "reacts" by construction. Since this feeds the gate that
+ * decides whether a resume is good enough to ship, that inflated the one number the
+ * whole quality claim rests on.
+ *
+ * Now every comparison is on word boundaries (shared with vocabulary.ts, so the gate and
+ * the skills scorer agree). Variance is kept for genuine spelling differences —
+ * "CI/CD" vs "ci cd", "Node.js" vs "nodejs".
+ *
+ * Plurals need both directions to be useful — a posting saying "integration" should
+ * match "integrations" in the text, and vice versa. But adding an "s" is what produced
+ * the original defect: "React" became "reacts" and matched "the service reacts to
+ * webhook events".
+ *
+ * The distinction is that React is a product name. A common noun pluralises into
+ * another common noun ("integration" -> "integrations", still about integrations),
+ * whereas a proper noun plus an "s" usually lands on an unrelated verb. So pluralising
+ * is allowed for ordinary words and withheld from anything the posting capitalised or
+ * wrote with a dot or digit — the shape of a technology name.
  */
+const MIN_PLURAL_STEM = 4;
+
+/** Product/technology names: capitalised, or carrying a version or dotted namespace. */
+function looksLikeProperNoun(rawKeyword: string): boolean {
+  const first = rawKeyword.trim()[0] ?? '';
+  return /[A-Z]/.test(first) || /[.\d]/.test(rawKeyword);
+}
+
 function matches(haystack: string, keyword: string): boolean {
   const k = norm(keyword);
   if (!k) return false;
-  if (haystack.includes(k)) return true;
+  if (containsPhrase(haystack, k)) return true;
 
-  // Plural / possessive variance
-  const variants = [
-    k.endsWith('s') ? k.slice(0, -1) : `${k}s`,
+  const variants = new Set<string>([
     k.replace(/\s+/g, '-'),
     k.replace(/-/g, ' '),
     k.replace(/\./g, ''),
-  ];
-  return variants.some((v) => v.length > 1 && haystack.includes(v));
+    k.replace(/\//g, ' '),
+  ]);
+
+  const lastWord = k.split(' ').pop() ?? '';
+  if (lastWord.length >= MIN_PLURAL_STEM) {
+    if (k.endsWith('s')) {
+      // Stripping is always safe: the worst case is a missed match.
+      variants.add(k.slice(0, -1));
+    } else if (!looksLikeProperNoun(keyword)) {
+      variants.add(`${k}s`);
+    }
+  }
+
+  for (const v of variants) {
+    if (v.length > 1 && v !== k && containsPhrase(haystack, v)) return true;
+  }
+  return false;
 }
 
 export interface KeywordCoverage {

@@ -127,12 +127,40 @@ export interface RankOptions {
   relevanceFloor?: number;
 }
 
+/**
+ * Below this many surviving records, the floor has stopped filtering and started
+ * deleting the resume. Observed live: a keyword set phrased slightly differently by the
+ * extractor pushed 173 of 174 records under the floor, and the pipeline cheerfully
+ * produced a 270-character document containing one certification.
+ */
+const MIN_VIABLE_SURVIVORS = 12;
+
 export function rankRecords(
   records: ProfileRecord[],
   job: JobRequirement,
   options: RankOptions = {},
 ): { ranked: RankedRecord[]; excluded: ProfileRecord[] } {
-  const floor = options.relevanceFloor ?? RELEVANCE_FLOOR;
+  // The floor is a preference, not a guarantee, and it is applied against keywords an
+  // LLM phrased — so it must degrade rather than empty the document. Progressively
+  // relax until enough records survive to build a resume from; a slightly off-target
+  // bullet is recoverable, an empty resume is not.
+  const requested = options.relevanceFloor ?? RELEVANCE_FLOOR;
+  const target = Math.min(MIN_VIABLE_SURVIVORS, records.length);
+
+  for (const floor of [requested, requested / 2, requested / 4, 0]) {
+    const attempt = rankAtFloor(records, job, options, floor);
+    if (attempt.ranked.length >= target || floor === 0) return attempt;
+  }
+  return rankAtFloor(records, job, options, 0);
+}
+
+function rankAtFloor(
+  records: ProfileRecord[],
+  job: JobRequirement,
+  options: RankOptions,
+  floorOverride: number,
+): { ranked: RankedRecord[]; excluded: ProfileRecord[] } {
+  const floor = floorOverride;
   const ranked: RankedRecord[] = [];
   const excluded: ProfileRecord[] = [];
 

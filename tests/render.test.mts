@@ -235,17 +235,23 @@ await (async () => {
 
   await testAsync('catches a skills section that did not survive rendering', async () => {
     const doc = goodDoc();
-    // The leading skill has to be one that appears nowhere else in the document: the
-    // round-trip check searches the whole extracted text, not the skills region, so a
-    // term that also occurs in a bullet would be found even with the section gone.
-    doc.sections[0].items[0].text = 'Kubernetes, PostgreSQL, React';
+    // Deliberately uses skills that DO appear elsewhere in the document. The check used
+    // to search the whole extracted text, so this exact case slipped through; it now
+    // isolates the Skills region, and a section that vanished is caught either way.
+    doc.sections[0].items[0].text = 'React, PostgreSQL, TypeScript';
     const rendered = { ...doc, sections: doc.sections.filter((s) => s.key !== 'skills') };
 
     // The file was rendered without the skills, but the document claims them — exactly
     // what a template regression that drops a section looks like from the outside.
     const result = await selfTest(await renderResumeDocx(rendered), 'docx', doc);
     assert.equal(result.passed, false);
-    assert.ok(failures(result).includes('skills-extractable'));
+    const f = failures(result);
+    // Two distinct failures now: the heading vanished, or it survived but the skills
+    // under it did not. Either is a dropped Skills section from the outside.
+    assert.ok(
+      f.includes('skills-extractable') || f.includes('skills-section-extractable'),
+      `expected a skills failure, got: ${f.join(', ')}`,
+    );
   });
 
   // --- contact info absent --------------------------------------------------

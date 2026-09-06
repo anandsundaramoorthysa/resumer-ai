@@ -201,16 +201,41 @@ export async function selfTest(
     }
   }
 
-  // --- Skills must survive: the highest-weighted zone for parsers ------------
+  // --- Skills must survive, IN the Skills region -----------------------------
+  //
+  // Searching the whole document was close to useless here: a resume whose Skills
+  // section vanished entirely still passed whenever its leading skill happened to
+  // appear in a project line, which for a technology-led resume is almost always. The
+  // check now isolates the text between the Skills heading and the next heading, which
+  // is the zone parsers weight most heavily, and samples several skills rather than
+  // trusting one.
   const skills = doc.sections.find((s) => s.key === 'skills');
-  if (skills?.items[0]?.text) {
-    const first = skills.items[0].text.split(',')[0]?.trim().toLowerCase();
-    if (first && !lower.includes(first)) {
+  const skillsText = skills?.items[0]?.text ?? '';
+  if (skillsText) {
+    const region = extractSectionRegion(text, skills!.heading, doc);
+
+    if (region === null) {
       issues.push({
         severity: 'fail',
-        check: 'skills-extractable',
-        detail: `The Skills section did not survive parsing (looked for "${first}").`,
+        check: 'skills-section-extractable',
+        detail: `The "${skills!.heading}" heading did not survive parsing, so the highest-weighted keyword zone is gone.`,
       });
+    } else {
+      const wanted = skillsText
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 5);
+      const regionLower = region.toLowerCase();
+      const lost = wanted.filter((w) => !regionLower.includes(w));
+
+      if (lost.length > 0) {
+        issues.push({
+          severity: 'fail',
+          check: 'skills-extractable',
+          detail: `${lost.length} of the first ${wanted.length} skills are missing from the extracted Skills section: ${lost.join(', ')}.`,
+        });
+      }
     }
   }
 
@@ -220,4 +245,33 @@ export async function selfTest(
     issues,
     extractedText: text,
   };
+}
+
+/**
+ * Text between a section's heading and the next heading in the extracted output.
+ *
+ * Returns null when the heading itself is missing, which is a distinct and worse
+ * failure than the heading being present but empty — the caller reports them
+ * separately because they point at different bugs.
+ */
+function extractSectionRegion(
+  text: string,
+  heading: string,
+  doc: ResumeDocument,
+): string | null {
+  const haystack = text.toLowerCase();
+  const start = haystack.indexOf(heading.toLowerCase());
+  if (start === -1) return null;
+
+  const after = start + heading.length;
+
+  // The region ends at whichever other section heading appears first.
+  let end = text.length;
+  for (const other of doc.sections) {
+    if (other.heading === heading) continue;
+    const idx = haystack.indexOf(other.heading.toLowerCase(), after);
+    if (idx !== -1 && idx < end) end = idx;
+  }
+
+  return text.slice(after, end);
 }
