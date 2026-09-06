@@ -35,7 +35,7 @@ export default async function HomePage() {
           </p>
           <Link
             href="/sign-in"
-            className="mt-6 inline-block rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark"
+            className="mt-6 inline-flex min-h-11 items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
           >
             Sign in with GitHub
           </Link>
@@ -67,6 +67,16 @@ export default async function HomePage() {
               <div className="mt-1 text-sm text-muted">
                 Point it at the repo behind your site. It reads your skills, projects and
                 experience, and re-checks for changes before every draft.
+              </div>
+            </Link>
+            <Link
+              href="/import"
+              className="block rounded-xl border border-line p-4 transition-colors hover:border-brand"
+            >
+              <div className="font-semibold">Upload an existing resume</div>
+              <div className="mt-1 text-sm text-muted">
+                PDF or DOCX. It&apos;s read into the individual facts behind it and shown to
+                you for approval before anything is saved.
               </div>
             </Link>
             <Link
@@ -140,10 +150,10 @@ function Shell({
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3.5">
           <Logo />
           <nav className="flex items-center gap-5 text-sm">
-            <Link href="/profile" className="text-muted hover:text-ink">
+            <Link href="/profile" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
               Profile
             </Link>
-            <Link href="/applications" className="text-muted hover:text-ink">
+            <Link href="/applications" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
               Applications
             </Link>
             {userName ? (
@@ -278,7 +288,7 @@ function PortfolioCard({
 
       <Link
         href="/settings/portfolio"
-        className="mt-4 block rounded-lg border border-line py-2.5 text-center text-sm font-semibold hover:bg-paper"
+        className="mt-4 flex min-h-11 items-center justify-center rounded-lg border border-line py-2.5 text-center text-sm font-semibold hover:bg-paper"
       >
         {repo ? 'Manage connection' : 'Connect portfolio'}
       </Link>

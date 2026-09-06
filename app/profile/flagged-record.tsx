@@ -26,7 +26,7 @@ export function FlaggedRecord({
           type="button"
           disabled={pending}
           onClick={() => startTransition(() => keepRecord(id))}
-          className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold hover:bg-paper disabled:opacity-50"
+          className="min-h-11 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold hover:bg-paper disabled:opacity-50"
         >
           Keep
         </button>
@@ -34,7 +34,7 @@ export function FlaggedRecord({
           type="button"
           disabled={pending}
           onClick={() => startTransition(() => removeRecord(id))}
-          className="rounded-lg px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+          className="min-h-11 rounded-lg px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
         >
           Remove
         </button>

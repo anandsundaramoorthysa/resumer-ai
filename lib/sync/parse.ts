@@ -99,96 +99,154 @@ export interface ParseResult {
 }
 
 /**
- * Extraction runs as several focused calls in parallel, each with a SMALL schema.
+ * One unit of extraction work: a whole small file, or one slice of a large one.
  *
- * The measurements that led here:
- *   one big call, one big schema      191s
- *   chunked corpus, same big schema   133s
- *   plus per-attempt timeouts         180s  (worse — see below)
- *
- * The schema was the bottleneck, not the corpus. A seven-branch nested schema fails on
- * most open-weight models, so every call walked the entire provider chain before
- * succeeding; adding timeouts just made each doomed walk cost a predictable maximum
- * instead of finishing sooner. Splitting into single-purpose schemas means each call
- * succeeds on the first provider, which is both far faster and far more reliable.
+ * `attempt` counts how many times this slice has already been tried. It exists so a
+ * slice whose extraction ran out of time can be re-queued and retried later in the
+ * job, by which point the provider that stalled is on cooldown and a healthy one
+ * answers instead.
  */
-const CHUNK_CHAR_BUDGET = 14_000;
-const MAX_CHUNKS = 6;
-
-const SkillsOnly = z.object({ skills: ExtractionSchema.shape.skills });
-const ProjectsOnly = z.object({ projects: ExtractionSchema.shape.projects });
-const ExperienceOnly = z.object({ experience: ExtractionSchema.shape.experience });
-const CredentialsOnly = z.object({
-  education: ExtractionSchema.shape.education,
-  certifications: ExtractionSchema.shape.certifications,
-  achievements: ExtractionSchema.shape.achievements,
-});
-const ContactOnly = z.object({ contact: ExtractionSchema.shape.contact });
-
-export interface ExtractionPass {
-  key: string;
-  label: string;
-  schema: z.ZodType<Partial<ExtractedProfile>>;
-  ask: string;
+export interface WorkSlice {
+  path: string;
+  content: string;
+  part?: number;
+  parts?: number;
+  attempt?: number;
 }
 
-/** One pass per category. Small schemas succeed on the first provider; the combined
- *  schema did not, which is what made the original single call take minutes. */
-export const EXTRACTION_PASSES: ExtractionPass[] = [
-  {
-    key: 'skills',
-    label: 'skills',
-    schema: SkillsOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
-    ask: 'every concrete technology, tool, language and named competency',
-  },
-  {
-    key: 'experience',
-    label: 'work experience',
-    schema: ExperienceOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
-    ask: 'every job or role, with its bullets split into action / scale / outcome',
-  },
-  {
-    key: 'projects',
-    label: 'projects',
-    schema: ProjectsOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
-    ask: 'every project, with its stack, links and any stated impact',
-  },
-  {
-    key: 'credentials',
-    label: 'education and certifications',
-    schema: CredentialsOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
-    ask: 'education, certifications and achievements',
-  },
-  {
-    key: 'contact',
-    label: 'contact details',
-    schema: ContactOnly as unknown as z.ZodType<Partial<ExtractedProfile>>,
-    ask: 'the contact details - name, email, phone, location and profile URLs',
-  },
-];
+/**
+ * Chars per extraction call.
+ *
+ * Measured against the real repository, one pass:
+ *   whole corpus  73k chars   138s, then failed on a provider quota
+ *   one slice      6.0k chars   4.0-7.2s — too close to the step budget, slices dropped
+ *   one slice      3.5k chars   1.1-5.8s — fits with room for a fallback provider
+ *
+ * Input size is what decides this, so the corpus is cut into pieces rather than
+ * truncated at a file boundary: the portfolio's largest file is 17.7k chars, and
+ * truncating it to fit would have silently dropped two thirds of the projects.
+ */
+const MAX_SLICE_CHARS = Number(process.env.SYNC_SLICE_CHARS ?? 3_500);
 
-/** Runs a single extraction pass over the corpus. */
-export async function runPass(
-  pass: ExtractionPass,
-  files: RepoFile[],
-  budget?: DraftBudget,
+/**
+ * Cuts the fetched corpus into extraction-sized units, splitting on line boundaries so
+ * a record is never severed mid-line. Each unit is one step of the stepped sync.
+ */
+export function planSlices(files: RepoFile[]): WorkSlice[] {
+  const slices: WorkSlice[] = [];
+
+  for (const file of files) {
+    const content = file.content;
+    if (!content.trim()) continue;
+
+    if (content.length <= MAX_SLICE_CHARS) {
+      slices.push({ path: file.path, content });
+      continue;
+    }
+
+    const chunks: string[] = [];
+    let current = '';
+    for (const line of content.split('\n')) {
+      // A single monstrous line still has to go somewhere: give it its own chunk
+      // rather than growing one past the budget.
+      if (current && current.length + line.length + 1 > MAX_SLICE_CHARS) {
+        chunks.push(current);
+        current = '';
+      }
+      current = current ? `${current}\n${line}` : line;
+    }
+    if (current.trim()) chunks.push(current);
+
+    chunks.forEach((chunk, i) =>
+      slices.push({
+        path: file.path,
+        content: chunk,
+        part: i + 1,
+        parts: chunks.length,
+      }),
+    );
+  }
+
+  return slices;
+}
+
+/**
+ * Halves a slice that could not be extracted in the time available.
+ *
+ * A retry that re-sends the same content is only worth anything if the provider was
+ * the problem. When the content is the problem — a dense slice that takes longer to
+ * read and produces more JSON than the window allows — the useful retry is a smaller
+ * one. Returns the slice unchanged when it is already too small to be worth halving.
+ */
+export function splitSlice(slice: WorkSlice): WorkSlice[] {
+  const lines = slice.content.split('\n');
+  if (slice.content.length < 800 || lines.length < 2) return [slice];
+
+  const half = Math.ceil(lines.length / 2);
+  return [lines.slice(0, half).join('\n'), lines.slice(half).join('\n')]
+    .filter((content) => content.trim())
+    .map((content) => ({ ...slice, content }));
+}
+
+/** Human-readable label for a slice — used in the sync's progress messages. */
+export function sliceLabel(slice: WorkSlice): string {
+  const name = slice.path.split('/').pop() ?? slice.path;
+  return slice.parts && slice.parts > 1
+    ? `${name} (${slice.part}/${slice.parts})`
+    : name;
+}
+
+export interface ExtractOptions {
+  budget?: DraftBudget;
+  /** Wall clock the whole extraction may take, including provider fallback. */
+  deadlineMs?: number;
+  /** Wall clock any single provider attempt may take. */
+  timeoutMs?: number;
+  /** Which model tier to route to. See SYNC_TIER for why the sync picks what it does. */
+  tier?: 'standard' | 'fast';
+}
+
+/**
+ * One AI call per slice, bounded by the caller's deadline.
+ *
+ * `maxRetriesPerProvider: 0` is deliberate: the fallback chain already is the retry.
+ * Retrying inside a provider doubles the worst case without adding a second opinion,
+ * and the whole point of stepping the sync is that no single call may overrun.
+ */
+export async function extractFromSlice(
+  slice: WorkSlice,
+  options: ExtractOptions = {},
 ): Promise<Partial<ExtractedProfile>> {
-  const corpus = buildChunks(files, null).join('\n').slice(0, 45_000);
-  if (!corpus.trim()) return {};
+  const body = slice.content.slice(0, MAX_SLICE_CHARS);
+  if (!body.trim()) return {};
+
+  const where =
+    slice.parts && slice.parts > 1
+      ? `${slice.path} (part ${slice.part} of ${slice.parts})`
+      : slice.path;
 
   const { data } = await generateStructured({
-    schema: pass.schema,
+    schema: ExtractionSchema as unknown as z.ZodType<Partial<ExtractedProfile>>,
     system: SYSTEM,
-    prompt: `From this portfolio source, extract ${pass.ask}. Return nothing for anything not actually present.
+    prompt: `File: ${where}
 
-${corpus}`,
-    options: { budget, temperature: 0.1 },
+Extract every professional fact this file actually contains. Return empty arrays for categories it does not mention.
+
+${body}`,
+    options: {
+      budget: options.budget,
+      tier: options.tier,
+      temperature: 0.1,
+      maxRetriesPerProvider: 0,
+      timeoutMs: options.timeoutMs,
+      deadlineMs: options.deadlineMs,
+    },
   });
   return data;
 }
 
 /** Merges per-chunk results, de-duplicating by the same identity the sync uses. */
-export function mergeExtractions(parts: ExtractedProfile[]): ExtractedProfile {
+export function mergeExtractions(parts: Array<Partial<ExtractedProfile>>): ExtractedProfile {
   const merged: ExtractedProfile = {
     contact: undefined,
     skills: [],
@@ -230,34 +288,6 @@ export function mergeExtractions(parts: ExtractedProfile[]): ExtractedProfile {
   }
 
   return merged;
-}
-
-/** Packs files into chunks, keeping whole files together where possible. */
-function buildChunks(files: RepoFile[], liveSiteText: string | null): string[] {
-  const chunks: string[] = [];
-  let current = '';
-
-  const push = () => {
-    if (current.trim()) chunks.push(current);
-    current = '';
-  };
-
-  for (const f of files) {
-    if (chunks.length >= MAX_CHUNKS) break;
-    const body = f.content.slice(0, CHUNK_CHAR_BUDGET);
-    const piece = `--- FILE: ${f.path} ---\n${body}\n`;
-    if (current.length + piece.length > CHUNK_CHAR_BUDGET) push();
-    current += piece;
-  }
-  push();
-
-  if (liveSiteText && chunks.length < MAX_CHUNKS) {
-    chunks.push(
-      `--- LIVE SITE TEXT (fallback) ---\n${liveSiteText.slice(0, CHUNK_CHAR_BUDGET)}\n`,
-    );
-  }
-
-  return chunks.slice(0, MAX_CHUNKS);
 }
 
 export function toRecords(data: ExtractedProfile): ParseResult {

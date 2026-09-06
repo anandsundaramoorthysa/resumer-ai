@@ -68,14 +68,20 @@ export default async function ProfilePage() {
     <div className="min-h-screen">
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-5 py-3.5">
-          <Link href="/">
+          <Link href="/" className="inline-flex min-h-11 items-center">
             <Logo />
           </Link>
-          <nav className="flex items-center gap-4 text-sm">
-            <Link href="/settings/portfolio" className="text-muted hover:text-ink">
+          <nav className="flex flex-wrap items-center gap-4 text-sm">
+            <Link href="/import" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
+              Import
+            </Link>
+            <Link href="/settings/portfolio" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
               Portfolio
             </Link>
-            <Link href="/" className="text-muted hover:text-ink">
+            <Link href="/settings/application" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
+              Application answers
+            </Link>
+            <Link href="/" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
               Dashboard
             </Link>
           </nav>
@@ -102,12 +108,20 @@ export default async function ProfilePage() {
               the output honest. Connect your portfolio and Resumer AI will read your
               skills, projects and experience from it.
             </p>
-            <Link
-              href="/settings/portfolio"
-              className="mt-5 inline-block rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark"
-            >
-              Connect your portfolio
-            </Link>
+            <div className="mt-5 flex flex-wrap justify-center gap-3">
+              <Link
+                href="/import"
+                className="inline-flex min-h-11 items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+              >
+                Import an existing resume
+              </Link>
+              <Link
+                href="/settings/portfolio"
+                className="inline-flex min-h-11 items-center rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
+              >
+                Connect your portfolio
+              </Link>
+            </div>
           </div>
         ) : null}
 

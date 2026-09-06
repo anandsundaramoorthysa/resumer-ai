@@ -34,6 +34,14 @@
     "mammoth",
   ]
 
+# Scheduled functions are picked up from netlify/functions by their `schedule` export,
+# so there is nothing to declare here. netlify/functions/daily-sync.mts runs at 04:15 UTC
+# and only pings /api/cron/sync — it must stay a trigger, because a real portfolio sync
+# takes minutes and no scheduled function gets minutes.
+#
+# Set CRON_SECRET in the site environment to enable it. Without that variable the route
+# refuses every request, which is the intended default: it walks stored GitHub tokens.
+
 [dev]
   command = "npm run dev"
   targetPort = 3000

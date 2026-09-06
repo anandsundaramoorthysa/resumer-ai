@@ -10,6 +10,7 @@
  */
 
 import type { ProfileRecord, ResumeDocument } from '../types';
+import { holdsKeyword, textHoldsKeyword } from './vocabulary';
 
 export interface SkillsCompletenessResult {
   score: number; // 0..1
@@ -56,8 +57,10 @@ export function scoreSkillsCompleteness(
 
   for (const kw of keywords) {
     const k = norm(kw);
-    const inSkills = skillsText.includes(k);
-    const held = vocab.has(k) || [...vocab].some((v) => v.includes(k) || k.includes(v));
+    // Whole-phrase, one-directional matching (see vocabulary.ts). Substring matching
+    // here previously let a profile containing "SEO" claim "technical SEO".
+    const inSkills = textHoldsKeyword(skillsText, kw);
+    const held = holdsKeyword(vocab, kw);
 
     if (inSkills) present.push(kw);
     else if (held) missingButHeld.push(kw);

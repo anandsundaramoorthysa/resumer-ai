@@ -21,6 +21,7 @@ import { generateStructured } from '../ai/chain';
 import type { DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
 import { formatDate } from '../render/dates';
+import { holdsKeyword } from '../quality/vocabulary';
 
 const ReviseSchema = z.object({
   revisions: z.array(
@@ -105,10 +106,9 @@ function applySkillsFix(
   }
 
   // Only add what the profile actually supports — never invent a skill to score.
-  const additions = missing.filter((m) => {
-    const k = m.toLowerCase();
-    return vocabulary.has(k) || [...vocabulary].some((v) => v.includes(k) || k.includes(v));
-  });
+  // Uses the same one-directional, whole-phrase rule as the scorer, so the gate and the
+  // fix can never disagree about what counts as held.
+  const additions = missing.filter((m) => holdsKeyword(vocabulary, m));
   if (additions.length === 0) return doc;
 
   const section = doc.sections.find((s) => s.key === 'skills');

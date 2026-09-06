@@ -29,12 +29,17 @@ export default async function PortfolioSettingsPage() {
     <div className="min-h-screen">
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-5 py-3.5">
-          <Link href="/">
+          <Link href="/" className="inline-flex min-h-11 items-center">
             <Logo />
           </Link>
-          <Link href="/" className="text-sm text-muted hover:text-ink">
-            Back to dashboard
-          </Link>
+          <nav className="flex flex-wrap items-center gap-4 text-sm">
+            <Link href="/settings/application" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
+              Application answers
+            </Link>
+            <Link href="/" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
+              Back to dashboard
+            </Link>
+          </nav>
         </div>
       </header>
 

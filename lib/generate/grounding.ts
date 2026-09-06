@@ -54,6 +54,29 @@ export interface GroundingViolation {
   token: string;
 }
 
+/** Strips the unit so "40%", "40k" and "40" compare as the same figure. */
+function bareFigure(token: string): string {
+  return token.replace(/[%kmbx+]/g, '');
+}
+
+/**
+ * Whether `figure` occurs in the source as a whole number rather than as a fragment of a
+ * longer one.
+ *
+ * The digit-boundary check is not decoration. Matching by plain substring let an
+ * invented "9x" through because the source happened to mention "p95" — measured at 7
+ * escapes in 1,439 generated fabrications (tests/grounding.test.mts). A guard that leaks
+ * one fabrication in two hundred is not a guarantee, and a guarantee is what NFR-8 says
+ * this is.
+ */
+function containsFigure(source: string, figure: string): boolean {
+  if (!figure) return false;
+  const escaped = figure.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // A trailing sentence period is not a decimal point, so only a following digit — or a
+  // period that is itself followed by one — means the match landed inside a longer figure.
+  return new RegExp(`(?<![\\d.])${escaped}(?!\\d)(?!\\.\\d)`).test(source);
+}
+
 /**
  * Returns the tokens present in `candidate` but absent from `source`.
  * Empty array == the rewrite introduced nothing new.
@@ -68,10 +91,16 @@ export function findUngroundedTokens(
 
   const violations: GroundingViolation[] = [];
 
+  // The same figure written with a different unit ("40%" vs "40 percent") is the same
+  // claim, so units are stripped before comparing — but the comparison is still against
+  // whole figures the source actually states, never against any run of digits inside one.
+  const sourceFigures = new Set([...sourceNumbers].map(bareFigure));
+
   for (const num of extractNumbers(candidate)) {
     if (sourceNumbers.has(num)) continue;
-    // Allow a number that appears verbatim in the source string in any form.
-    if (sourceNorm.includes(num.replace(/[%kmbx+]/g, ''))) continue;
+    const bare = bareFigure(num);
+    if (sourceFigures.has(bare)) continue;
+    if (containsFigure(sourceNorm, bare)) continue;
     violations.push({ kind: 'number', token: num });
   }
 

@@ -107,12 +107,12 @@ export function PortfolioForm({
               name="repo"
               defaultValue={currentRepo ?? ''}
               placeholder="owner/name"
-              className="min-w-0 flex-1 rounded-lg border border-line bg-paper px-3 py-2.5 font-mono text-sm outline-none focus:border-brand"
+              className="min-h-11 min-w-0 flex-1 rounded-lg border border-muted bg-paper px-3 py-2.5 font-mono text-sm outline-none focus:border-brand"
             />
             <button
               type="submit"
               disabled={connecting}
-              className="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+              className="min-h-11 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
             >
               {connecting ? 'Checking…' : currentRepo ? 'Update' : 'Connect'}
             </button>
@@ -153,21 +153,21 @@ export function PortfolioForm({
               type="button"
               onClick={runSync}
               disabled={pending || syncing}
-              className="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+              className="min-h-11 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
             >
               {syncing ? 'Syncing…' : 'Sync now'}
             </button>
             {flaggedCount > 0 ? (
               <Link
                 href="/profile"
-                className="rounded-lg border border-warning px-4 py-2.5 text-sm font-semibold text-warning hover:bg-warning-tint"
+                className="inline-flex min-h-11 items-center rounded-lg border border-warning px-4 py-2.5 text-sm font-semibold text-warning hover:bg-warning-tint"
               >
                 Review {flaggedCount} flagged
               </Link>
             ) : (
               <Link
                 href="/profile"
-                className="rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper"
+                className="inline-flex min-h-11 items-center rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper"
               >
                 View profile
               </Link>
@@ -176,7 +176,7 @@ export function PortfolioForm({
               type="button"
               onClick={runDisconnect}
               disabled={pending}
-              className="rounded-lg px-4 py-2.5 text-sm font-semibold text-muted hover:text-danger disabled:opacity-50"
+              className="min-h-11 rounded-lg px-4 py-2.5 text-sm font-semibold text-muted hover:text-danger disabled:opacity-50"
             >
               Disconnect
             </button>

@@ -22,7 +22,7 @@ export default function SignInPage() {
         >
           <button
             type="submit"
-            className="mt-6 w-full rounded-lg bg-brand px-5 py-3 text-sm font-semibold text-white hover:bg-brand-dark"
+            className="mt-6 w-full rounded-lg bg-brand px-5 py-3 text-sm font-semibold text-on-brand hover:bg-brand-dark"
           >
             Continue with GitHub
           </button>

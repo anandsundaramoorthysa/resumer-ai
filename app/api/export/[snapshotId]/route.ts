@@ -11,7 +11,7 @@ import { and, eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { resumeSnapshots } from '@/lib/db/schema';
-import { renderResumePdf } from '@/lib/render/pdf';
+import { renderPresentationPdf, renderResumePdf } from '@/lib/render/pdf';
 import { renderResumeDocx } from '@/lib/render/docx';
 import { resumeFileName } from '@/lib/render/filename';
 import type { ResumeDocument } from '@/lib/types';
@@ -28,6 +28,14 @@ export async function GET(
 
   const { snapshotId } = await ctx.params;
   const format = req.nextUrl.searchParams.get('format') === 'docx' ? 'docx' : 'pdf';
+  const presentation = req.nextUrl.searchParams.get('mode') === 'presentation';
+
+  // REQ-6.2 is PDF-only. Refusing here rather than quietly falling back to ats-strict:
+  // silently handing someone a different document than the one they asked for is how a
+  // file gets sent to the wrong place.
+  if (presentation && format === 'docx') {
+    return new Response('Presentation mode is PDF-only.', { status: 400 });
+  }
 
   const [row] = await db
     .select()
@@ -42,8 +50,14 @@ export async function GET(
 
   const doc = row.document as unknown as ResumeDocument;
   const buffer =
-    format === 'docx' ? await renderResumeDocx(doc) : await renderResumePdf(doc);
-  const fileName = resumeFileName(doc, format);
+    format === 'docx'
+      ? await renderResumeDocx(doc)
+      : presentation
+        ? await renderPresentationPdf(doc)
+        : await renderResumePdf(doc);
+
+  const base = resumeFileName(doc, format);
+  const fileName = presentation ? base.replace(/\.pdf$/, '_Presentation.pdf') : base;
 
   return new Response(new Uint8Array(buffer), {
     headers: {

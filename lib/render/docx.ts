@@ -43,6 +43,16 @@ function bulletParagraph(text: string): Paragraph {
 }
 
 export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
+  // REQ-6.2 makes presentation mode PDF-only, and this is where that is enforced rather
+  // than merely intended. A DOCX is the format people paste into a portal's own editor,
+  // where the styling is discarded and only the parse survives — so the one variant
+  // whose whole point is styling must not be obtainable in it.
+  if (doc.renderMode === 'presentation') {
+    throw new Error(
+      'Presentation mode is PDF-only. Export the ats-strict version for DOCX.',
+    );
+  }
+
   const children: Paragraph[] = [];
   const c = doc.contact;
 

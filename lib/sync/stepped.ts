@@ -2,14 +2,16 @@ import 'server-only';
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { accounts, contactInfo, syncJobs, users } from '@/lib/db/schema';
+import { fetchPortfolioFiles, latestCommitSha, parseRepoRef } from './github';
 import {
-  fetchPortfolioFiles,
-  latestCommitSha,
-  parseRepoRef,
-  type RepoFile,
-} from './github';
-import { EXTRACTION_PASSES, runPass, toRecords, mergeExtractions } from './parse';
-import type { ExtractedProfile } from './parse';
+  extractFromSlice,
+  mergeExtractions,
+  planSlices,
+  sliceLabel,
+  splitSlice,
+  toRecords,
+} from './parse';
+import type { ExtractedProfile, WorkSlice } from './parse';
 import { applyParsedProfile } from '@/lib/server/profile';
 
 /**
@@ -22,8 +24,13 @@ import { applyParsedProfile } from '@/lib/server/profile';
  * starting over.
  *
  *   step 0            fetch the repo (SHA gate + file download)
- *   steps 1..N        one focused extraction pass each
+ *   steps 1..N        one extraction pass over one slice of the corpus
  *   step N+1          merge, reconcile and write
+ *
+ * Every step is bounded by STEP_BUDGET_MS rather than by hope: the extraction is given
+ * an explicit deadline and the provider chain honours it. A slice that runs out of time
+ * is not lost — it goes back on the queue and is retried a step later, by which point
+ * the provider that stalled is on cooldown and a healthy one takes it.
  */
 
 export interface StepResult {
@@ -36,7 +43,48 @@ export interface StepResult {
   error?: string;
 }
 
-const TOTAL_STEPS = EXTRACTION_PASSES.length + 2;
+/** Provisional; the real count is set once we know how many slices there are. */
+const INITIAL_TOTAL_STEPS = 8;
+
+/**
+ * Wall clock one step may take, end to end.
+ *
+ * Sized against the tightest host in play: Netlify caps a non-streaming function at
+ * 10s. Staying under that is the entire reason this job is stepped, so the budget is
+ * enforced here rather than assumed.
+ */
+const STEP_BUDGET_MS = Number(process.env.SYNC_STEP_BUDGET_MS ?? 8_500);
+
+/** Held back from the budget so the step can always record its own progress. */
+const WRITE_RESERVE_MS = 1_200;
+
+/** Longest any single provider attempt may run inside a step. */
+const ATTEMPT_TIMEOUT_MS = Number(process.env.SYNC_ATTEMPT_TIMEOUT_MS ?? 5_500);
+
+/**
+ * The sync runs on the cheap tier, and not only to save money.
+ *
+ * Measured on real 3.5k slices of this portfolio, per extraction:
+ *   Gemini flash-lite (fast)      1.1-4.0s   reliable
+ *   Groq gpt-oss-120b (standard)  1.5-5.8s   reliable
+ *   Groq gpt-oss-20b (fast)       0.1-2.6s   intermittent schema rejections
+ *   Fireworks (either tier)       3.1-30s    too slow for a 10s step
+ *
+ * Fact counts came out level between the tiers on the same slices (39 vs 38, 37 vs 33),
+ * so the standard tier was buying latency rather than better extraction. It also buys
+ * a specific failure here: this account's Gemini standard quota is exhausted while
+ * flash-lite still answers, and the fast tier is what reaches it.
+ */
+const EXTRACTION_TIER = 'fast' as const;
+
+/**
+ * How many times a slice may be attempted before the job gives up on it.
+ *
+ * Each retry is half the size of the attempt that failed, so three attempts take a
+ * slice down to a quarter of its original length — past the point where running out of
+ * time is about the content rather than the provider.
+ */
+const MAX_SLICE_ATTEMPTS = 3;
 
 export async function startSyncJob(userId: string): Promise<StepResult> {
   // Reuse an in-flight job rather than starting a second one.
@@ -64,7 +112,7 @@ export async function startSyncJob(userId: string): Promise<StepResult> {
       userId,
       status: 'running',
       step: 0,
-      totalSteps: TOTAL_STEPS,
+      totalSteps: INITIAL_TOTAL_STEPS,
       message: 'Checking your portfolio for changes…',
     })
     .returning();
@@ -72,7 +120,7 @@ export async function startSyncJob(userId: string): Promise<StepResult> {
   return {
     jobId: job.id,
     step: 0,
-    totalSteps: TOTAL_STEPS,
+    totalSteps: INITIAL_TOTAL_STEPS,
     status: 'running',
     message: job.message,
     done: false,
@@ -83,6 +131,10 @@ export async function advanceSyncJob(
   userId: string,
   jobId: string,
 ): Promise<StepResult> {
+  // The clock starts before the job row is read, because that read is part of the
+  // step's cost and the budget has to cover the whole request, not just the AI call.
+  const deadlineAt = Date.now() + STEP_BUDGET_MS;
+
   const [job] = await db
     .select()
     .from(syncJobs)
@@ -103,7 +155,7 @@ export async function advanceSyncJob(
   }
 
   try {
-    return await runStep(userId, job);
+    return await runStep(userId, job, deadlineAt);
   } catch (err) {
     const message = err instanceof Error ? err.message.slice(0, 400) : String(err);
     await db
@@ -124,13 +176,21 @@ export async function advanceSyncJob(
 
 type Job = typeof syncJobs.$inferSelect;
 
-async function runStep(userId: string, job: Job): Promise<StepResult> {
+async function runStep(
+  userId: string,
+  job: Job,
+  deadlineAt: number,
+): Promise<StepResult> {
   const finish = async (patch: Partial<Job>, res: Omit<StepResult, 'jobId' | 'totalSteps'>) => {
     await db
       .update(syncJobs)
       .set({ ...patch, updatedAt: new Date() })
       .where(eq(syncJobs.id, job.id));
-    return { jobId: job.id, totalSteps: job.totalSteps, ...res };
+    return {
+      jobId: job.id,
+      totalSteps: patch.totalSteps ?? job.totalSteps,
+      ...res,
+    };
   };
 
   // ---------------------------------------------------------- step 0: fetch --
@@ -165,12 +225,20 @@ async function runStep(userId: string, job: Job): Promise<StepResult> {
       );
     }
 
+    const slices = planSlices(files);
+    if (slices.length === 0) {
+      throw new Error(
+        'The content files in that repository are all empty. Check the repo has your profile data in it.',
+      );
+    }
+
     return finish(
       {
         step: 1,
         sha,
-        corpus: files,
-        message: `Read ${files.length} files — extracting ${EXTRACTION_PASSES[0].label}…`,
+        corpus: slices,
+        totalSteps: slices.length + 2,
+        message: `Read ${files.length} files — reading ${sliceLabel(slices[0])}…`,
       },
       {
         step: 1,
@@ -181,48 +249,67 @@ async function runStep(userId: string, job: Job): Promise<StepResult> {
     );
   }
 
-  // ------------------------------------------- steps 1..N: extraction passes --
-  const passIndex = job.step - 1;
-  if (passIndex < EXTRACTION_PASSES.length) {
-    const pass = EXTRACTION_PASSES[passIndex];
-    const corpus = (job.corpus ?? []) as RepoFile[];
+  // ---------------------------------------------- steps 1..N: one slice each --
+  const queue = (job.corpus ?? []) as WorkSlice[];
+  const index = job.step - 1;
 
-    // One pass at a time: running them concurrently hit provider rate limits and made
-    // several passes fail outright, which is worse than taking a few seconds longer.
+  if (index < queue.length) {
+    const slice = queue[index];
+    const label = sliceLabel(slice);
+    const attempt = slice.attempt ?? 0;
+
     let partial: Record<string, unknown> | null = null;
+    let failure: string | null = null;
     try {
-      partial = (await runPass(pass, corpus)) as Record<string, unknown>;
-    } catch {
-      // A failed pass loses only its own category. Skills surviving while
-      // certifications fail is a far better outcome than an all-or-nothing sync.
-      partial = null;
+      partial = (await extractFromSlice(slice, {
+        tier: EXTRACTION_TIER,
+        deadlineMs: Math.max(0, deadlineAt - WRITE_RESERVE_MS - Date.now()),
+        timeoutMs: ATTEMPT_TIMEOUT_MS,
+      })) as Record<string, unknown>;
+    } catch (err) {
+      // One unreadable slice costs only itself. Losing a single module is far better
+      // than failing a sync that has already read nine others correctly.
+      failure = err instanceof Error ? err.message : String(err);
     }
 
+    // Re-queue rather than discard, and re-queue smaller. The chain has benched
+    // whichever provider just ran out of time, so the retry lands on a different one —
+    // and halving the content means it is a smaller question when it gets there.
+    const requeue = failure !== null && attempt + 1 < MAX_SLICE_ATTEMPTS;
+    const retries = requeue
+      ? splitSlice(slice).map((part) => ({ ...part, attempt: attempt + 1 }))
+      : [];
+    const nextQueue = retries.length > 0 ? [...queue, ...retries] : queue;
+
     const nextStep = job.step + 1;
-    const nextLabel =
-      passIndex + 1 < EXTRACTION_PASSES.length
-        ? EXTRACTION_PASSES[passIndex + 1].label
-        : 'saving';
+    const next = nextQueue[index + 1];
 
     return finish(
       {
         step: nextStep,
+        corpus: retries.length > 0 ? nextQueue : undefined,
+        totalSteps: nextQueue.length + 2,
         partials: [...(job.partials ?? []), ...(partial ? [partial] : [])],
-        message: `Extracted ${pass.label} — next: ${nextLabel}…`,
+        message: next ? `Read ${label} — next: ${sliceLabel(next)}…` : 'Saving…',
       },
       {
         step: nextStep,
         status: 'running',
-        message: partial
-          ? `Extracted ${pass.label}`
-          : `Couldn't read ${pass.label} — continuing with the rest`,
+        message: failure
+          ? requeue
+            ? `${label} timed out — will retry`
+            : `Skipped ${label}`
+          : `Read ${label}`,
         done: false,
       },
     );
   }
 
   // --------------------------------------------- final step: merge and write --
-  const merged = mergeExtractions((job.partials ?? []) as ExtractedProfile[]);
+  const totalSteps = queue.length + 2;
+  const merged = mergeExtractions(
+    (job.partials ?? []) as Array<Partial<ExtractedProfile>>,
+  );
   const parsed = toRecords(merged);
   const summary = await applyParsedProfile(userId, parsed, job.sha ?? null);
 
@@ -254,8 +341,8 @@ async function runStep(userId: string, job: Job): Promise<StepResult> {
   }
 
   return finish(
-    { status: 'done', step: job.totalSteps, message: summary, corpus: null },
-    { step: job.totalSteps, status: 'done', message: summary, done: true },
+    { status: 'done', step: totalSteps, totalSteps, message: summary, corpus: null },
+    { step: totalSteps, status: 'done', message: summary, done: true },
   );
 }
 

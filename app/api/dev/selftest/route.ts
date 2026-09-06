@@ -9,7 +9,7 @@
  * 404s in production.
  */
 
-import { renderResumePdf } from '@/lib/render/pdf';
+import { renderPresentationPdf, renderResumePdf } from '@/lib/render/pdf';
 import { renderResumeDocx } from '@/lib/render/docx';
 import { selfTest } from '@/lib/render/selftest';
 import { resumeFileName } from '@/lib/render/filename';
@@ -80,20 +80,37 @@ export async function GET() {
   }
 
   const started = Date.now();
-  const [pdf, docx] = await Promise.all([
+  const [pdf, docx, presentation] = await Promise.all([
     renderResumePdf(FIXTURE),
     renderResumeDocx(FIXTURE),
+    renderPresentationPdf(FIXTURE),
   ]);
 
-  const [pdfTest, docxTest] = await Promise.all([
+  const [pdfTest, docxTest, presentationTest] = await Promise.all([
     selfTest(pdf, 'pdf', FIXTURE),
     selfTest(docx, 'docx', FIXTURE),
+    // The presentation variant is not for a parser (REQ-6.2), but it is still checked:
+    // the icons are vector geometry, so every contact value must survive as text. If
+    // this ever fails, the icons stopped being decoration and started replacing content.
+    selfTest(presentation, 'pdf', FIXTURE),
   ]);
 
   const formatting = scoreFormatting(FIXTURE);
 
+  let docxRefusedPresentation = false;
+  try {
+    await renderResumeDocx({ ...FIXTURE, renderMode: 'presentation' });
+  } catch {
+    docxRefusedPresentation = true;
+  }
+
   return Response.json({
-    ok: pdfTest.passed && docxTest.passed && formatting.violations.length === 0,
+    ok:
+      pdfTest.passed &&
+      docxTest.passed &&
+      presentationTest.passed &&
+      docxRefusedPresentation &&
+      formatting.violations.length === 0,
     tookMs: Date.now() - started,
     formatting: {
       score: formatting.score,
@@ -114,6 +131,14 @@ export async function GET() {
       issues: docxTest.issues,
       fileName: resumeFileName(FIXTURE, 'docx'),
       textPreview: docxTest.extractedText.replace(/\s+/g, ' ').slice(0, 320),
+    },
+    presentationPdf: {
+      bytes: presentation.length,
+      passed: presentationTest.passed,
+      extractedChars: presentationTest.extractedChars,
+      issues: presentationTest.issues,
+      docxRefused: docxRefusedPresentation,
+      textPreview: presentationTest.extractedText.replace(/\s+/g, ' ').slice(0, 320),
     },
   });
 }

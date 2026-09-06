@@ -25,6 +25,12 @@ up to 4 times. Three of the four checks are pure code, so they can't hallucinate
 have, no rewrite can close that honestly — so it stops, shows the best version it made,
 and tells you exactly what's capping the score instead of inventing experience.
 
+**Getting your profile in doesn't start from scratch.** Upload an existing resume (PDF
+or DOCX) at `/import` and it's read into the individual facts behind it — skills, roles,
+bullets, projects, qualifications — and shown to you for approval. Nothing is stored
+until you tick it, because these records are the only thing the generator is allowed to
+say about you.
+
 **The ATS rules are mechanical, not folklore.** Single column, no icons, contact details
 in the document body (never a header/footer, which many parsers skip), spelled-out dates
 (numeric ones parse differently by locale), plain bullet characters, and section headings
@@ -71,13 +77,20 @@ npm run dev
 ## Verifying it works
 
 ```bash
+npm test                      # 95 assertions: scorers, grounding property tests, known-bad
+                              # documents, importer chunking and merge
 npx tsx scripts/smoke.mts     # 18 checks: scorers, grounding guard, retrieval, sync, DOCX round-trip
 npx tsx scripts/ai-check.mts  # confirms your AI provider chain actually responds
 ```
 
-With the dev server running, `GET /api/dev/selftest` renders a fixture resume to PDF and
-DOCX, parses both back to text, and returns exactly what an ATS would read. (Dev only —
-404s in production.)
+`tests/grounding.test.mts` is the one worth knowing about: it generates thousands of
+source/rewrite pairs and asserts that every number and proper noun in an *accepted*
+rewrite came from the source, checked by a second scanner written independently of the
+guard. It has already caught a real leak.
+
+With the dev server running, `GET /api/dev/selftest` renders a fixture resume to PDF,
+DOCX and presentation-mode PDF, parses all three back to text, and returns exactly what
+an ATS would read. (Dev only — 404s in production.)
 
 ---
 
@@ -136,8 +149,11 @@ lib/
   quality/    keyword gate, formatting, skills, evidence, the loop
   render/     PDF, DOCX, headings, dates, filenames, round-trip self-test
   sync/       GitHub SHA gate, portfolio parsing, reconciliation
+  import/     old-resume upload: text extraction, chunked AI pass, confirmed commit
   server/     database access, dashboard queries
 scripts/      smoke tests
+tests/        scorer units, grounding property tests, known-bad documents (`npm test`)
+netlify/      scheduled function: daily portfolio-freshness check
 specs/        requirements, design, tasks
 ```
 

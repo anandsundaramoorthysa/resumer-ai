@@ -137,7 +137,7 @@ export function DraftConsole() {
           placeholder="Paste a job URL, description, or LinkedIn post here…"
           rows={5}
           disabled={running}
-          className="mt-4 w-full resize-y rounded-xl border border-line bg-paper px-3.5 py-3 text-sm outline-none placeholder:text-muted focus:border-brand disabled:opacity-60"
+          className="mt-4 w-full resize-y rounded-xl border border-muted bg-paper px-3.5 py-3 text-sm outline-none placeholder:text-muted focus:border-brand disabled:opacity-60"
         />
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -148,7 +148,7 @@ export function DraftConsole() {
             type="button"
             onClick={start}
             disabled={running || jobInput.trim().length < 3}
-            className="rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-11 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
             {running ? 'Drafting…' : 'Draft resume →'}
           </button>
@@ -161,7 +161,9 @@ export function DraftConsole() {
             Live progress
           </h3>
 
-          <ol className="mt-4 space-y-0">
+          {/* REQ-8.1 is a live view, and "live" has to mean live for a screen reader
+              too — polite so each stage is announced without interrupting. */}
+          <ol className="mt-4 space-y-0" aria-live="polite" aria-busy={running}>
             {startedStages.map((stage) => {
               const event = latestByStage.get(stage);
               const isScore = stage === 'score';
@@ -172,7 +174,10 @@ export function DraftConsole() {
                   <div className="flex items-start gap-3">
                     <StatusDot status={status} />
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium">{STAGE_LABELS[stage]}</div>
+                      <div className="text-sm font-medium">
+                        {STAGE_LABELS[stage]}
+                        <span className="sr-only"> — {STATUS_WORDS[status]}</span>
+                      </div>
 
                       {isScore && scoreRows.length > 0 && (
                         <ul className="mt-1.5 space-y-1">
@@ -201,7 +206,7 @@ export function DraftConsole() {
           </ol>
 
           {error && (
-            <p className="mt-4 rounded-lg bg-danger-tint px-3 py-2.5 text-sm text-danger">
+            <p role="alert" className="mt-4 rounded-lg bg-danger-tint px-3 py-2.5 text-sm text-danger">
               {error}
             </p>
           )}
@@ -213,14 +218,24 @@ export function DraftConsole() {
   );
 }
 
+const STATUS_WORDS: Record<'running' | 'done' | 'error', string> = {
+  running: 'in progress',
+  done: 'done',
+  error: 'failed',
+};
+
+/**
+ * The mark is decorative: the same status is spelled out in the sr-only text beside the
+ * stage name, so nothing here is carried by shape or colour alone (WCAG 1.4.1).
+ */
 function StatusDot({ status }: { status: 'running' | 'done' | 'error' }) {
   const base = 'mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full text-[11px]';
   if (status === 'done')
-    return <span className={`${base} bg-success-tint text-success`}>✓</span>;
+    return <span aria-hidden className={`${base} bg-success-tint text-success`}>✓</span>;
   if (status === 'error')
-    return <span className={`${base} bg-danger-tint text-danger`}>!</span>;
+    return <span aria-hidden className={`${base} bg-danger-tint text-danger`}>!</span>;
   return (
-    <span className={`${base} bg-brand-tint text-brand-dark`}>
+    <span aria-hidden className={`${base} bg-brand-tint text-brand-dark`}>
       <span className="font-mono">·</span>
     </span>
   );
@@ -275,15 +290,23 @@ function ResultCard({ result }: { result: CompletePayload }) {
       )}
 
       <div className="mt-5 flex flex-wrap gap-3">
+        {/* Review leads, deliberately. Downloading straight from the generator asks you
+            to trust it sight-unseen on something this consequential. */}
+        <a
+          href={`/resume/${result.snapshotId}`}
+          className="inline-flex min-h-11 items-center rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+        >
+          Review &amp; edit →
+        </a>
         <a
           href={`/api/export/${result.snapshotId}?format=pdf`}
-          className="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark"
+          className="inline-flex min-h-11 items-center rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper"
         >
           Download PDF
         </a>
         <a
           href={`/api/export/${result.snapshotId}?format=docx`}
-          className="rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper"
+          className="inline-flex min-h-11 items-center rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper"
         >
           Download DOCX
         </a>

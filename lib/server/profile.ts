@@ -6,7 +6,7 @@
  */
 
 import 'server-only';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
   accounts,
@@ -27,6 +27,7 @@ import type {
 import type { PipelineOutput } from '@/lib/pipeline/run';
 import { latestCommitSha, parseRepoRef } from '@/lib/sync/github';
 import type { ParseResult } from '@/lib/sync/parse';
+import type { ParsedRecord } from '@/lib/sync/reconcile';
 import { hashContent, reconcile, summarizePlan } from '@/lib/sync/reconcile';
 
 export interface LoadedProfile {
@@ -147,71 +148,124 @@ export async function applyParsedProfile(
   parsed: ParseResult,
   sha: string | null,
 ): Promise<string> {
+  // Roles first. The parser can only refer to a role by its content hash, but
+  // lib/generate/assemble.ts groups bullets by real role id — so the hashes have to be
+  // exchanged for row ids before any bullet is written, or every bullet lands in the
+  // orphan bucket and the experience section comes out empty.
+  const roleIdByHash = await syncRoles(userId, parsed.roles);
+  const records = parsed.records.map((rec) => {
+    const bullet = rec as unknown as { type: string; roleId?: string };
+    if (bullet.type !== 'experience-bullet' || !bullet.roleId) return rec;
+    const roleId = roleIdByHash.get(bullet.roleId);
+    return roleId ? ({ ...rec, roleId } as ParsedRecord) : rec;
+  });
+
   const existing = (
     await db.select().from(profileRecords).where(eq(profileRecords.userId, userId))
   ).map(rowToRecord);
 
-  const plan = reconcile(existing, parsed.records);
+  const plan = reconcile(existing, records);
 
-  for (const rec of plan.toInsert) {
-    const { type, tags, contentHash, ...data } = rec as unknown as Record<string, unknown> & {
-      type: string;
-      tags: string[];
-      contentHash: string;
+  // Everything below is batched deliberately. One statement per record measured at
+  // 34s for a 150-record portfolio — three times the whole step budget — and almost
+  // all of it was round-trip latency to a remote database rather than real work.
+  const audits: Array<{
+    userId: string;
+    recordId: string | null;
+    action: string;
+    source: string;
+    diff: Record<string, unknown>;
+  }> = [];
+
+  // Deduped in place so the summary reports rows actually written. Two slices of one
+  // file can yield the same fact, and counting the plan rather than the result made the
+  // sync tell the user "163 added" when 161 rows landed.
+  plan.toInsert = dedupeByHash(plan.toInsert);
+
+  const inserts = plan.toInsert.map((rec) => {
+    const { type, tags, contentHash, ...data } = rec as unknown as Record<
+      string,
+      unknown
+    > & { type: string; tags: string[]; contentHash: string };
+    audits.push({
+      userId,
+      recordId: null,
+      action: 'create',
+      source: 'github-sync',
+      diff: { type },
+    });
+    return {
+      userId,
+      type,
+      source: 'github-sync',
+      contentHash,
+      tags: tags ?? [],
+      data: data as Record<string, unknown>,
     };
-    await db
-      .insert(profileRecords)
-      .values({
-        userId,
-        type,
-        source: 'github-sync',
-        contentHash,
-        tags: tags ?? [],
-        data: data as Record<string, unknown>,
-      })
-      .onConflictDoNothing();
-    await audit(userId, null, 'create', 'github-sync', { type });
+  });
+
+  for (const chunk of chunked(inserts, 100)) {
+    await db.insert(profileRecords).values(chunk).onConflictDoNothing();
   }
 
-  for (const { id, parsed: rec } of plan.toUpdate) {
-    const { type, tags, contentHash, ...data } = rec as unknown as Record<string, unknown> & {
-      type: string;
-      tags: string[];
-      contentHash: string;
-    };
-    await db
-      .update(profileRecords)
-      .set({
-        contentHash,
-        tags: tags ?? [],
-        data: data as Record<string, unknown>,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(profileRecords.id, id), eq(profileRecords.source, 'github-sync')));
-    await audit(userId, id, 'update', 'github-sync', { type });
+  // Updates each target one row by id, so they can't collapse into a single statement
+  // — but they can go out concurrently instead of one round trip at a time.
+  for (const chunk of chunked(plan.toUpdate, 20)) {
+    await Promise.all(
+      chunk.map(({ id, parsed: rec }) => {
+        const { type, tags, contentHash, ...data } = rec as unknown as Record<
+          string,
+          unknown
+        > & { type: string; tags: string[]; contentHash: string };
+        audits.push({
+          userId,
+          recordId: id,
+          action: 'update',
+          source: 'github-sync',
+          diff: { type },
+        });
+        return db
+          .update(profileRecords)
+          .set({
+            contentHash,
+            tags: tags ?? [],
+            data: data as Record<string, unknown>,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(eq(profileRecords.id, id), eq(profileRecords.source, 'github-sync')),
+          );
+      }),
+    );
   }
 
-  for (const { id, reason } of plan.toFlag) {
+  // Flagging sets the same value on every row, so it really is one statement.
+  for (const chunk of chunked(plan.toFlag, 200)) {
     await db
       .update(profileRecords)
       .set({ flaggedForRemoval: true, updatedAt: new Date() })
-      .where(and(eq(profileRecords.id, id), eq(profileRecords.source, 'github-sync')));
-    await audit(userId, id, 'flag-removed', 'github-sync', { reason });
+      .where(
+        and(
+          inArray(
+            profileRecords.id,
+            chunk.map((f) => f.id),
+          ),
+          eq(profileRecords.source, 'github-sync'),
+        ),
+      );
+    for (const { id, reason } of chunk) {
+      audits.push({
+        userId,
+        recordId: id,
+        action: 'flag-removed',
+        source: 'github-sync',
+        diff: { reason },
+      });
+    }
   }
 
-  for (const role of parsed.roles) {
-    await db
-      .insert(rolesTable)
-      .values({
-        userId,
-        title: role.title,
-        company: role.company,
-        startDate: role.startDate,
-        endDate: role.endDate,
-        source: 'github-sync',
-        contentHash: role.contentHash,
-      })
-      .onConflictDoNothing();
+  for (const chunk of chunked(audits, 200)) {
+    await db.insert(auditLog).values(chunk);
   }
 
   if (sha) {
@@ -222,6 +276,72 @@ export async function applyParsedProfile(
   }
 
   return summarizePlan(plan);
+}
+
+/**
+ * Inserts roles that aren't already stored and returns contentHash -> row id for all
+ * of them, new and existing.
+ *
+ * The `role` table has no unique constraint on contentHash, so the previous
+ * `onConflictDoNothing()` was a no-op: every sync appended a fresh copy of every role.
+ * De-duplication has to happen here, in code, against what is already stored.
+ */
+async function syncRoles(
+  userId: string,
+  roles: ParseResult['roles'],
+): Promise<Map<string, string>> {
+  const stored = await db
+    .select({ id: rolesTable.id, contentHash: rolesTable.contentHash })
+    .from(rolesTable)
+    .where(eq(rolesTable.userId, userId));
+
+  const idByHash = new Map(stored.map((r) => [r.contentHash, r.id]));
+
+  const pending: ParseResult['roles'] = [];
+  for (const role of roles) {
+    if (idByHash.has(role.contentHash)) continue;
+    if (pending.some((r) => r.contentHash === role.contentHash)) continue;
+    pending.push(role);
+  }
+
+  for (const chunk of chunked(pending, 100)) {
+    const inserted = await db
+      .insert(rolesTable)
+      .values(
+        chunk.map((role) => ({
+          userId,
+          title: role.title,
+          company: role.company,
+          startDate: role.startDate,
+          endDate: role.endDate,
+          source: 'github-sync',
+          contentHash: role.contentHash,
+        })),
+      )
+      .returning({ id: rolesTable.id, contentHash: rolesTable.contentHash });
+    for (const row of inserted) idByHash.set(row.contentHash, row.id);
+  }
+
+  return idByHash;
+}
+
+/**
+ * Drops repeats within one batch. `profile_record` is unique on (userId, contentHash),
+ * and two slices of the same file can legitimately yield the same fact.
+ */
+function dedupeByHash(records: ParsedRecord[]): ParsedRecord[] {
+  const seen = new Set<string>();
+  return records.filter((r) => {
+    if (seen.has(r.contentHash)) return false;
+    seen.add(r.contentHash);
+    return true;
+  });
+}
+
+function chunked<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 /* ------------------------------------------------------------- persistence -- */

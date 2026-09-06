@@ -14,7 +14,7 @@ import { createTogetherAI } from '@ai-sdk/togetherai';
 import { createFireworks } from '@ai-sdk/fireworks';
 import { z } from 'zod';
 
-import { availableProviders, type ProviderConfig } from './models';
+import { availableProviders, type ProviderConfig, type ProviderId } from './models';
 import { BudgetExceededError, DraftBudget } from './budget';
 
 export class AllProvidersFailedError extends Error {
@@ -61,6 +61,16 @@ export interface CallOptions {
    * next provider is almost always faster than waiting it out.
    */
   timeoutMs?: number;
+  /**
+   * Wall-clock cap for the WHOLE call, across every provider and both paths.
+   *
+   * A per-attempt cap alone doesn't bound anything useful: five providers times two
+   * paths times a 25s attempt is over four minutes, and portfolio extraction measured
+   * exactly that shape — single steps of 140s and 122s while the caller only had ten
+   * seconds to give. Callers that run inside a request have a real deadline, so they
+   * state it here and the chain stops trying rather than overrunning it.
+   */
+  deadlineMs?: number;
 }
 
 const DEFAULT_ATTEMPT_TIMEOUT_MS = Number(
@@ -70,6 +80,100 @@ const DEFAULT_ATTEMPT_TIMEOUT_MS = Number(
 interface Attempt {
   provider: string;
   error: string;
+}
+
+/**
+ * Short-lived cooldown for providers that report quota or rate-limit errors.
+ *
+ * Without this, an exhausted provider sitting at the front of the chain is retried on
+ * every single call — measured as the dominant cost once a free tier ran out, because
+ * each doomed attempt burned its full timeout before falling through. A provider that
+ * just told us it's out of quota will still be out of quota a second later, so we skip
+ * it for a while instead of asking again.
+ */
+const cooldownUntil = new Map<ProviderId, number>();
+const COOLDOWN_MS = Number(process.env.AI_PROVIDER_COOLDOWN_MS ?? 120_000);
+
+/**
+ * A shorter cooldown for providers that simply ran out of time.
+ *
+ * Measured: Together AI answers correctly but takes 8-11s for an extraction, so under
+ * a per-step budget it times out every single time — and, being neither a quota error
+ * nor a hard failure, it would otherwise be re-tried at full cost on every call. One
+ * timeout is enough evidence to stop asking for a while.
+ */
+const SLOW_COOLDOWN_MS = Number(process.env.AI_SLOW_COOLDOWN_MS ?? 60_000);
+
+/** The smallest attempt worth starting; below this a call cannot realistically land. */
+const MIN_ATTEMPT_MS = 800;
+
+const QUOTA_SIGNATURES = [
+  'exceeded your current quota',
+  'rate limit',
+  'rate_limit',
+  'too many requests',
+  'quota',
+  'insufficient_quota',
+  'resource_exhausted',
+  '429',
+];
+
+function isQuotaError(message: string): boolean {
+  const m = message.toLowerCase();
+  return QUOTA_SIGNATURES.some((s) => m.includes(s));
+}
+
+const TIMEOUT_SIGNATURES = [
+  'aborted',
+  'abort',
+  'timeout',
+  'timed out',
+  'etimedout',
+];
+
+function isTimeoutError(message: string): boolean {
+  const m = message.toLowerCase();
+  return TIMEOUT_SIGNATURES.some((s) => m.includes(s));
+}
+
+/**
+ * @param cutShort true when the caller's overall deadline, not the provider, ended the
+ * attempt. That says nothing about the provider's health, so it must not earn a
+ * cooldown — otherwise a tight budget would slowly bench every provider we have.
+ */
+function noteFailure(id: ProviderId, message: string, cutShort = false): boolean {
+  if (isQuotaError(message)) {
+    cooldownUntil.set(id, Date.now() + COOLDOWN_MS);
+    return true;
+  }
+  if (!cutShort && isTimeoutError(message)) {
+    cooldownUntil.set(id, Date.now() + SLOW_COOLDOWN_MS);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * How long the next attempt may take: the smaller of the per-attempt cap and whatever
+ * is left of the caller's overall deadline.
+ */
+function attemptWindow(
+  deadlineAt: number,
+  perAttemptMs: number,
+): { ms: number; viable: boolean; cutShort: boolean } {
+  const left = deadlineAt - Date.now();
+  const ms = Math.min(perAttemptMs, left);
+  return { ms, viable: ms >= MIN_ATTEMPT_MS, cutShort: left < perAttemptMs };
+}
+
+/** Providers that are configured and not currently cooling down. */
+function usableProviders(): ProviderConfig[] {
+  const all = availableProviders();
+  const now = Date.now();
+  const ready = all.filter((p) => (cooldownUntil.get(p.id) ?? 0) <= now);
+  // If everything is cooling down, try anyway rather than failing outright — a stale
+  // cooldown must never be the reason a request gets no answer at all.
+  return ready.length > 0 ? ready : all;
 }
 
 /**
@@ -88,12 +192,22 @@ export async function generateStructured<T>(args: {
     budget,
     temperature = 0.2,
     timeoutMs = DEFAULT_ATTEMPT_TIMEOUT_MS,
+    deadlineMs,
   } = options;
-  const providers = availableProviders();
+  const deadlineAt = deadlineMs ? Date.now() + deadlineMs : Infinity;
+  const providers = usableProviders();
   const attempts: Attempt[] = [];
+
+  // Providers benched by a failure inside THIS call. Kept separate from the global
+  // cooldown map on purpose: usableProviders() deliberately hands back everything when
+  // every provider is cooling down, and that safety valve must not be re-closed here.
+  const benched = new Set<ProviderId>();
 
   for (const cfg of providers) {
     budget?.assertCanSpend();
+
+    const a = attemptWindow(deadlineAt, timeoutMs);
+    if (!a.viable) break;
 
     // Path A — native structured output. Clean when the provider supports it.
     try {
@@ -104,14 +218,24 @@ export async function generateStructured<T>(args: {
         prompt,
         temperature,
         maxRetries: options.maxRetriesPerProvider ?? 1,
-        abortSignal: AbortSignal.timeout(timeoutMs),
+        abortSignal: AbortSignal.timeout(a.ms),
       });
       budget?.record(result.usage?.totalTokens ?? 0);
       return { data: result.object as T, provider: cfg.label };
     } catch (err) {
       if (err instanceof BudgetExceededError) throw err;
-      attempts.push({ provider: cfg.label, error: errText(err) });
+      const msg = errText(err);
+      if (noteFailure(cfg.id, msg, a.cutShort)) benched.add(cfg.id);
+      attempts.push({ provider: cfg.label, error: msg });
     }
+
+    // Path A just benched this provider — it is out of quota, or too slow to be worth
+    // the wait. Asking the very same provider again, immediately, cannot succeed, and
+    // that doubled cost was a measured part of why extraction overran its budget.
+    if (benched.has(cfg.id)) continue;
+
+    const b = attemptWindow(deadlineAt, timeoutMs);
+    if (!b.viable) break;
 
     // Path B — ask for JSON as text, then parse and validate ourselves.
     //
@@ -128,7 +252,7 @@ export async function generateStructured<T>(args: {
         prompt: `${prompt}\n\nReturn JSON matching this shape:\n${describeSchema(schema)}`,
         temperature,
         maxRetries: options.maxRetriesPerProvider ?? 1,
-        abortSignal: AbortSignal.timeout(timeoutMs),
+        abortSignal: AbortSignal.timeout(b.ms),
       });
       budget?.record(result.usage?.totalTokens ?? 0);
 
@@ -145,7 +269,9 @@ export async function generateStructured<T>(args: {
       });
     } catch (err) {
       if (err instanceof BudgetExceededError) throw err;
-      attempts.push({ provider: `${cfg.label} (json)`, error: errText(err) });
+      const msg = errText(err);
+      if (noteFailure(cfg.id, msg, b.cutShort)) benched.add(cfg.id);
+      attempts.push({ provider: `${cfg.label} (json)`, error: msg });
     }
   }
 
@@ -197,12 +323,18 @@ export async function generatePlainText(args: {
     budget,
     temperature = 0.3,
     timeoutMs = DEFAULT_ATTEMPT_TIMEOUT_MS,
+    deadlineMs,
   } = options;
-  const providers = availableProviders();
+  const deadlineAt = deadlineMs ? Date.now() + deadlineMs : Infinity;
+  const providers = usableProviders();
   const attempts: Attempt[] = [];
 
   for (const cfg of providers) {
     budget?.assertCanSpend();
+
+    const a = attemptWindow(deadlineAt, timeoutMs);
+    if (!a.viable) break;
+
     try {
       const result = await generateText({
         model: resolveModel(cfg, tier),
@@ -210,13 +342,15 @@ export async function generatePlainText(args: {
         prompt,
         temperature,
         maxRetries: options.maxRetriesPerProvider ?? 1,
-        abortSignal: AbortSignal.timeout(timeoutMs),
+        abortSignal: AbortSignal.timeout(a.ms),
       });
       budget?.record(result.usage?.totalTokens ?? 0);
       return { text: result.text, provider: cfg.label };
     } catch (err) {
       if (err instanceof BudgetExceededError) throw err;
-      attempts.push({ provider: cfg.label, error: errText(err) });
+      const msg = errText(err);
+      noteFailure(cfg.id, msg, a.cutShort);
+      attempts.push({ provider: cfg.label, error: msg });
     }
   }
 

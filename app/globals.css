@@ -2,10 +2,25 @@
 
 /**
  * Tidewater v2 — the palette from PLAN.md §9, with every text color verified against
- * WCAG AA (4.5:1) rather than assumed. The gold and warning shades are deliberately
- * darker than they "look right" at a glance: the brighter versions measured 3.24:1 and
- * 3.34:1 on white, which fails for normal text. `--color-gold-bright` exists for
- * large/decorative use only and must never carry small standalone text.
+ * WCAG AA (4.5:1) by calculation rather than assumed (NFR-4). The gold and warning shades
+ * are deliberately darker than they "look right" at a glance: the brighter versions
+ * measured 3.24:1 and 3.34:1 on white, which fails for normal text. `--color-gold-bright`
+ * exists for large/decorative use only and must never carry small standalone text.
+ *
+ * The status colors are checked against their OWN tint, not only against white. A badge
+ * is where they are actually used, and that is the tighter pair: at the previous values
+ * gold/gold-tint measured 4.20:1, warning/warning-tint 4.26:1 and danger/danger-tint
+ * 4.42:1 — all readable-looking, all failing. Each was darkened by a few percent until
+ * its badge cleared 4.5:1; nothing else about the palette moved.
+ *
+ * `--color-on-brand` exists because white is not a safe foreground in both themes. On the
+ * light brand it measures 4.95:1, but on the dark theme's lighter brand it collapses to
+ * 2.93:1 — so every primary button in dark mode was failing. The token flips to near-black
+ * there (6.37:1 on brand, 9.71:1 on brand-dark) instead.
+ *
+ * `--color-line` is 1.25:1 and stays that way: it draws card edges and dividers, which are
+ * decorative under WCAG 1.4.11. Form controls need a 3:1 boundary and use `border-muted`
+ * (6.13:1 light, 6.42:1 dark) rather than this.
  */
 @theme {
   --color-paper: #f5f6f8;
@@ -17,16 +32,17 @@
   --color-brand: #0e7c86;
   --color-brand-dark: #0a5f67;
   --color-brand-tint: #e4f1f1;
+  --color-on-brand: #ffffff;
 
-  --color-gold: #96691d;
+  --color-gold: #8f641c;
   --color-gold-bright: #c9922f;
   --color-gold-tint: #f6eedd;
 
   --color-success: #197a42;
   --color-success-tint: #e5f4eb;
-  --color-warning: #a85f12;
+  --color-warning: #a15b11;
   --color-warning-tint: #fbeedd;
-  --color-danger: #c43d3d;
+  --color-danger: #c23c3c;
   --color-danger-tint: #fbeaea;
 
   --font-display: 'Instrument Serif', Georgia, serif;
@@ -45,6 +61,7 @@
     --color-brand: #2ba6af;
     --color-brand-dark: #6fc9d0;
     --color-brand-tint: #17313f;
+    --color-on-brand: #0c1416;
 
     --color-gold: #d8ae5e;
     --color-gold-bright: #e0bc7c;
