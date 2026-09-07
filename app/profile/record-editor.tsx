@@ -14,6 +14,7 @@
 import { useState, useTransition } from 'react';
 import {
   RECORD_FORMS,
+  articleFor,
   coerceFormValues,
   describeRecord,
   missingRequired,
@@ -225,7 +226,7 @@ export function RecordEditor({
           }}
           className="mt-3 min-h-11 rounded-lg border border-line px-3.5 text-sm font-semibold hover:bg-paper"
         >
-          + Add a {form.singular}
+          + Add {articleFor(form.singular)} {form.singular}
         </button>
       )}
 

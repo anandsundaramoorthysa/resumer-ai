@@ -273,6 +273,19 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
  */
 export const EDITABLE_TYPES = Object.keys(RECORD_FORMS);
 
+/**
+ * "a" or "an", from the noun that follows.
+ *
+ * The add buttons are built as `+ Add a {singular}`, which rendered "+ Add a article" and
+ * "+ Add a award" — visible on the profile page to every user, on two of the twelve
+ * types. Vowel-initial is the whole rule here: these nouns are a fixed, curated list, so
+ * there is no need for the heuristics that make this hard in general ("a university",
+ * "an hour"), and adding one is a decision someone makes rather than a guess.
+ */
+export function articleFor(noun: string): 'a' | 'an' {
+  return /^[aeiou]/i.test(noun.trim()) ? 'an' : 'a';
+}
+
 export function formFor(type: string): RecordForm | null {
   return RECORD_FORMS[type] ?? null;
 }
