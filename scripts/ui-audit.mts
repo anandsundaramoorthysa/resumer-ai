@@ -410,12 +410,114 @@ async function checkFocus(page: Page, ctx: Omit<Finding, 'check' | 'severity' | 
   }
 }
 
+/* ------------------------------------------------------- palette probe -- */
+
+/**
+ * The palette, measured rather than trusted.
+ *
+ * `globals.css` documents a ratio beside almost every token ("verified against WCAG AA
+ * by calculation"). Those comments were written while the light palette could not
+ * compile — `@theme` nested in a media query is hoisted by Tailwind v4, so only the dark
+ * values ever reached the browser — and so no light number in them was ever observed.
+ * This resolves the tokens out of a real `:root` in a real browser and recomputes each
+ * documented pair, which is the only way to tell a verified claim from a plausible one.
+ */
+const TOKEN_PAIRS: Array<{ fg: string; bg: string; use: string; large?: boolean }> = [
+  { fg: 'ink', bg: 'surface', use: 'body text on a card' },
+  { fg: 'ink', bg: 'paper', use: 'body text on the page ground' },
+  { fg: 'muted', bg: 'surface', use: 'secondary text on a card' },
+  { fg: 'muted', bg: 'paper', use: 'secondary text on the page ground' },
+  { fg: 'brand', bg: 'surface', use: 'link/accent text on a card' },
+  { fg: 'brand-dark', bg: 'surface', use: 'link text on a card' },
+  { fg: 'brand-dark', bg: 'brand-tint', use: 'active nav item, category pill' },
+  { fg: 'on-brand', bg: 'brand', use: 'primary button label' },
+  { fg: 'on-brand', bg: 'brand-dark', use: 'primary button label, hover' },
+  { fg: 'gold', bg: 'surface', use: 'interview count, accent stat' },
+  { fg: 'gold', bg: 'gold-tint', use: 'gold badge' },
+  { fg: 'gold-bright', bg: 'surface', use: 'decorative only — large text' , large: true },
+  { fg: 'success', bg: 'surface', use: 'passing score, offer status' },
+  { fg: 'success', bg: 'success-tint', use: 'success badge' },
+  { fg: 'warning', bg: 'surface', use: 'below-threshold score' },
+  { fg: 'warning', bg: 'warning-tint', use: 'warning badge' },
+  { fg: 'danger', bg: 'surface', use: 'destructive action, error text' },
+  { fg: 'danger', bg: 'danger-tint', use: 'error banner' },
+  /* Non-text pairs, held to 1.4.11's 3:1 rather than 4.5:1. */
+  { fg: 'muted', bg: 'surface', use: 'form control boundary (border-muted)', large: true },
+  { fg: 'line', bg: 'surface', use: 'card edge — decorative, 3:1 not required', large: true },
+  { fg: 'brand', bg: 'paper', use: 'focus ring against the page ground', large: true },
+  { fg: 'brand', bg: 'surface', use: 'focus ring against a card', large: true },
+];
+
+const PALETTE_PROBE = String.raw`((pairs) => {
+  const cs = getComputedStyle(document.documentElement);
+  const canvas = document.createElement('canvas').getContext('2d');
+  const rgb = (name) => {
+    const raw = cs.getPropertyValue('--color-' + name).trim();
+    if (!raw) return null;
+    canvas.fillStyle = '#000';
+    canvas.fillStyle = raw;
+    const hex = canvas.fillStyle;
+    const m = /^#([0-9a-f]{6})$/i.exec(hex);
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return { hex, r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  };
+  const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const lum = (c) => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  return pairs.map((p) => {
+    const a = rgb(p.fg), b = rgb(p.bg);
+    if (!a || !b) return { ...p, missing: true };
+    const l1 = lum(a), l2 = lum(b);
+    const hi = Math.max(l1, l2), lo = Math.min(l1, l2);
+    return { ...p, ratio: Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100, fgHex: a.hex, bgHex: b.hex };
+  });
+})`;
+
+async function probePalette(browser: Browser, scheme: 'light' | 'dark') {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: scheme });
+  const page = await ctx.newPage();
+  await page.goto(`${BASE}/sign-in`, { waitUntil: 'networkidle', timeout: 60_000 });
+  const rows = (await page.evaluate(PALETTE_PROBE as unknown as string, TOKEN_PAIRS)) as Array<{
+    fg: string; bg: string; use: string; large?: boolean; missing?: boolean;
+    ratio?: number; fgHex?: string; bgHex?: string;
+  }>;
+  for (const row of rows) {
+    const base = { page: 'palette', viewport: '(tokens)', scheme } as const;
+    if (row.missing) {
+      add({ ...base, check: 'palette', severity: 'major', detail: `--color-${row.fg} or --color-${row.bg} does not resolve` });
+      continue;
+    }
+    const need = row.large ? 3 : 4.5;
+    const ratio = row.ratio ?? 0;
+    if (ratio < need - 0.005) {
+      add({
+        ...base,
+        check: 'palette',
+        severity: ratio < need * 0.7 ? 'major' : 'minor',
+        detail: `${row.ratio}:1 (needs ${need}:1) — text-${row.fg} ${row.fgHex} on bg-${row.bg} ${row.bgHex} — ${row.use}`,
+      });
+    } else {
+      add({ ...base, check: 'palette-ok', severity: 'info', detail: `${row.ratio}:1 — text-${row.fg} ${row.fgHex} on bg-${row.bg} ${row.bgHex} — ${row.use}` });
+    }
+  }
+  await ctx.close();
+}
+
 /* ------------------------------------------------------------------- seed -- */
 
 const TEST_EMAIL = `zz-uiaudit-${Date.now()}@example.invalid`;
 const TEST_PASSWORD = 'a-long-enough-audit-passphrase-9';
 let sql: ReturnType<typeof postgres> | null = null;
 let seededId: string | null = null;
+
+/**
+ * The seeded resume snapshot, shared by /applications and /resume/[snapshotId].
+ *
+ * Both screens need one and it must be the same row: an application references a
+ * snapshot, and auditing the resume page means opening the very snapshot those
+ * applications point at.
+ */
+let seededSnapshotId: string | null = null;
 
 async function seedUser() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not set');
@@ -489,6 +591,279 @@ async function seedRecords(q: NonNullable<typeof sql>) {
               ${`audit-${type}-${Math.random().toString(36).slice(2, 10)}`},
               ${'[]'}::jsonb, ${JSON.stringify(data)}::jsonb)`;
   }
+}
+
+/**
+ * One resume snapshot and the applications that point at it.
+ *
+ * `/applications` and `/resume/[snapshotId]` have never been audited with content in
+ * them — the table is six columns inside an `overflow-x-auto`, which is exactly the
+ * shape that goes wrong at 320px, and the editor is a long list of grouped line items.
+ * The statuses below cover every branch of `StatusSelect`'s TONE map and both sides of
+ * the 8.5 score threshold, so each colour the page can produce is actually rendered.
+ *
+ * Everything is written against the seeded user id and removed with it.
+ */
+async function seedApplications(q: NonNullable<typeof sql>) {
+  seededSnapshotId = randomUUID();
+
+  const item = (text: string) => ({ text, sourceRecordId: null });
+  const document = {
+    id: seededSnapshotId,
+    userId: seededId,
+    contact: {
+      fullName: 'Uma Iyer',
+      email: 'uma.iyer@example.invalid',
+      phone: '+91 90000 00000',
+      location: 'Chennai, India',
+      portfolioUrl: 'https://example.invalid/uma',
+      githubUrl: 'https://github.com/example',
+      linkedinUrl: 'https://www.linkedin.com/in/example',
+    },
+    sections: [
+      {
+        key: 'summary',
+        heading: 'Summary',
+        items: [
+          item(
+            'Platform engineer with eight years on data infrastructure other teams depend on, most recently owning an ingestion path that moves 40 million rows a day.',
+          ),
+        ],
+      },
+      {
+        key: 'skills',
+        heading: 'Skills',
+        items: [
+          item('Languages: TypeScript, Python, Go, SQL'),
+          item('Infrastructure: PostgreSQL, Kubernetes, Terraform, Kafka'),
+          item('Practice: distributed tracing, incident review, capacity planning'),
+        ],
+      },
+      {
+        key: 'experience',
+        heading: 'Experience',
+        items: [],
+        groups: [
+          {
+            title: 'Senior Platform Engineer',
+            subtitle: 'Northwind Analytics — Chennai, India',
+            dateRange: '2021-03 – present',
+            items: [
+              item(
+                'Rebuilt the ingestion path so a failed batch retries from its last good offset instead of the beginning, across 40 million rows a day, cutting median recovery time from four hours to eleven minutes.',
+              ),
+              item(
+                'Introduced per-tenant rate limits at the edge, which removed the weekly on-call page for noisy-neighbour saturation entirely.',
+              ),
+              item(
+                'Moved the metrics pipeline off three cron jobs and a spreadsheet onto a scheduled DAG, reducing month-end reporting from two days to under an hour.',
+              ),
+            ],
+          },
+          {
+            title: 'Platform Engineer',
+            subtitle: 'Kestrel Systems — Bengaluru, India',
+            dateRange: '2018-06 – 2021-02',
+            items: [
+              item(
+                'Cut p99 checkout latency from 1.8s to 420ms by replacing a synchronous fan-out with a materialised read model.',
+              ),
+              item(
+                'Wrote the migration tooling that moved 140 services from hand-rolled deploy scripts onto a single pipeline.',
+              ),
+            ],
+          },
+        ],
+      },
+      {
+        key: 'projects',
+        heading: 'Projects',
+        items: [],
+        groups: [
+          {
+            title: 'Tidewater',
+            subtitle: 'Internal metrics pipeline',
+            items: [
+              item('Replaced three cron jobs and a spreadsheet with a scheduled pipeline other teams now build on.'),
+            ],
+          },
+        ],
+      },
+      {
+        key: 'education',
+        heading: 'Education',
+        items: [item('B.E. Computer Science, Anna University, 2017')],
+      },
+      {
+        key: 'certifications',
+        heading: 'Certifications',
+        items: [item('AWS Solutions Architect — Associate, Amazon Web Services, 2023')],
+      },
+    ],
+    jobRequirement: {
+      title: 'Staff Platform Engineer',
+      company: 'Meridian Data',
+      mustHave: ['PostgreSQL', 'Kubernetes', 'Kafka'],
+      niceToHave: ['Terraform', 'Go'],
+      keywords: ['ingestion', 'observability', 'reliability'],
+    },
+    renderMode: 'ats-strict',
+    recordHashSnapshot: [],
+    createdAt: new Date().toISOString(),
+  };
+
+  const scoreDetail = {
+    keywordGatePassed: true,
+    keywordCoveragePct: 82,
+    missingKeywords: ['Terraform'],
+    formattingScore: 0.95,
+    evidenceScore: 0.88,
+    skillsCompletenessScore: 0.8,
+    overall: 8.7,
+    passed: true,
+    iterations: 2,
+    critiques: [
+      { subScore: 'skills', message: 'Terraform appears in the posting but nowhere in the profile.' },
+      { subScore: 'evidence', message: 'Two bullets state an action without a measured outcome.' },
+    ],
+  };
+
+  await q`
+    insert into resume_snapshot (id, user_id, document, job_requirement, score, score_detail, record_hash_snapshot, render_mode, file_name, created_at)
+    values (${seededSnapshotId}, ${seededId}, ${JSON.stringify(document)}::jsonb,
+            ${JSON.stringify(document.jobRequirement)}::jsonb, ${8.7},
+            ${JSON.stringify(scoreDetail)}::jsonb, ${'[]'}::jsonb, ${'ats-strict'},
+            ${'uma-iyer-staff-platform-engineer.pdf'}, now())`;
+
+  const apps: Array<[string, string, string, string, number | null]> = [
+    ['Staff Platform Engineer', 'Meridian Data', 'platform', 'interview', 8.7],
+    ['Senior Backend Engineer, Payments and Settlement Infrastructure', 'Longbow Financial Technologies', 'backend', 'applied', 7.4],
+    ['Infrastructure Engineer', 'Harbourline', 'infrastructure', 'offer', 9.1],
+    ['Data Platform Engineer', 'Alcove', 'data', 'rejected', 6.2],
+    ['Site Reliability Engineer', 'Vantage Grid', 'general', 'draft', null],
+  ];
+  for (const [roleTitle, company, category, status, score] of apps) {
+    await q`
+      insert into application (id, user_id, resume_snapshot_id, role_title, company, category, score, status, created_at, updated_at)
+      values (${randomUUID()}, ${seededId}, ${seededSnapshotId}, ${roleTitle}, ${company},
+              ${category}, ${score}, ${status}, now(), now())`;
+  }
+}
+
+/**
+ * A LinkedIn export archive, built here rather than uploaded by hand.
+ *
+ * `/import`'s review step is the densest screen in the application and the only route to
+ * it is a real upload. The resume route needs a model per chunk, which makes it slow and
+ * non-deterministic; the LinkedIn route is pure CSV parsing, so an archive assembled in
+ * memory reaches the same review screen every single time.
+ *
+ * Written as a stored (uncompressed) ZIP because `lib/import/zip.ts` accepts method 0,
+ * which removes the need for a packaging dependency for the sake of a fixture.
+ */
+const CRC_TABLE = (() => {
+  const t = new Int32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c;
+  }
+  return t;
+})();
+
+function crc32(buf: Buffer): number {
+  let c = -1;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ -1) >>> 0;
+}
+
+function storedZip(files: Array<[string, string]>): Buffer {
+  const local: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const [name, text] of files) {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const data = Buffer.from(text, 'utf8');
+    const crc = crc32(data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(0, 6);
+    lh.writeUInt16LE(0, 8); // stored
+    lh.writeUInt32LE(crc, 14);
+    lh.writeUInt32LE(data.length, 18);
+    lh.writeUInt32LE(data.length, 22);
+    lh.writeUInt16LE(nameBuf.length, 26);
+    local.push(lh, nameBuf, data);
+
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0);
+    ch.writeUInt16LE(20, 4);
+    ch.writeUInt16LE(20, 6);
+    ch.writeUInt16LE(0, 10); // stored
+    ch.writeUInt32LE(crc, 16);
+    ch.writeUInt32LE(data.length, 20);
+    ch.writeUInt32LE(data.length, 24);
+    ch.writeUInt16LE(nameBuf.length, 28);
+    ch.writeUInt32LE(offset, 42);
+    central.push(ch, nameBuf);
+    offset += 30 + nameBuf.length + data.length;
+  }
+  const centralBuf = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralBuf.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, centralBuf, end]);
+}
+
+const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+
+function linkedInFixture(): Buffer {
+  return storedZip([
+    [
+      'Profile.csv',
+      'First Name,Last Name,Headline,Summary,Geo Location,Websites\n' +
+        `Uma,Iyer,${q('Platform engineer')},${q('Platform engineer with eight years on data infrastructure other teams depend on. I like the unglamorous half of the job: the retry path, the backfill, the runbook nobody has had to open in a year.')},${q('Chennai, Tamil Nadu, India')},${q('[STANDARD:https://example.invalid/uma]')}\n`,
+    ],
+    [
+      'Positions.csv',
+      'Company Name,Title,Description,Location,Started On,Finished On\n' +
+        `${q('Northwind Analytics')},${q('Senior Platform Engineer')},${q('Rebuilt the ingestion path so a failed batch retries from its last good offset instead of the beginning, cutting median recovery time from four hours to eleven minutes.\nIntroduced per-tenant rate limits at the edge, removing the weekly on-call page for noisy-neighbour saturation.\nMoved month-end reporting off three cron jobs and a spreadsheet onto a scheduled pipeline.')},${q('Chennai, India')},${q('Mar 2021')},\n` +
+        `${q('Kestrel Systems')},${q('Platform Engineer')},${q('Cut p99 checkout latency from 1.8s to 420ms by replacing a synchronous fan-out with a materialised read model.\nWrote the migration tooling that moved 140 services onto a single deploy pipeline.')},${q('Bengaluru, India')},${q('Jun 2018')},${q('Feb 2021')}\n` +
+        `${q('Kestrel Systems')},${q('Platform Engineer')},${q('Ran the on-call rotation review that halved repeat incidents quarter over quarter.')},${q('Bengaluru, India')},${q('Jun 2018')},${q('Feb 2021')}\n` +
+        `${q('Alcove')},${q('Junior Engineer')},,${q('Remote')},${q('Aug 2017')},${q('May 2018')}\n`,
+    ],
+    [
+      'Skills.csv',
+      'Name\nTypeScript\nPostgreSQL\nKubernetes\nDistributed Systems Observability and Tracing\nTerraform\nApache Kafka\nGo\nIncident Response\n',
+    ],
+    [
+      'Education.csv',
+      'School Name,Degree Name,Field Of Study,Start Date,End Date\n' +
+        `${q('Anna University')},${q('B.E.')},${q('Computer Science')},2013,2017\n`,
+    ],
+    [
+      'Certifications.csv',
+      'Name,Authority,Started On,Url\n' +
+        `${q('AWS Solutions Architect — Associate')},${q('Amazon Web Services')},${q('Feb 2023')},${q('https://example.invalid/cert')}\n`,
+    ],
+    ['Languages.csv', 'Name,Proficiency\nTamil,Native or bilingual proficiency\nEnglish,Full professional proficiency\n'],
+    [
+      'Projects.csv',
+      'Title,Description,Url\n' +
+        `${q('Tidewater')},${q('An internal metrics pipeline that replaced three cron jobs and a spreadsheet, now used by four teams.')},${q('https://example.invalid/tidewater')}\n`,
+    ],
+    [
+      'Honors.csv',
+      'Title,Description,Issued On\n' +
+        `${q('Engineering Excellence Award')},${q('For the ingestion rewrite.')},${q('Dec 2022')}\n`,
+    ],
+    ['Email Addresses.csv', 'Email Address,Confirmed,Primary\numa.iyer@example.invalid,Yes,Yes\n'],
+    ['Interests.csv', 'Name\nLong-distance cycling\n'],
+  ]);
 }
 
 async function removeUser() {
@@ -731,7 +1106,7 @@ async function capture(
     });
   }
 
-  for (const c of r.contrast.slice(0, 12)) {
+  for (const c of r.contrast.slice(0, 40)) {
     add({
       ...base,
       check: 'contrast',
