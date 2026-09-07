@@ -25,7 +25,7 @@ export default async function VerifyEmailPage({
     : { ok: false, message: 'That link is missing its token. Open it from the email directly.' };
 
   return (
-    <main className="grid min-h-screen place-items-center px-5 py-10">
+    <main className="grid min-h-screen min-h-dvh place-items-center px-5 py-10">
       <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-8 text-center">
         <Logo size={40} showWordmark={false} className="mb-5" />
         <h1 className="font-display text-2xl">

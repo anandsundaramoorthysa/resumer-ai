@@ -31,7 +31,7 @@ export default async function PortfolioSettingsPage({
     .where(eq(profileRecords.userId, userId));
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen min-h-dvh">
       <AppHeader current="/settings/portfolio" width="3xl" />
 
       <main className="mx-auto max-w-3xl px-5 py-8">

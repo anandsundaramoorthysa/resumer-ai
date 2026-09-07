@@ -574,16 +574,32 @@ export function Importer() {
           );
         })}
 
-        <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-line pt-5">
+        {/*
+          * Stuck to the bottom of the viewport while the list is on screen.
+          *
+          * A real resume produces around eighty candidates, and the review list ran to
+          * 9,402px on a 320px phone — the only way to commit an import was to scroll
+          * sixteen screens past every checkbox to reach the button, and the running count
+          * of what you had ticked was only ever visible once you got there. It settles
+          * into place at the end of the card, so nothing is permanently covered.
+          */}
+        <div className="sticky bottom-0 z-10 -mx-5 mt-6 flex flex-wrap items-center gap-3 border-t border-line bg-surface px-5 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6">
           <button
             type="button"
             onClick={save}
             disabled={saving || selectedCount === 0}
             className="min-h-11 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
           >
-            {saving
-              ? 'Saving…'
-              : `Add ${selectedCount} item${selectedCount === 1 ? '' : 's'} to my profile`}
+            {saving ? (
+              'Saving…'
+            ) : (
+              <>
+                Add {selectedCount} item{selectedCount === 1 ? '' : 's'}
+                {/* Dropped below `sm` so the bar stays one row: with the full label it
+                    wrapped, and two rows of buttons took 133px of a 568px phone. */}
+                <span className="hidden sm:inline"> to my profile</span>
+              </>
+            )}
           </button>
           <button
             type="button"

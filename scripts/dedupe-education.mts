@@ -19,6 +19,7 @@
  *
  * Run: npx tsx --tsconfig scripts/tsconfig.json scripts/dedupe-education.mts [--apply]
  */
+import { recordDedupeAudit } from './dedupe-audit';
 import 'dotenv/config';
 import postgres from 'postgres';
 import { createHash } from 'node:crypto';
@@ -176,6 +177,27 @@ if (apply) {
       for (const row of group.drop) {
         const gone = await tx`delete from profile_record where id = ${row.id} and source <> 'manual' returning id`;
         deleted += gone.length;
+
+        // Recorded inside the transaction, so the trace lands or rolls back with the
+        // deletion it describes. Without this a row simply disappears: an engineer
+        // reviewing this project lost real time to a profile that went 172 -> 171 with
+        // nothing in audit_log to explain it.
+        if (gone.length > 0) {
+          await recordDedupeAudit(tx as never, 'github-sync', [
+            {
+              userId: row.user_id,
+              recordId: row.id,
+              action: 'delete',
+              diff: {
+                reason: 'merged into a duplicate education record',
+                mergedInto: group.keep.id,
+                removed: { credential: row.data?.credential, institution: row.data?.institution },
+                survivor: { credential: m.credential, institution: m.institution },
+                script: 'dedupe-education',
+              },
+            },
+          ]);
+        }
       }
     }
 

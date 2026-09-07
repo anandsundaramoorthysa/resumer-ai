@@ -28,7 +28,7 @@ export default async function ApplicationsPage() {
   const scored = rows.filter((r) => r.score != null);
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen min-h-dvh">
       <AppHeader current="/applications" width="5xl" />
 
       <main className="mx-auto max-w-5xl px-5 py-8">

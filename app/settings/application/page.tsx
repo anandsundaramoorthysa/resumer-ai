@@ -20,7 +20,7 @@ export default async function ApplicationFieldsPage() {
     .limit(1);
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen min-h-dvh">
       <AppHeader current="/settings/application" width="3xl" />
 
       <main className="mx-auto max-w-3xl px-5 py-8">

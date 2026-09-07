@@ -11,7 +11,7 @@ export default async function ImportPage() {
   if (!session?.user?.id) redirect('/sign-in');
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen min-h-dvh">
       <AppHeader current="/import" width="3xl" />
 
       <main className="mx-auto max-w-3xl px-5 py-8">

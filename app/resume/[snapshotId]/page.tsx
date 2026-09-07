@@ -34,7 +34,7 @@ export default async function ResumePage({
   if (!row) notFound();
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen min-h-dvh">
       <AppHeader width="5xl" />
 
       <main className="mx-auto max-w-5xl px-5 py-8">

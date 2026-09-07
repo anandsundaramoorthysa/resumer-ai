@@ -169,7 +169,7 @@ function Shell({
   userName?: string;
 }) {
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen min-h-dvh">
       <AppHeader current="/" userName={userName} width="6xl" />
       <main className="mx-auto max-w-6xl px-5 py-8">{children}</main>
     </div>

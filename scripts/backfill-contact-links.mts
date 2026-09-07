@@ -25,7 +25,16 @@ const links = findContactLinks(text.slice(0, 1200));
 console.log('found in the resume header:', JSON.stringify(links, null, 2));
 
 const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
-const rows = await sql<any[]>`
+interface ContactRow {
+  user_id: string;
+  email: string;
+  full_name: string | null;
+  linkedin_url: string | null;
+  github_url: string | null;
+  portfolio_url: string | null;
+}
+
+const rows = await sql<ContactRow[]>`
   select c.user_id, u.email, c.full_name, c.linkedin_url, c.github_url, c.portfolio_url
   from contact_info c join "user" u on u.id = c.user_id`;
 
