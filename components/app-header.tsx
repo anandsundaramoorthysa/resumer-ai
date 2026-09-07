@@ -10,36 +10,18 @@
  * So the links live in one list, and every page gets all of them. Adding a destination is
  * a line here rather than an edit to six files that will disagree again within a month.
  *
- * On narrow screens the links wrap rather than collapsing behind a menu button. A
- * hamburger would be the conventional choice, but it hides navigation behind a tap and an
- * animation, and the whole complaint this fixes is navigation that could not be reached.
- * Six short labels wrap to two or three rows at 320px, which is a little taller and
- * entirely visible — the right trade when the alternative is hiding things again.
+ * From `sm` up every link is on screen at once. Below that they are behind a menu
+ * button — see components/mobile-nav.tsx. Wrapping them was the first attempt and kept
+ * everything visible, but six chips became two or three rows and ate about a third of a
+ * 320px screen before any content appeared. Hiding navigation is only acceptable if the
+ * control behaves the way people expect, which is what that component is careful about.
  */
 
 import Link from 'next/link';
 import { auth, signOut } from '@/auth';
 import { Logo } from '@/components/logo';
-
-export interface NavLink {
-  href: string;
-  label: string;
-}
-
-/**
- * Every destination, in the order someone would use them: the thing you do (dashboard),
- * the thing it is built from (profile), the things that fill the profile (import,
- * portfolio), the record of what you sent (applications), and the settings you rarely
- * touch (answers).
- */
-export const NAV_LINKS: NavLink[] = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/profile', label: 'Profile' },
-  { href: '/import', label: 'Import' },
-  { href: '/settings/portfolio', label: 'Portfolio' },
-  { href: '/applications', label: 'Applications' },
-  { href: '/settings/application', label: 'Answers' },
-];
+import { MobileNav } from '@/components/mobile-nav';
+import { NAV_LINKS } from '@/components/nav-links';
 
 /** Tailwind's max-width scale, as the pages use it — each keeps its own content width. */
 export type HeaderWidth = '3xl' | '4xl' | '5xl' | '6xl';
@@ -102,8 +84,22 @@ export async function AppHeader({
     );
   }
 
+  /**
+   * One server action, used by both layouts.
+   *
+   * Defined here rather than inline twice so the phone menu and the desktop bar cannot
+   * drift into signing out differently. Passing it to a client component is fine — a
+   * server action is a reference, not the function body.
+   */
+  const signOutAction = async () => {
+    'use server';
+    await signOut({ redirectTo: '/sign-in' });
+  };
+
   return (
-    <header className="border-b border-line bg-surface">
+    // `relative` so the phone menu can position against the header rather than the page,
+    // which keeps it under the bar when the page is scrolled.
+    <header className="relative border-b border-line bg-surface">
       <div className={`${container} flex items-center justify-between gap-3 py-3`}>
         <Link
           href="/"
@@ -122,12 +118,9 @@ export async function AppHeader({
             </span>
           ) : null}
 
-          <form
-            action={async () => {
-              'use server';
-              await signOut({ redirectTo: '/sign-in' });
-            }}
-          >
+          {/* From `sm` up the links are always on screen, so sign out belongs here. On a
+              phone it moves inside the menu, where everything else lives. */}
+          <form action={signOutAction} className="hidden sm:block">
             <button
               type="submit"
               className="inline-flex min-h-11 items-center rounded-lg border border-line px-3 text-sm font-semibold text-muted hover:bg-paper hover:text-ink"
@@ -135,10 +128,19 @@ export async function AppHeader({
               Sign out
             </button>
           </form>
+
+          <MobileNav links={NAV_LINKS} current={current} signOut={signOutAction} />
         </div>
       </div>
 
-      <nav className={`${container} pb-2.5`} aria-label="Main">
+      {/*
+        * The wrapping row, from `sm` up only.
+        *
+        * Below that it became two or three rows of chips and took about a third of a
+        * 320px screen before any content appeared. Everything visible was the right
+        * instinct while there was no menu; a menu that behaves properly is better.
+        */}
+      <nav className={`${container} hidden pb-2.5 sm:block`} aria-label="Main">
         <ul className="flex flex-wrap gap-1.5">
           {NAV_LINKS.map((link) => {
             const active = isCurrent(link.href, current);

@@ -16,6 +16,7 @@
  * this schema is checked against at compile time.
  */
 
+import { findContactLinks, mergeContactLinks } from './contact-links';
 import { z } from 'zod';
 import { generateStructured } from '../ai/chain';
 import type { DraftBudget } from '../ai/budget';
@@ -167,6 +168,23 @@ ${chunk}
 Extract every professional fact this excerpt actually states. Return empty arrays for categories it does not mention.`,
     options: { budget, temperature: 0.1 },
   });
+
+  /**
+   * Contact links are read from the chunk's own text as well as from the model.
+   *
+   * A resume header renders its LinkedIn and GitHub links as icons, and a PDF extractor
+   * turns those icons into the letters "in" or into nothing at all — leaving two bare
+   * handles that the model quite reasonably declined to assign to either network. On a
+   * real import that produced a profile with the website captured and both handles null,
+   * so a generated resume carried no LinkedIn and no GitHub at all.
+   *
+   * `mergeContactLinks` only fills what the model left empty, so this can add a link but
+   * never contradict one.
+   */
+  const links = findContactLinks(chunk);
+  if (links.linkedinUrl || links.githubUrl || links.portfolioUrl) {
+    return { ...data, contact: mergeContactLinks(data.contact, links) };
+  }
 
   return data;
 }
