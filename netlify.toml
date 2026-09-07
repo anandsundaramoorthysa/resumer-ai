@@ -14,7 +14,10 @@
   publish = ".next"
 
 [build.environment]
-  NODE_VERSION = "20"
+  # Pinned rather than floating. Next 16 requires Node 20.9+, and "20" resolves to
+  # whatever the build image ships that day — a moving target under a framework with a
+  # hard floor. 22 is the current LTS and what Next 16 is developed against.
+  NODE_VERSION = "22"
 
 # The Next.js runtime handles routing, SSR, streaming and image optimization.
 [[plugins]]
