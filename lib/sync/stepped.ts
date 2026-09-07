@@ -1,8 +1,8 @@
-import { getGithubToken } from '@/lib/server/github-token';
+import { getRepoAccess } from '@/lib/server/repo-access';
 import 'server-only';
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { accounts, contactInfo, syncJobs, users } from '@/lib/db/schema';
+import { contactInfo, syncJobs, users } from '@/lib/db/schema';
 import { fetchPortfolioFiles, latestCommitSha, parseRepoRef } from './github';
 import {
   extractFromSlice,
@@ -200,10 +200,13 @@ async function runStep(
     const ref = user?.portfolioRepo ? parseRepoRef(user.portfolioRepo) : null;
     if (!ref) throw new Error('No portfolio repository connected.');
 
-    const token = await getGithubToken(userId);
-    if (!token) {
-      throw new Error('No GitHub token — sign out and back in to re-grant repo access.');
+    const access = await getRepoAccess(userId, { owner: ref.owner, name: ref.repo });
+    if (!access) {
+      throw new Error(
+        'No read access to that repository. Install the GitHub App on it from Settings, or sign out and back in.',
+      );
     }
+    const token = access.token;
 
     const sha = await latestCommitSha(ref, token);
 

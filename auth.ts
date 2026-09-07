@@ -7,8 +7,15 @@
  * needs. Clerk would mean a second SaaS account plus extra work to get the provider
  * token back out. One flow, one credential, no third-party dependency.
  *
- * Scope note: GitHub's OAuth scopes have no read-only variant for private repos, so we
- * request `repo` and never issue a write call anywhere in this codebase (REQ-10.3).
+ * Scope note: GitHub's OAuth scopes have no read-only variant for private repositories.
+ * `repo` — read *and* write to everything the user owns — was the only way to read one
+ * portfolio repo, which is an absurd thing to ask for and an unpleasant thing to hold.
+ *
+ * A GitHub App solves it properly: the user installs it on the repositories they choose,
+ * the permission is `contents: read`, and access is a token minted on demand rather than
+ * a credential we store. So when one is configured, sign-in asks only for identity and
+ * the consent screen stops mentioning repositories at all. Without one, `repo` is still
+ * requested, because otherwise existing users lose sync the moment this ships.
  *
  * Session note: sessions are JWTs rather than database rows. That is forced rather than
  * chosen — Auth.js will not issue a database session for the Credentials provider, and
@@ -30,6 +37,7 @@ import { verifyPassword } from '@/lib/auth/password';
 import { normalizeEmail } from '@/lib/auth/email-policy';
 import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
 import { encryptIfPossible } from '@/lib/auth/secret-box';
+import { isGitHubAppConfigured } from '@/lib/github/app';
 
 const githubConfigured =
   Boolean(process.env.AUTH_GITHUB_ID) && Boolean(process.env.AUTH_GITHUB_SECRET);
@@ -156,8 +164,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             clientId: process.env.AUTH_GITHUB_ID,
             clientSecret: process.env.AUTH_GITHUB_SECRET,
             authorization: {
-              // REQ-2.1 — repo access granted by the same sign-in.
-              params: { scope: 'read:user user:email repo' },
+              // REQ-2.1 — one sign-in, no second credential to set up. The `repo` half
+              // is dropped as soon as a GitHub App can take over the reading.
+              params: {
+                scope: isGitHubAppConfigured()
+                  ? 'read:user user:email'
+                  : 'read:user user:email repo',
+              },
             },
             // Linking by email is safe only because GitHub verifies the address it
             // returns. Enabling this for a provider that did not would let anyone who

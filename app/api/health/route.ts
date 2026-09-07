@@ -14,6 +14,7 @@ import { availableProviders } from '@/lib/ai/models';
 import { isDatabaseConfigured } from '@/lib/db';
 import { getSiteUrl } from '@/lib/site-url';
 import { isEncryptionConfigured } from '@/lib/auth/secret-box';
+import { isGitHubAppConfigured } from '@/lib/github/app';
 import { isMailConfigured, mailProvider } from '@/lib/auth/mail';
 
 export const runtime = 'nodejs';
@@ -61,6 +62,15 @@ export async function GET() {
     security: {
       tokenEncryption: isEncryptionConfigured(),
       cronEnabled: present('CRON_SECRET').set,
+      /**
+       * With a GitHub App configured, sign-in stops asking for `repo` — read and write
+       * on every repository the user owns — and repository access becomes a token minted
+       * per request instead of a credential stored here.
+       */
+      githubApp: isGitHubAppConfigured(),
+      githubOAuthScope: isGitHubAppConfigured()
+        ? 'read:user user:email'
+        : 'read:user user:email repo',
     },
     mail: {
       configured: isMailConfigured(),

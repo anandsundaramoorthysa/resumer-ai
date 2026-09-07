@@ -6,11 +6,17 @@ import { db } from '@/lib/db';
 import { profileRecords, users } from '@/lib/db/schema';
 import { Logo } from '@/components/logo';
 import { PortfolioForm } from './portfolio-form';
+import { AppInstallPanel } from './app-install';
 
 export const metadata = { title: 'Portfolio connection' };
 export const dynamic = 'force-dynamic';
 
-export default async function PortfolioSettingsPage() {
+export default async function PortfolioSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ installed?: string; installError?: string }>;
+}) {
+  const { installed, installError } = await searchParams;
   const session = await auth();
   if (!session?.user?.id) redirect('/sign-in');
   const userId = session.user.id;
@@ -50,6 +56,18 @@ export default async function PortfolioSettingsPage() {
           your portfolio site. Before every draft it checks whether that repo has changed —
           a single API call — and only re-reads it when the commit is new.
         </p>
+
+        <AppInstallPanel
+          userId={userId}
+          currentRepo={user?.portfolioRepo ?? null}
+          notice={
+            installed
+              ? { kind: 'installed', message: installed }
+              : installError
+                ? { kind: 'error', message: installError }
+                : undefined
+          }
+        />
 
         <PortfolioForm
           currentRepo={user?.portfolioRepo ?? null}

@@ -13,9 +13,11 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { NextRequest } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
+import { forgetInstallation } from '@/lib/github/app';
+import { markInstallationRemoved } from '@/lib/server/repo-access';
 
 export const runtime = 'nodejs';
 
@@ -32,8 +34,57 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Bad signature.' }, { status: 401 });
   }
 
-  if (req.headers.get('x-github-event') === 'ping') {
+  const event = req.headers.get('x-github-event');
+
+  if (event === 'ping') {
     return Response.json({ ok: true, pong: true });
+  }
+
+  /**
+   * Installation lifecycle.
+   *
+   * Without this the app keeps a row saying it can read a repository long after the user
+   * revoked that. Nothing breaks visibly — token minting just starts failing — but the
+   * settings page would go on claiming access that no longer exists, which is the kind
+   * of quiet lie that makes a permissions screen worthless.
+   */
+  if (event === 'installation' || event === 'installation_repositories') {
+    const body = JSON.parse(raw) as {
+      action?: string;
+      installation?: {
+        id?: number;
+        account?: { login?: string; type?: string };
+        repository_selection?: string;
+      };
+    };
+
+    const id = body.installation?.id;
+    if (!id) return Response.json({ ok: true, ignored: 'no installation id' });
+
+    if (body.action === 'deleted' || body.action === 'suspend') {
+      await markInstallationRemoved(id);
+      forgetInstallation(id);
+      return Response.json({ ok: true, installation: id, removed: true });
+    }
+
+    // A repository added or removed changes what the same installation can see, so the
+    // cached token is dropped: it carries the old repository list.
+    forgetInstallation(id);
+
+    if (body.action === 'unsuspend' || event === 'installation_repositories') {
+      // The row is only updated, never created, from a webhook: an installation reaches
+      // us first through the redirect, where a signed-in user proves it is theirs. A
+      // webhook has no user attached, so creating a row here would leave an installation
+      // owned by nobody — or worse, guessable into someone else's account.
+      await db.execute(
+        sql`update github_installation
+            set repository_selection = ${body.installation?.repository_selection ?? 'selected'},
+                removed_at = null
+            where id = ${id}`,
+      );
+    }
+
+    return Response.json({ ok: true, installation: id });
   }
 
   const payload = JSON.parse(raw) as {

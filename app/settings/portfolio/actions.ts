@@ -1,13 +1,13 @@
 'use server';
 
-import { getGithubToken } from '@/lib/server/github-token';
+import { getRepoAccess } from '@/lib/server/repo-access';
+import { isGitHubAppConfigured } from '@/lib/github/app';
 import { revalidatePath } from 'next/cache';
 import { eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { parseRepoRef, latestCommitSha } from '@/lib/sync/github';
-import { accounts } from '@/lib/db/schema';
 import { and } from 'drizzle-orm';
 
 export interface ActionResult {
@@ -44,17 +44,19 @@ export async function connectRepo(
     };
   }
 
-  const token = await getGithubToken(userId);
+  const access = await getRepoAccess(userId, { owner: ref.owner, name: ref.repo });
 
-  if (!token) {
+  if (!access) {
     return {
       ok: false,
-      message: 'No GitHub token on your account. Sign out and sign in again to grant repo access.',
+      message: isGitHubAppConfigured()
+        ? 'No read access to that repository yet. Install the GitHub App on it below.'
+        : 'No GitHub token on your account. Sign out and sign in again to grant repo access.',
     };
   }
 
   try {
-    await latestCommitSha(ref, token);
+    await latestCommitSha(ref, access.token);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('404')) {

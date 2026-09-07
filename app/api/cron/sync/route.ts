@@ -15,12 +15,12 @@
  * request it exists to avoid.
  */
 
-import { getGithubToken } from '@/lib/server/github-token';
+import { getRepoAccess } from '@/lib/server/repo-access';
+import { users } from '@/lib/db/schema';
 import { timingSafeEqual } from 'node:crypto';
 import { NextRequest } from 'next/server';
-import { and, eq, isNotNull } from 'drizzle-orm';
+import { eq, isNotNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { accounts, users } from '@/lib/db/schema';
 import { latestCommitSha, parseRepoRef } from '@/lib/sync/github';
 
 export const runtime = 'nodejs';
@@ -96,15 +96,15 @@ async function run(req: NextRequest) {
       continue;
     }
 
-    const token = await getGithubToken(user.id);
+    const access = await getRepoAccess(user.id, { owner: ref.owner, name: ref.repo });
 
-    if (!token) {
+    if (!access) {
       skipped += 1;
       continue;
     }
 
     try {
-      const sha = await latestCommitSha(ref, token);
+      const sha = await latestCommitSha(ref, access.token);
       checked += 1;
       if (sha === user.lastSyncedSha) continue;
 

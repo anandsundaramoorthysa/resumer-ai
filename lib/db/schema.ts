@@ -84,6 +84,38 @@ export const verificationTokens = pgTable(
 );
 
 /**
+ * A GitHub App installation, which is how repository access is granted.
+ *
+ * Distinct from the `account` row, which holds the OAuth identity. That distinction is
+ * the point of moving to a GitHub App: signing in proves who someone is, installing
+ * grants read access to the repositories they choose, and the two are no longer the same
+ * grant. Nothing here is a credential — an installation id is a public-ish identifier,
+ * and the token that reads a repository is minted from the app's private key on demand
+ * and never stored.
+ *
+ * One user may have several: a personal account and an organisation are separate
+ * installations, and a portfolio can live in either.
+ */
+export const githubInstallations = pgTable(
+  'github_installation',
+  {
+    /** GitHub's own installation id. */
+    id: integer('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** The user or organisation the app is installed on. */
+    accountLogin: text('account_login').notNull(),
+    targetType: text('target_type').notNull(), // User | Organization
+    repositorySelection: text('repository_selection').notNull(), // all | selected
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    /** Set when GitHub tells us the installation was removed or suspended. */
+    removedAt: timestamp('removed_at'),
+  },
+  (t) => [index('github_installation_user_idx').on(t.userId)],
+);
+
+/**
  * Single-use tokens for email verification and password reset.
  *
  * Separate from `verificationToken`, which belongs to the Auth.js adapter and has its

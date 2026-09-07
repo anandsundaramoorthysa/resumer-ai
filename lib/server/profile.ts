@@ -9,7 +9,6 @@ import 'server-only';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
-  accounts,
   applications,
   auditLog,
   contactInfo,
