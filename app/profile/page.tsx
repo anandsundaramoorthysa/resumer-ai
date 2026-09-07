@@ -6,6 +6,9 @@ import { db } from '@/lib/db';
 import { profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { Logo } from '@/components/logo';
 import { FlaggedRecord } from './flagged-record';
+import { BulletEditor, type ExistingBullet } from './bullet-editor';
+import { findProfileGaps } from '@/lib/profile/gaps';
+import type { ProfileRecord, RoleRecord } from '@/lib/types';
 
 export const metadata = { title: 'Profile' };
 export const dynamic = 'force-dynamic';
@@ -93,6 +96,42 @@ export default async function ProfilePage() {
 
   const flagged = records.filter((r) => r.flaggedForRemoval);
   const active = records.filter((r) => !r.flaggedForRemoval);
+
+  // The gap summary is the point of this page for a profile like this one: sync cannot
+  // write accomplishments that the portfolio never stated, so the hole has to be visible
+  // and typeable rather than merely absent from the resume (AUDIT.md #2, #5).
+  const asRecords = active.map((r) => ({
+    id: r.id,
+    type: r.type,
+    flaggedForRemoval: r.flaggedForRemoval,
+    ...(r.data as Record<string, unknown>),
+  })) as unknown as ProfileRecord[];
+
+  const asRoles = roles.map((r) => ({
+    id: r.id,
+    title: r.title,
+    company: r.company,
+    startDate: r.startDate,
+    endDate: r.endDate,
+  })) as unknown as RoleRecord[];
+
+  const gaps = findProfileGaps(asRoles, asRecords);
+
+  const bulletsByRole = new Map<string, ExistingBullet[]>();
+  for (const r of active) {
+    if (r.type !== 'experience-bullet') continue;
+    const d = r.data as Record<string, unknown>;
+    const roleId = String(d.roleId ?? '');
+    const list = bulletsByRole.get(roleId) ?? [];
+    list.push({
+      id: r.id,
+      action: String(d.action ?? ''),
+      scale: d.scale ? String(d.scale) : undefined,
+      outcome: d.outcome ? String(d.outcome) : undefined,
+      text: String(d.text ?? ''),
+    });
+    bulletsByRole.set(roleId, list);
+  }
 
   const grouped = new Map<string, typeof records>();
   for (const r of active) {
@@ -187,8 +226,55 @@ export default async function ProfilePage() {
           </section>
         ) : null}
 
+        {gaps.headline ? (
+          <section className="mt-7 rounded-xl border border-warning bg-warning-tint/40 p-5">
+            <h2 className="font-display text-lg text-warning">{gaps.headline}</h2>
+            <p className="mt-1.5 max-w-prose text-sm text-muted">
+              These are facts only you have. Your portfolio states what you worked on but
+              not what changed as a result, and nothing here will invent that — so a role
+              with nothing recorded simply cannot appear on a resume.
+            </p>
+          </section>
+        ) : null}
+
+        {roles.length > 0 ? (
+          <section className="mt-5 rounded-xl border border-line bg-surface p-5">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-display text-lg">Experience</h2>
+              <span className="font-mono text-xs text-muted tabular">
+                {roles.length} role{roles.length === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            <div className="mt-4 space-y-6">
+              {roles.map((role) => {
+                const bullets = bulletsByRole.get(role.id) ?? [];
+                return (
+                  <div key={role.id} className="border-t border-line pt-4 first:border-t-0 first:pt-0">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <p className="font-semibold">
+                        {role.title}
+                        <span className="font-normal text-muted"> — {role.company}</span>
+                      </p>
+                      <span className="font-mono text-xs text-muted">
+                        {role.startDate || '(no start)'} → {role.endDate}
+                        {role.location ? ` · ${role.location}` : ''}
+                      </span>
+                    </div>
+                    <BulletEditor
+                      roleId={role.id}
+                      roleLabel={role.company}
+                      bullets={bullets}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
         <div className="mt-7 space-y-5">
-          {[...grouped.entries()].map(([type, list]) => (
+          {[...grouped.entries()].filter(([type]) => type !== 'experience-bullet').map(([type, list]) => (
             <section key={type} className="rounded-xl border border-line bg-surface p-5">
               <div className="flex items-baseline justify-between gap-3">
                 <h2 className="font-display text-lg">{TYPE_LABELS[type] ?? type}</h2>
