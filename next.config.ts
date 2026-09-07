@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
    * rewrites out from under them; @react-pdf and docx are heavy Node-only renderers
    * with their own asset/font resolution. Keeping all four external is what makes the
    * round-trip self-test (REQ-6.6) work in a built app rather than only in dev.
+   *
+   * nodemailer is here for a different reason: it loads transport and encoding modules
+   * by dynamic path, and bundling it produces a build that only fails when someone
+   * actually tries to send mail.
    */
   serverExternalPackages: [
     'pdf-parse',
@@ -15,6 +19,7 @@ const nextConfig: NextConfig = {
     '@react-pdf/renderer',
     'docx',
     'mammoth',
+    'nodemailer',
   ],
 };
 
