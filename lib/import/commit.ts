@@ -21,22 +21,22 @@ import { hashContent } from '@/lib/sync/reconcile';
 import { formFor, hashInput, missingRequired } from '@/lib/profile/forms';
 import type { RecordSource } from '@/lib/types';
 
-const Tags = z.array(z.string()).default([]);
+const Tags = z.array(z.string().max(64)).max(50).default([]);
 
 const BulletIn = z.object({
-  text: z.string().min(1),
-  action: z.string().default(''),
-  scale: z.string().optional(),
-  outcome: z.string().optional(),
+  text: z.string().min(1).max(2000),
+  action: z.string().max(2000).default(''),
+  scale: z.string().max(500).optional(),
+  outcome: z.string().max(1000).optional(),
   tags: Tags,
 });
 
 const RoleIn = z.object({
-  title: z.string().min(1),
-  company: z.string().default(''),
-  startDate: z.string().default(''),
-  endDate: z.string().default('present'),
-  bullets: z.array(BulletIn).default([]),
+  title: z.string().min(1).max(200),
+  company: z.string().max(200).default(''),
+  startDate: z.string().max(32).default(''),
+  endDate: z.string().max(32).default('present'),
+  bullets: z.array(BulletIn).max(100).default([]),
 });
 
 /**
@@ -98,8 +98,10 @@ export const CommitPayloadSchema = z.object({
     })
     .nullable()
     .optional(),
-  roles: z.array(RoleIn).default([]),
-  records: z.array(RecordIn).default([]),
+  // Bounded so a payload cannot be used as unmetered storage. A real resume yields tens
+  // of records, not thousands; anything past these caps is not an import.
+  roles: z.array(RoleIn).max(200).default([]),
+  records: z.array(RecordIn).max(2000).default([]),
 });
 
 export type CommitPayload = z.infer<typeof CommitPayloadSchema>;

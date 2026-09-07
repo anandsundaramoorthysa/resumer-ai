@@ -47,9 +47,16 @@ export async function POST(req: NextRequest) {
     files.set(file.name, buf.toString('utf8'));
   } else {
     try {
-      for (const entry of readZip(buf)) {
-        if (/\.csv$/i.test(entry.name)) files.set(entry.name, entry.bytes.toString('utf8'));
-      }
+      // A real export is around thirty CSVs totalling a few hundred kilobytes. These
+      // bounds are generous against that and hostile to an archive built to exhaust
+      // memory — non-CSV members are never decompressed at all.
+      const entries = readZip(buf, {
+        maxEntries: 128,
+        maxEntryBytes: 8 * 1024 * 1024,
+        maxTotalBytes: 32 * 1024 * 1024,
+        nameFilter: (name) => /\.csv$/i.test(name),
+      });
+      for (const entry of entries) files.set(entry.name, entry.bytes.toString('utf8'));
     } catch (err) {
       const message =
         err instanceof NotAZipError

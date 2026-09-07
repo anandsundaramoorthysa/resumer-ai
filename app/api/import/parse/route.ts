@@ -13,7 +13,8 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { auth } from '@/auth';
-import { DraftBudget } from '@/lib/ai/budget';
+import { BudgetExceededError, DraftBudget } from '@/lib/ai/budget';
+import { assertDailyBudget, recordDailyUsage } from '@/lib/ai/daily-budget';
 import { MAX_CHUNK_CHARS } from '@/lib/import/text';
 import { extractFromChunk } from '@/lib/import/parse';
 
@@ -26,6 +27,19 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: 'Sign in first.' }, { status: 401 });
+  }
+  const userId = session.user.id;
+
+  // The per-request budget below caps one chunk. A file is chunked into many, and
+  // nothing caps how many files — so the only real ceiling on what an import can spend
+  // is the daily one, which for a long time existed in the schema and was never read.
+  try {
+    await assertDailyBudget(userId);
+  } catch (err) {
+    if (err instanceof BudgetExceededError) {
+      return Response.json({ error: err.message }, { status: 429 });
+    }
+    throw err;
   }
 
   const parsed = BodySchema.safeParse(await req.json().catch(() => null));
@@ -51,5 +65,8 @@ export async function POST(req: NextRequest) {
       read: false,
       reason: err instanceof Error ? err.message.slice(0, 200) : 'Extraction failed.',
     });
+  } finally {
+    // A chunk that failed still spent its tokens, so it still counts.
+    await recordDailyUsage(userId, budget.snapshot());
   }
 }

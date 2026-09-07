@@ -18,6 +18,7 @@ import type {
   RoleRecord,
 } from '../types';
 import { DraftBudget } from '../ai/budget';
+import { assertDailyBudget, recordDailyUsage } from '../ai/daily-budget';
 import { AllProvidersFailedError } from '../ai/chain';
 import { BudgetExceededError } from '../ai/budget';
 import { extractJobRequirement } from '../intake/extract';
@@ -57,11 +58,38 @@ export interface PipelineOutput {
   budget: { calls: number; tokens: number };
 }
 
+/**
+ * The daily spend gate, wrapped around the run.
+ *
+ * `DraftBudget` bounds one generation; nothing bounded how many generations. A script
+ * calling /api/draft in a loop stayed inside every per-draft limit and still spent
+ * without end across all five providers, because the daily counter the design called for
+ * was declared in the schema and then never read or written by anything.
+ *
+ * Recording happens in a `finally`, so a draft that fails halfway — or halts at the
+ * quality gate, or runs out of time — still counts the tokens it burned. Charging only
+ * for successful runs would be precisely backwards: failures are what a runaway loop
+ * produces.
+ */
 export async function runDraftPipeline(
   input: PipelineInput,
   emit: Emit,
 ): Promise<PipelineOutput> {
+  await assertDailyBudget(input.userId);
+
   const budget = new DraftBudget();
+  try {
+    return await runDraft(input, emit, budget);
+  } finally {
+    await recordDailyUsage(input.userId, budget.snapshot());
+  }
+}
+
+async function runDraft(
+  input: PipelineInput,
+  emit: Emit,
+  budget: DraftBudget,
+): Promise<PipelineOutput> {
   let records = input.records;
 
   // ---------------------------------------------------------------- 1. sync --

@@ -7,11 +7,20 @@
  * that standalone runners can't resolve — so the Next runtime is the only place the PDF
  * half can honestly be exercised.
  *
- * 404s in production.
+ * 404s in production — and, since that guard is a single environment variable, it is no
+ * longer the only one. A dev server bound to 0.0.0.0, a tunnel (ngrok, a Codespaces port
+ * forward) or a preview build with the wrong NODE_ENV would otherwise have handed an
+ * unauthenticated stranger the first user's entire profile and generated resume.
+ *
+ * So: the signed-in user's own profile when there is a session, and the first user only
+ * for a request that arrived directly, with none of the forwarding headers every proxy
+ * and tunnel adds. That keeps the terminal harness working over localhost without
+ * leaving a hole reachable from anywhere else.
  */
 
 import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
+import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { loadProfileForUser } from '@/lib/server/profile';
@@ -40,9 +49,30 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => ({}))) as { jobInput?: string };
 
-  // No auth here: this is a dev-only harness, and it takes the first user so it can be
-  // driven from a terminal without a session cookie.
-  const [user] = await db.select().from(users).limit(1);
+  const session = await auth();
+  const userId = session?.user?.id;
+
+  // The unauthenticated fallback is allowed only when the connection itself came from
+  // this machine.
+  //
+  // `Host` is not the test — a client sends whatever it likes there. Neither is
+  // `x-forwarded-host`, which Next's own dev server sets even for a direct request. The
+  // signal is the RIGHT-most `x-forwarded-for` entry, which is appended by the nearest
+  // hop and is therefore the real peer: Next dev writes `::1` for a local request, and
+  // any proxy in front of a deployed app writes the actual client address. A remote
+  // caller cannot make it loopback by spoofing, because their own value is appended to
+  // rather than replaced.
+  const hops = (req.headers.get('x-forwarded-for') ?? '').split(',').map((v) => v.trim());
+  const peer = hops[hops.length - 1] ?? '';
+  const local = peer === '' || peer === '::1' || peer === '127.0.0.1' || peer.startsWith('127.');
+
+  if (!userId && !local) {
+    return new Response('Not found', { status: 404 });
+  }
+
+  const [user] = userId
+    ? await db.select().from(users).where(eq(users.id, userId)).limit(1)
+    : await db.select().from(users).limit(1);
   if (!user) return Response.json({ error: 'No user in the database.' }, { status: 400 });
 
   const profile = await loadProfileForUser(user.id);

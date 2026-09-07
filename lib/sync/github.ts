@@ -1,3 +1,4 @@
+import { safeFetchText } from '@/lib/net/safe-fetch';
 /**
  * GitHub portfolio sync — REQ-2.1 through REQ-2.5.
  *
@@ -150,15 +151,23 @@ export async function fetchPortfolioFiles(
   return files;
 }
 
-/** REQ-2.3 — live-site fallback for anything unresolvable from source. */
+/**
+ * REQ-2.3 — live-site fallback for anything unresolvable from source.
+ *
+ * The URL is the user's own portfolio address, which is still user input: this used to
+ * be a bare `fetch`, which would have reached `http://169.254.169.254/` and every other
+ * internal address the host can see the moment it was wired up to anything. It is routed
+ * through `safeFetchText`, which resolves the hostname, refuses private ranges, and
+ * re-checks each redirect hop.
+ */
 export async function fetchLiveSite(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, {
+    const html = await safeFetchText(url, {
       headers: { 'User-Agent': 'ResumerAI/1.0 (+profile-sync)' },
-      signal: AbortSignal.timeout(20_000),
+      maxBytes: 2 * 1024 * 1024,
+      timeoutMs: 20_000,
     });
-    if (!res.ok) return null;
-    const html = await res.text();
+    if (html === null) return null;
     return html
       .replace(/<script[\s\S]*?<\/script>/gi, ' ')
       .replace(/<style[\s\S]*?<\/style>/gi, ' ')

@@ -15,6 +15,7 @@
  * request it exists to avoid.
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
@@ -37,7 +38,12 @@ function authorized(req: NextRequest): boolean {
     req.headers.get('x-cron-secret') ??
     req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
     '';
-  return header === secret;
+  // Constant-time, matching the GitHub webhook's comparison. `===` short-circuits on the
+  // first differing byte, which is a timing oracle in principle even if extracting a
+  // secret through serverless jitter is not realistic in practice.
+  const a = Buffer.from(header);
+  const b = Buffer.from(secret);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export async function POST(req: NextRequest) {

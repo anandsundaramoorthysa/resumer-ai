@@ -15,7 +15,6 @@
  *      and whether the domain can receive mail at all.
  */
 
-import { headers } from 'next/headers';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
@@ -28,7 +27,7 @@ import {
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from '@/lib/auth/mail';
-import { clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
+import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
 
 export interface AuthResult {
   ok: boolean;
@@ -41,12 +40,27 @@ export interface AuthResult {
 const NEUTRAL =
   'If that address can have an account here, a link is on its way. Check your inbox, and your spam folder.';
 
-async function callerIp(): Promise<string | null> {
-  const h = await headers();
-  // Netlify and Vercel both set x-forwarded-for; the first entry is the client.
-  const forwarded = h.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim() || null;
-  return h.get('x-nf-client-connection-ip') ?? h.get('x-real-ip');
+/**
+ * Why the mail is sent behind a fixed delay rather than awaited.
+ *
+ * The message was neutral; the clock was not. Issuing a token and posting to a mail
+ * provider is a database write plus a network round trip — several hundred milliseconds —
+ * and skipping both when no account exists returned in tens. One request per address was
+ * enough to tell them apart, which is account enumeration by stopwatch and defeats the
+ * whole point of the identical wording.
+ *
+ * So every branch now costs the same: the caller waits `EVEN_RESPONSE_MS` and no longer,
+ * and the send runs on its own. The delay is deliberately longer than a send typically
+ * takes, so the send finishing early or late changes nothing observable.
+ */
+const EVEN_RESPONSE_MS = 700;
+
+async function evenOut<T>(work: Promise<T> | null): Promise<void> {
+  const pause = new Promise((resolve) => setTimeout(resolve, EVEN_RESPONSE_MS));
+  // The work is awaited alongside the pause rather than detached: a serverless host may
+  // freeze the instance the moment the response is written, which would silently drop a
+  // detached send. Waiting for both costs the same in every branch, which is the point.
+  await Promise.all([pause, work ?? Promise.resolve()]);
 }
 
 export async function signUpAction(
@@ -84,27 +98,31 @@ export async function signUpAction(
     .where(eq(users.email, verdict.normalized))
     .limit(1);
 
+  // Hashed before the branch, and discarded on the paths that do not write it. scrypt is
+  // ~100ms by design, and doing it only for new addresses made an existing verified
+  // account measurably the FASTER answer — the same enumeration channel in reverse.
+  const passwordHash = await hashPassword(password);
+
   if (!existing) {
     await db.insert(users).values({
       email: verdict.normalized,
       name: name.trim().slice(0, 120) || null,
-      passwordHash: await hashPassword(password),
+      passwordHash,
     });
   } else if (!existing.passwordHash) {
     // The address already signs in with GitHub or Google. Adding a password here would
     // let anyone who knows the address set one, so nothing is written — and the reply is
     // the same sentence, so the attempt reveals nothing either.
+    await evenOut(null);
     return { ok: true, message: NEUTRAL };
   } else if (!existing.emailVerified) {
     // An unverified signup being repeated is someone who lost the email, so the password
     // is updated and a fresh link sent. Safe precisely because it is unverified: nobody
     // has ever proved they own this address, so there is no account to take over.
-    await db
-      .update(users)
-      .set({ passwordHash: await hashPassword(password) })
-      .where(eq(users.id, existing.id));
+    await db.update(users).set({ passwordHash }).where(eq(users.id, existing.id));
   } else {
     // A verified account already exists. Say nothing that confirms it.
+    await evenOut(null);
     return { ok: true, message: NEUTRAL };
   }
 
@@ -128,18 +146,30 @@ export async function resendVerificationAction(email: string): Promise<AuthResul
   const limit = await rateLimit('verify', normalized, ip);
   if (!limit.allowed) return { ok: false, message: limit.message! };
 
+  // With no provider configured, `deliver()` falls back to writing the link to the
+  // server log. That is a development convenience and a production credential leak —
+  // anyone with log access could complete a reset — so nothing is issued at all.
+  if (!isMailConfigured() && process.env.NODE_ENV === 'production') {
+    await evenOut(null);
+    return { ok: true, message: NEUTRAL };
+  }
+
   const [user] = await db
     .select({ id: users.id, emailVerified: users.emailVerified, passwordHash: users.passwordHash })
     .from(users)
     .where(eq(users.email, normalized))
     .limit(1);
 
-  if (user && !user.emailVerified && user.passwordHash) {
-    const { token } = await issueToken(normalized, 'verify-email');
-    const sent = await sendVerificationEmail(normalized, token);
-    if (!sent.ok) console.error('[auth] verification resend failed:', sent.error);
-  }
+  const send =
+    user && !user.emailVerified && user.passwordHash
+      ? (async () => {
+          const { token } = await issueToken(normalized, 'verify-email');
+          const sent = await sendVerificationEmail(normalized, token);
+          if (!sent.ok) console.error('[auth] verification resend failed:', sent.error);
+        })()
+      : null;
 
+  await evenOut(send);
   return { ok: true, message: NEUTRAL };
 }
 
@@ -168,6 +198,11 @@ export async function requestPasswordResetAction(email: string): Promise<AuthRes
   const limit = await rateLimit('reset-request', normalized, ip);
   if (!limit.allowed) return { ok: false, message: limit.message! };
 
+  if (!isMailConfigured() && process.env.NODE_ENV === 'production') {
+    await evenOut(null);
+    return { ok: true, message: NEUTRAL };
+  }
+
   const [user] = await db
     .select({ id: users.id, passwordHash: users.passwordHash })
     .from(users)
@@ -176,12 +211,15 @@ export async function requestPasswordResetAction(email: string): Promise<AuthRes
 
   // No link is sent to an address that signs in with GitHub or Google: there is no
   // password to reset, and a reset link would be a way to add one.
-  if (user?.passwordHash) {
-    const { token } = await issueToken(normalized, 'reset-password');
-    const sent = await sendPasswordResetEmail(normalized, token);
-    if (!sent.ok) console.error('[auth] reset email failed:', sent.error);
-  }
+  const send = user?.passwordHash
+    ? (async () => {
+        const { token } = await issueToken(normalized, 'reset-password');
+        const sent = await sendPasswordResetEmail(normalized, token);
+        if (!sent.ok) console.error('[auth] reset email failed:', sent.error);
+      })()
+    : null;
 
+  await evenOut(send);
   return { ok: true, message: NEUTRAL };
 }
 
@@ -224,15 +262,18 @@ export async function resetPasswordAction(
 }
 
 /**
- * The rate-limit gate for sign-in.
+ * The friendly half of the sign-in rate limit.
  *
- * Auth.js runs `authorize()` itself, and a limiter inside it cannot reach the request
- * headers cleanly, so the form calls this first and only submits when it passes. The
- * check is on the server either way — this is not a client-side guard.
+ * The authoritative check lives in `authorize()` in auth.ts, on the path Auth.js
+ * publishes — a limiter that only guards this action guards the route an attacker would
+ * never use. This one exists purely so the form can say "too many attempts" in words
+ * instead of the generic sign-in failure, and it therefore READS the counter without
+ * adding to it. Recording here as well would spend two of the user's eight attempts on
+ * every single sign-in.
  */
 export async function guardSignInAction(email: string): Promise<AuthResult> {
   const normalized = normalizeEmail(email);
-  const limit = await rateLimit('sign-in', normalized, await callerIp());
+  const limit = await rateLimit('sign-in', normalized, await callerIp(), { record: false });
   return limit.allowed
     ? { ok: true, message: '' }
     : { ok: false, message: limit.message! };

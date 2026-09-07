@@ -11,7 +11,8 @@ import { and, eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { resumeSnapshots } from '@/lib/db/schema';
-import { DraftBudget } from '@/lib/ai/budget';
+import { BudgetExceededError, DraftBudget } from '@/lib/ai/budget';
+import { assertDailyBudget, recordDailyUsage } from '@/lib/ai/daily-budget';
 import { generateCoverLetter, coverLetterToText } from '@/lib/generate/cover-letter';
 import { generateInterviewPrep } from '@/lib/generate/interview';
 import type { JobRequirement, ResumeDocument } from '@/lib/types';
@@ -54,6 +55,17 @@ export async function POST(
     );
   }
 
+  // Cover letters and interview prep are unlimited per snapshot and cost a model call
+  // each, so they count against the same daily ceiling a draft does.
+  try {
+    await assertDailyBudget(userId);
+  } catch (err) {
+    if (err instanceof BudgetExceededError) {
+      return Response.json({ error: err.message }, { status: 429 });
+    }
+    throw err;
+  }
+
   const budget = new DraftBudget();
 
   try {
@@ -73,5 +85,7 @@ export async function POST(
       { error: err instanceof Error ? err.message : 'Generation failed.' },
       { status: 500 },
     );
+  } finally {
+    await recordDailyUsage(userId, budget.snapshot());
   }
 }

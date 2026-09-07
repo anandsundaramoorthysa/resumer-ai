@@ -12,6 +12,7 @@
  */
 
 import 'server-only';
+import { headers } from 'next/headers';
 import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { authAttempts } from '@/lib/db/schema';
@@ -34,6 +35,48 @@ const LIMITS: Record<AuthAction, { subject: Limit; ip: Limit }> = {
   'reset-request': { subject: { max: 3, windowMs: 60 * 60_000 }, ip: { max: 10, windowMs: 60 * 60_000 } },
   verify: { subject: { max: 10, windowMs: 60 * 60_000 }, ip: { max: 40, windowMs: 60 * 60_000 } },
 };
+
+/**
+ * The caller's IP, from the header the platform sets rather than the one the caller can.
+ *
+ * `x-forwarded-for` is appended to by each hop, so its left-most entry is whatever the
+ * client sent — which means reading it first lets an attacker put a fresh fake IP in
+ * every request and never land in the same bucket twice. `x-real-ip` is worse: it is a
+ * plain client header with no platform guarantee at all.
+ *
+ * So the platform-set header wins, and `x-forwarded-for` is read from the RIGHT, where
+ * the edge appends the address it actually saw. The result must parse as an IP before it
+ * is used as a bucket key, or a caller could send two kilobytes of junk per request and
+ * fill the attempts table with it.
+ */
+export async function callerIp(): Promise<string | null> {
+  const h = await headers();
+
+  // Netlify's edge sets this from the connection, and it cannot be forged upstream.
+  const platform =
+    h.get('x-nf-client-connection-ip') ?? h.get('cf-connecting-ip') ?? h.get('x-vercel-forwarded-for');
+  if (platform && isIpAddress(platform.trim())) return platform.trim();
+
+  const forwarded = h.get('x-forwarded-for');
+  if (forwarded) {
+    const hops = forwarded.split(',').map((v) => v.trim());
+    const nearest = hops[hops.length - 1];
+    if (isIpAddress(nearest)) return nearest;
+  }
+
+  // No trustworthy address. The per-address limits still apply; inventing a bucket key
+  // from a spoofable header would be worse than admitting there is no IP limit here.
+  return null;
+}
+
+/** Loose but sufficient: this only decides whether a string may be a bucket key. */
+export function isIpAddress(value: string): boolean {
+  if (value.length === 0 || value.length > 45) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
+    return value.split('.').every((o) => Number(o) <= 255);
+  }
+  return /^[0-9a-f:]+$/i.test(value) && value.includes(':');
+}
 
 export interface RateVerdict {
   allowed: boolean;
@@ -66,13 +109,19 @@ export async function rateLimit(
   action: AuthAction,
   subject: string,
   ip: string | null,
+  options: { record?: boolean } = {},
 ): Promise<RateVerdict> {
   const limits = LIMITS[action];
   const now = Date.now();
 
-  const rows = [{ subject: `email:${subject}`, action }];
-  if (ip) rows.push({ subject: `ip:${ip}`, action });
-  await db.insert(authAttempts).values(rows);
+  // `record: false` reads the counter without adding to it, so a path that is checked
+  // twice — the form's friendly pre-check and the authoritative check inside
+  // `authorize()` — does not burn two of the user's eight attempts per sign-in.
+  if (options.record !== false) {
+    const rows = [{ subject: `email:${subject}`, action }];
+    if (ip) rows.push({ subject: `ip:${ip}`, action });
+    await db.insert(authAttempts).values(rows);
+  }
 
   const subjectCount = await countSince(
     `email:${subject}`,

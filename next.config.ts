@@ -21,6 +21,58 @@ const nextConfig: NextConfig = {
     'mammoth',
     'nodemailer',
   ],
+
+  /**
+   * Security headers.
+   *
+   * `frame-ancestors`/`X-Frame-Options` is the one that closes a real hole: Next's
+   * Server Actions carry an Origin check, which blocks a cross-origin action POST — but
+   * a page framed by an attacker and clicked through by the victim is same-origin by
+   * construction, so that check never fires. Without this, the delete buttons on
+   * /profile are clickjackable.
+   *
+   * `Referrer-Policy` matters because verification and reset tokens travel in the query
+   * string, and this app loads stylesheets from two font CDNs. On the default policy the
+   * full reset URL can reach those third parties in the Referer header.
+   *
+   * The CSP allows inline styles and scripts because app/layout.tsx emits a JSON-LD
+   * block and Tailwind injects styles; tightening that needs a nonce and is a separate
+   * change. `object-src 'none'` and `base-uri 'self'` cost nothing and close two of the
+   * cheapest injection escalations.
+   */
+  async headers() {
+    const csp = [
+      "default-src 'self'",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "form-action 'self'",
+      "img-src 'self' data: https:",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://api.fontshare.com",
+      "font-src 'self' data: https://fonts.gstatic.com https://api.fontshare.com",
+      "connect-src 'self'",
+    ].join('; ');
+
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
+          { key: 'Content-Security-Policy', value: csp },
+        ],
+      },
+      {
+        // The two pages that carry a single-use credential in the URL send no referrer
+        // at all, so the token cannot reach a font CDN or any other third party.
+        source: '/:path(reset-password|verify-email)',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

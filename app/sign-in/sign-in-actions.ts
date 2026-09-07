@@ -3,7 +3,6 @@
 import { AuthError } from 'next-auth';
 import { signIn } from '@/auth';
 import { normalizeEmail } from '@/lib/auth/email-policy';
-import { clearAttempts } from '@/lib/auth/rate-limit';
 import { guardSignInAction, type AuthResult } from './account-actions';
 
 /**
@@ -42,7 +41,8 @@ export async function passwordSignInAction(
     throw err;
   }
 
-  await clearAttempts('sign-in', normalizeEmail(email));
+  // Unreachable in practice: a successful `signIn` throws a redirect above. The counter
+  // is cleared inside `authorize()`, which is the only place that can see a success.
   return { ok: true, message: 'Signed in.' };
 }
 

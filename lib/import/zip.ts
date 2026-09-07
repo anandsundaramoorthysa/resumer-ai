@@ -41,16 +41,32 @@ export class NotAZipError extends Error {}
 /**
  * Every entry in the archive, decompressed.
  *
- * `maxEntryBytes` bounds a single decompressed file. A ZIP can claim a small compressed
- * size and expand enormously, and this runs inside a serverless function with a fixed
- * memory ceiling — an unbounded inflate is a crash, not an error message.
+ * Three separate bounds, because one is not enough:
+ *
+ *   - `maxEntryBytes` caps a single decompressed file. A ZIP can declare a small size and
+ *     expand enormously, so the real bound is `inflateRawSync`'s `maxOutputLength`.
+ *   - `maxTotalBytes` caps everything kept, which the per-entry cap alone does not: five
+ *     hundred entries each just under an 8MB ceiling is four gigabytes, from an archive
+ *     of a few kilobytes, and every one of them is retained in the returned array.
+ *   - `nameFilter` decides what is worth inflating at all, so an archive padded with
+ *     files the caller will discard never costs anything to decompress.
+ *
+ * This runs inside a serverless function with a fixed memory ceiling, where exceeding it
+ * is a crash rather than an error message.
  */
 export function readZip(
   buf: Buffer,
-  options: { maxEntryBytes?: number; maxEntries?: number } = {},
+  options: {
+    maxEntryBytes?: number;
+    maxEntries?: number;
+    maxTotalBytes?: number;
+    nameFilter?: (name: string) => boolean;
+  } = {},
 ): ZipEntry[] {
   const maxEntryBytes = options.maxEntryBytes ?? 8 * 1024 * 1024;
   const maxEntries = options.maxEntries ?? 500;
+  const maxTotalBytes = options.maxTotalBytes ?? 32 * 1024 * 1024;
+  const nameFilter = options.nameFilter;
 
   if (buf.length < 22) throw new NotAZipError('That file is too small to be a zip archive.');
 
@@ -68,6 +84,7 @@ export function readZip(
   }
 
   const entries: ZipEntry[] = [];
+  let totalBytes = 0;
 
   for (let i = 0; i < entryCount && i < maxEntries; i++) {
     if (offset + 46 > buf.length || buf.readUInt32LE(offset) !== CENTRAL_SIGNATURE) break;
@@ -87,6 +104,9 @@ export function readZip(
     // the whole import: one unreadable member should not cost the user the other twelve.
     if (name.endsWith('/')) continue;
     if (uncompressedSize > maxEntryBytes) continue;
+    // The declared size is attacker-controlled, so it is a cheap early reject and never
+    // the real bound — that is maxOutputLength below.
+    if (nameFilter && !nameFilter(name)) continue;
 
     if (localOffset + 30 > buf.length || buf.readUInt32LE(localOffset) !== LOCAL_SIGNATURE) {
       continue;
@@ -99,12 +119,23 @@ export function readZip(
 
     const raw = buf.subarray(start, end);
     try {
-      if (method === 0) entries.push({ name, bytes: Buffer.from(raw) });
+      // Never inflate more than the remaining budget, so the last entry cannot blow past
+      // the total on its own.
+      const remaining = maxTotalBytes - totalBytes;
+      if (remaining <= 0) break;
+
+      let bytes: Buffer | null = null;
+      if (method === 0) bytes = Buffer.from(raw.subarray(0, Math.min(raw.length, remaining)));
       else if (method === 8) {
-        entries.push({ name, bytes: inflateRawSync(raw, { maxOutputLength: maxEntryBytes }) });
+        bytes = inflateRawSync(raw, { maxOutputLength: Math.min(maxEntryBytes, remaining) });
       }
       // Any other method is left out; the caller reports which expected files are absent,
       // which is more useful than a compression-method number.
+      if (!bytes) continue;
+
+      entries.push({ name, bytes });
+      totalBytes += bytes.length;
+      if (totalBytes >= maxTotalBytes) break;
     } catch {
       continue;
     }

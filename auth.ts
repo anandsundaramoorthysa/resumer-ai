@@ -22,11 +22,13 @@ import GitHub from 'next-auth/providers/github';
 import Google from 'next-auth/providers/google';
 import Credentials from 'next-auth/providers/credentials';
 import { DrizzleAdapter } from '@auth/drizzle-adapter';
+import type { Adapter } from 'next-auth/adapters';
 import { eq } from 'drizzle-orm';
 import { db, isDatabaseConfigured } from '@/lib/db';
 import { accounts, sessions, users, verificationTokens } from '@/lib/db/schema';
 import { verifyPassword } from '@/lib/auth/password';
 import { normalizeEmail } from '@/lib/auth/email-policy';
+import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
 
 const githubConfigured =
   Boolean(process.env.AUTH_GITHUB_ID) && Boolean(process.env.AUTH_GITHUB_SECRET);
@@ -41,6 +43,15 @@ const googleConfigured =
  * accounts here. The sign-in page says one thing for all three. The verification case is
  * the one real cost — a user who never clicked the link gets an unhelpful message — so
  * that page carries a standing "resend the confirmation email" link instead.
+ *
+ * Why the rate limit is HERE and not only in the server action:
+ *
+ * Auth.js publishes `/api/auth/callback/credentials`, and anyone can post an email and
+ * password to it directly — no React, no server action, no `guardSignInAction`. A limiter
+ * that only guards the form guards the path nobody attacking would use. This was not
+ * theoretical: the endpoint was driven from a shell script during development and signed
+ * in without the form being involved at all. So the check lives on the path Auth.js
+ * itself calls, which every route into a password sign-in must pass through.
  */
 const credentialsProvider = Credentials({
   credentials: {
@@ -53,6 +64,11 @@ const credentialsProvider = Credentials({
     const email = typeof raw?.email === 'string' ? normalizeEmail(raw.email) : '';
     const password = typeof raw?.password === 'string' ? raw.password : '';
     if (!email || !password) return null;
+
+    // Before any database read or any scrypt work: an attacker who is over the limit
+    // should not get to spend our CPU either.
+    const verdict = await rateLimit('sign-in', email, await callerIp());
+    if (!verdict.allowed) return null;
 
     const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
 
@@ -67,20 +83,49 @@ const credentialsProvider = Credentials({
     if (!user || !user.passwordHash || !correct) return null;
     if (!user.emailVerified) return null;
 
+    // Signing in successfully clears the counter, so someone who mistyped four times and
+    // then got it right is not still four attempts deep for the next quarter of an hour.
+    // This has to happen here: `signIn()` throws a redirect on success, so the equivalent
+    // line after it in the server action was unreachable.
+    await clearAttempts('sign-in', email);
+
     return { id: user.id, email: user.email, name: user.name, image: user.image };
   },
 });
+
+/**
+ * The adapter, with addresses normalised on the way in and out.
+ *
+ * Password signup stores `normalizeEmail(...)`; the adapter stored whatever the OAuth
+ * provider returned. So `First.Last@Corp.com` from GitHub and `first.last@corp.com` from
+ * a password signup were two rows for one person — which defeats the unique constraint
+ * on `user.email`, breaks the credentials lookup for anyone who first arrived via OAuth,
+ * and undoes the "one inbox, one profile" rule `lib/auth/email-policy.ts` exists to
+ * enforce. Both sides now key on the same string.
+ */
+function normalizingAdapter(base: Adapter): Adapter {
+  return {
+    ...base,
+    createUser: (user) =>
+      base.createUser!({ ...user, email: user.email ? normalizeEmail(user.email) : user.email }),
+    getUserByEmail: (email) => base.getUserByEmail!(normalizeEmail(email)),
+    updateUser: (user) =>
+      base.updateUser!({ ...user, email: user.email ? normalizeEmail(user.email) : user.email }),
+  };
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Without a database the app still boots (JWT sessions only) so a fresh clone can be
   // opened and inspected before Postgres is provisioned.
   adapter: isDatabaseConfigured
-    ? DrizzleAdapter(db, {
-        usersTable: users,
-        accountsTable: accounts,
-        sessionsTable: sessions,
-        verificationTokensTable: verificationTokens,
-      })
+    ? normalizingAdapter(
+        DrizzleAdapter(db, {
+          usersTable: users,
+          accountsTable: accounts,
+          sessionsTable: sessions,
+          verificationTokensTable: verificationTokens,
+        }),
+      )
     : undefined,
   session: { strategy: 'jwt' },
   providers: [
@@ -117,14 +162,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      * An OAuth sign-in is proof the provider delivered mail to that address, so it also
      * settles verification for a password account created earlier with the same one.
      */
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       if (!isDatabaseConfigured) return true;
-      if (account?.type === 'oauth' && user?.email) {
-        await db
-          .update(users)
-          .set({ emailVerified: new Date() })
-          .where(eq(users.email, normalizeEmail(user.email)));
+      if (account?.type !== 'oauth' || !user?.email) return true;
+
+      // Account linking by email is only sound if the provider actually verified the
+      // address. GitHub returns the user's verified primary address, so it always has.
+      // Google normally does too, but a Workspace tenant on a self-owned domain can
+      // present an unverified one — and with linking enabled, that would be a takeover
+      // of any password account holding the same address. So the claim is checked.
+      if (account.provider === 'google') {
+        const verifiedClaim = (profile as { email_verified?: unknown } | undefined)?.email_verified;
+        if (verifiedClaim !== true && verifiedClaim !== 'true') return false;
       }
+
+      // Scoped to the row being signed in, not to every row matching the address.
+      await db
+        .update(users)
+        .set({ emailVerified: new Date() })
+        .where(eq(users.id, user.id!));
       return true;
     },
     async jwt({ token, user }) {
