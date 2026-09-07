@@ -5,8 +5,8 @@
  * section ordering and the same exclusions — explainable and debuggable.
  *
  * The `domainVocabulary` is what powers the relevance floor: applying for an SEO role
- * should not surface a Kubernetes bullet just because it scored well on embedding
- * similarity. Across role families this different, an off-domain bullet actively hurts
+ * should not surface a Kubernetes bullet just because it scored well on keyword
+ * overlap. Across role families this different, an off-domain bullet actively hurts
  * rather than merely diluting.
  */
 

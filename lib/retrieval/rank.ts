@@ -3,15 +3,20 @@
  *
  * Two stages, in this order and for a reason:
  *   1. FLOOR   — exclude records that are off-domain for this role category outright.
- *   2. RANK    — score whatever survived by keyword overlap + (optional) embeddings.
+ *   2. RANK    — score whatever survived by keyword overlap.
  *
  * Doing the floor first is the whole point. Ranking alone would still let a Kubernetes
- * bullet onto an SEO resume whenever the similarity math happened to like it; excluding
- * it makes that structurally impossible.
+ * bullet onto an SEO resume whenever the ranking math happened to like it; excluding it
+ * makes that structurally impossible.
  *
- * Embeddings are optional. With none stored, this degrades to pure lexical matching,
- * which is exactly what moves ATS keyword scores anyway — so the app is fully usable
- * before any embedding infrastructure exists.
+ * Ranking is lexical, and only lexical. This module used to carry a second, weighted
+ * embedding term — `cosineSimilarity`, a `jobEmbedding` option, a per-record vector — and
+ * AUDIT #12 established that nothing ever populated any of it: no caller passed the
+ * option, no code wrote the column, and every ranked record scored 0 on that half of the
+ * formula, which meant the weights silently collapsed to pure keyword overlap anyway.
+ * Code that implies a capability it does not have is worse than not having it, so the
+ * branch is gone rather than left looking like a feature. Lexical overlap is also what
+ * moves ATS keyword scores, which is the thing this retrieval feeds.
  */
 
 import type { JobRequirement, ProfileRecord } from '../types';
@@ -21,12 +26,8 @@ export interface RankedRecord {
   record: ProfileRecord;
   score: number;
   keywordScore: number;
-  embeddingScore: number;
   matchedKeywords: string[];
 }
-
-const KEYWORD_WEIGHT = 0.6;
-const EMBEDDING_WEIGHT = 0.4;
 
 /** How much on-domain vocabulary a record needs before it's eligible at all. */
 export const RELEVANCE_FLOOR = 0.12;
@@ -146,24 +147,7 @@ function keywordOverlap(
   return { score: Math.min(1, weighted / Math.max(4, pool.length * 0.5)), matched };
 }
 
-export function cosineSimilarity(a: number[], b: number[]): number {
-  if (!a?.length || !b?.length || a.length !== b.length) return 0;
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
-  }
-  if (na === 0 || nb === 0) return 0;
-  return dot / (Math.sqrt(na) * Math.sqrt(nb));
-}
-
 export interface RankOptions {
-  jobEmbedding?: number[] | null;
-  /** Per-record embeddings, keyed by record id. */
-  embeddings?: Map<string, number[]>;
   relevanceFloor?: number;
 }
 
@@ -210,17 +194,16 @@ export function rankRecords(
   const target = viabilityTarget(records.filter(filterable).length);
 
   for (const floor of [requested, requested / 2, requested / 4, 0]) {
-    const attempt = rankAtFloor(records, job, options, floor);
+    const attempt = rankAtFloor(records, job, floor);
     const viable = attempt.ranked.filter((r) => filterable(r.record)).length;
     if (viable >= target || floor === 0) return attempt;
   }
-  return rankAtFloor(records, job, options, 0);
+  return rankAtFloor(records, job, 0);
 }
 
 function rankAtFloor(
   records: ProfileRecord[],
   job: JobRequirement,
-  options: RankOptions,
   floorOverride: number,
 ): { ranked: RankedRecord[]; excluded: ProfileRecord[] } {
   const floor = floorOverride;
@@ -243,32 +226,16 @@ function rankAtFloor(
     // Stage 2 — rank what survived (REQ-4.3).
     const { score: keywordScore, matched } = keywordOverlap(record, job);
 
-    let embeddingScore = 0;
-    const emb = options.embeddings?.get(record.id) ?? record_embedding(record);
-    if (options.jobEmbedding && emb) {
-      embeddingScore = Math.max(0, cosineSimilarity(options.jobEmbedding, emb));
-    }
-
-    const hasEmbeddings = Boolean(options.jobEmbedding && emb);
-    const combined = hasEmbeddings
-      ? keywordScore * KEYWORD_WEIGHT + embeddingScore * EMBEDDING_WEIGHT
-      : keywordScore;
-
     ranked.push({
       record,
-      score: combined * (0.7 + 0.3 * fit), // domain fit nudges ordering too
+      score: keywordScore * (0.7 + 0.3 * fit), // domain fit nudges ordering too
       keywordScore,
-      embeddingScore,
       matchedKeywords: matched,
     });
   }
 
   ranked.sort((a, b) => b.score - a.score);
   return { ranked, excluded };
-}
-
-function record_embedding(r: ProfileRecord): number[] | null {
-  return (r as unknown as { embedding?: number[] | null }).embedding ?? null;
 }
 
 /** Caps selections to what fits a resume (REQ-4.3). */

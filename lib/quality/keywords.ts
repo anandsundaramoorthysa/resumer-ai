@@ -11,6 +11,7 @@
 
 import type { ResumeDocument } from '../types';
 import { containsPhrase } from './vocabulary';
+import { skillAliases } from '../skills/identity';
 
 export const KEYWORD_GATE_THRESHOLD = 0.7;
 
@@ -65,6 +66,11 @@ function matches(haystack: string, keyword: string): boolean {
     k.replace(/-/g, ' '),
     k.replace(/\./g, ''),
     k.replace(/\//g, ' '),
+    // Other spellings of the same skill (AUDIT #11). The mechanical variants above only
+    // reach differences in punctuation, so a posting asking for "Golang" against a resume
+    // saying "Go" counted as a miss and cost the 70% gate a keyword it genuinely had.
+    // These come from a curated table, never from a similarity rule — see skills/identity.
+    ...skillAliases(keyword),
   ]);
 
   const lastWord = k.split(' ').pop() ?? '';

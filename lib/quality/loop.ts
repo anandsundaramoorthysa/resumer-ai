@@ -20,6 +20,7 @@ import type {
 } from '../types';
 import { scoreKeywordCoverage, KEYWORD_GATE_THRESHOLD } from './keywords';
 import { scoreFormatting } from './formatting';
+import { combinedFormattingScore, scoreLength } from './length';
 import { scoreSkillsCompleteness } from './skills';
 import { scoreEvidence } from './evidence';
 import { BudgetExceededError, type DraftBudget } from '../ai/budget';
@@ -47,13 +48,17 @@ export async function scoreDocument(
 ): Promise<ScoreBreakdown> {
   const keywords = scoreKeywordCoverage(doc);
   const formatting = scoreFormatting(doc);
+  // Length is scored beside the formatting rules rather than among them — see length.ts
+  // for why a 180-word resume is a quality defect and not a parsing one (AUDIT #7).
+  const length = scoreLength(doc);
+  const formattingScore = combinedFormattingScore(formatting, length);
   const skills = scoreSkillsCompleteness(doc, records);
 
   // Only spend a model call once the cheap deterministic checks are in hand.
   const evidence = await scoreEvidence(doc, budget);
 
   const overall =
-    (formatting.score * WEIGHTS.formatting +
+    (formattingScore * WEIGHTS.formatting +
       evidence.score * WEIGHTS.evidence +
       skills.score * WEIGHTS.skills) *
     10;
@@ -69,7 +74,7 @@ export async function scoreDocument(
     });
   }
 
-  for (const v of formatting.violations) {
+  for (const v of [...formatting.violations, ...(length.violation ? [length.violation] : [])]) {
     critiques.push({
       subScore: 'formatting',
       message: `${v.rule}: ${v.detail}`,
@@ -100,7 +105,7 @@ export async function scoreDocument(
     keywordGatePassed: keywords.passed,
     keywordCoveragePct: keywords.coveragePct,
     missingKeywords: keywords.missing,
-    formattingScore: formatting.score,
+    formattingScore,
     evidenceScore: evidence.score,
     skillsCompletenessScore: skills.score,
     overall: Number(overall.toFixed(2)),

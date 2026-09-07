@@ -17,13 +17,19 @@
  */
 
 import { assert, report, suite, suiteAsync, test, testAsync } from './harness.mjs';
-import { assembleResume, CONTENT_LINES_PER_PAGE } from '@/lib/generate/assemble';
+import {
+  assembleResume,
+  CONTENT_LINES_PER_PAGE,
+  distributeBulletsByRecency,
+  rolesByRecency,
+} from '@/lib/generate/assemble';
 import { CATEGORY_PROFILES, missingFromSectionOrder } from '@/lib/retrieval/categories';
 import { domainFit, rankRecords, RELEVANCE_FLOOR } from '@/lib/retrieval/rank';
 import { isAllowedHeading } from '@/lib/render/headings';
 import { scoreFormatting } from '@/lib/quality/formatting';
 import type {
   ContactInfo,
+  ExperienceBulletRecord,
   JobRequirement,
   ProfileRecord,
   ResumeDocument,
@@ -84,12 +90,18 @@ function job(overrides: Partial<JobRequirement> = {}): JobRequirement {
   };
 }
 
+/**
+ * Bullets are written at the length a real one runs to — around twenty words — because
+ * the quality gate now measures the document's word count against the page budget
+ * (AUDIT #7, `lib/quality/length.ts`). A fixture of five-word bullets is an implausibly
+ * thin resume, and the gate would be right to say so.
+ */
 function bullets(n: number): ProfileRecord[] {
   return Array.from({ length: n }, (_, i) => ({
     ...base(['typescript']),
     type: 'experience-bullet' as const,
     roleId: ROLE.id,
-    text: `Shipped feature ${i + 1} in TypeScript, cutting page weight`,
+    text: `Shipped feature ${i + 1} in TypeScript, cutting median page weight for the checkout journey and removing two rendering passes from every request`,
     action: 'Shipped',
   }));
 }
@@ -99,7 +111,7 @@ function projects(n: number): ProfileRecord[] {
     ...base(['typescript']),
     type: 'project' as const,
     name: `Project ${i + 1}`,
-    description: `A TypeScript service doing thing ${i + 1}`,
+    description: `A TypeScript service doing thing ${i + 1}, built to run unattended, with a job queue, structured logging and a small operator console for replaying failures`,
     stack: ['TypeScript'],
     links: [],
     impactMetrics: [],
@@ -112,7 +124,7 @@ function fullProfile(): ProfileRecord[] {
     {
       ...base(),
       type: 'summary',
-      text: 'Engineer who ships TypeScript services and writes about them.',
+      text: 'Engineer who ships TypeScript services and writes about them, working end to end from schema design through deployment, and happiest on the parts of a system that other people would rather not own.',
     },
     { ...base(), type: 'skill', name: 'TypeScript', category: 'language' },
     ...bullets(3),
@@ -142,12 +154,20 @@ function fullProfile(): ProfileRecord[] {
       venue: 'Medium',
       date: '2024-08',
     },
-    { ...base(), type: 'award', title: 'Best Paper', issuer: 'SIGIR', date: '2024-06' },
+    {
+      ...base(),
+      type: 'award',
+      title: 'Best Paper',
+      issuer: 'SIGIR',
+      date: '2024-06',
+      description: 'Awarded for the retrieval-floor work, out of four hundred submissions',
+    },
     {
       ...base(),
       type: 'achievement',
       title: 'Open source maintainer',
-      description: '3k stars',
+      description:
+        'Maintain a TypeScript logging library with three thousand stars, reviewing community patches and cutting a release every month',
     },
     {
       ...base(),
@@ -155,6 +175,8 @@ function fullProfile(): ProfileRecord[] {
       role: 'Organiser',
       organization: 'Chennai JS',
       date: '2023',
+      description:
+        'Run the monthly meetup, find and rehearse the speakers, and keep the venue and catering inside a sponsor budget',
     },
     { ...base(), type: 'language', name: 'Tamil', proficiency: 'native' },
     { ...base(), type: 'language', name: 'English', proficiency: 'professional' },
@@ -334,11 +356,19 @@ await suiteAsync('one-line sections', async () => {
 });
 
 await suiteAsync('page budget', async () => {
-  /** ~26 of the 29 lines a page holds: no headroom left, but not overflowing either. */
-  const fullPage = () => [...fullProfile(), ...bullets(5), ...projects(2)];
+  /**
+   * ~26 of the 29 lines a page holds: no headroom left, but not overflowing either.
+   *
+   * The page is filled with projects rather than more bullets. Since AUDIT #8 the bullet
+   * allowance is distributed per role and capped at five for the most recent one, so
+   * piling eight bullets onto this fixture's single role no longer produces eight lines —
+   * which is the point of that change, and would quietly make this fixture stop testing
+   * the page budget at all.
+   */
+  const fullPage = () => [...fullProfile(), ...bullets(2), ...projects(5)];
 
   /** More content than the page holds however the tail is trimmed. */
-  const overflowing = () => [...fullProfile(), ...bullets(8), ...projects(8)];
+  const overflowing = () => [...fullProfile(), ...bullets(5), ...projects(12)];
 
   await testAsync('a short resume keeps its interests', async () => {
     const { document, droppedForSpace } = await build(fullProfile());
@@ -485,3 +515,155 @@ suite('relevance floor exemptions', () => {
 });
 
 report('sections');
+
+/* --------------------------------------------------- bullets by recency ---- */
+
+suite('per-role bullet distribution (AUDIT #8)', () => {
+  const role = (
+    id: string,
+    startDate: string,
+    endDate: string,
+  ): RoleRecord => ({
+    id,
+    userId: 'u1',
+    title: `Engineer at ${id}`,
+    company: id,
+    startDate,
+    endDate,
+    source: 'github-sync',
+    contentHash: `h-${id}`,
+  });
+
+  const forRole = (roleId: string, n: number): ExperienceBulletRecord[] =>
+    Array.from({ length: n }, (_, i) => ({
+      ...base(['typescript']),
+      type: 'experience-bullet' as const,
+      roleId,
+      text: `${roleId} bullet ${i + 1}`,
+      action: 'Shipped',
+    }));
+
+  const counts = (kept: ExperienceBulletRecord[]) => {
+    const out: Record<string, number> = {};
+    for (const b of kept) out[b.roleId] = (out[b.roleId] ?? 0) + 1;
+    return out;
+  };
+
+  test('an ongoing role outranks a finished one that started later', () => {
+    const current = role('current', '2021-01', 'present');
+    const recent = role('recent', '2023-01', '2024-06');
+    assert.deepEqual(
+      rolesByRecency([recent, current]).map((r) => r.id),
+      ['current', 'recent'],
+      'a job you still hold is the most recent one you have',
+    );
+  });
+
+  test('two ongoing roles order by which started later', () => {
+    const older = role('older', '2019-01', 'present');
+    const newer = role('newer', '2023-05', 'present');
+    assert.deepEqual(
+      rolesByRecency([older, newer]).map((r) => r.id),
+      ['newer', 'older'],
+    );
+  });
+
+  test('a dateless role sorts last rather than being guessed at', () => {
+    const dated = role('dated', '2019-01', '2020-01');
+    const undated = role('undated', '', '');
+    assert.deepEqual(
+      rolesByRecency([undated, dated]).map((r) => r.id),
+      ['dated', 'undated'],
+    );
+  });
+
+  test('the current job gets more bullets than the old internship', () => {
+    const current = role('current', '2023-01', 'present');
+    const intern = role('intern', '2019-05', '2019-08');
+    // The internship's bullets come first, which is what retrieval ordering did to the
+    // live profile: relevance put a 2019 internship above the job the person holds.
+    const kept = distributeBulletsByRecency(
+      [...forRole('intern', 6), ...forRole('current', 6)],
+      [intern, current],
+      11,
+    );
+    const n = counts(kept);
+    assert.ok(
+      n.current > n.intern,
+      `current ${n.current} should beat intern ${n.intern}`,
+    );
+    // Nine, not eleven: two roles cap at five and four. The allowance is a ceiling, not
+    // a quota, and the lines it leaves go to the tail sections rather than to a fifth
+    // bullet on a three-month internship.
+    assert.equal(kept.length, 9);
+  });
+
+  test('no role takes more than five, however many it has', () => {
+    const only = role('only', '2023-01', 'present');
+    const kept = distributeBulletsByRecency(forRole('only', 20), [only], 20);
+    assert.equal(kept.length, 5, 'research caps a single role at five bullets');
+  });
+
+  test('every role keeps its floor before any role gets a second helping', () => {
+    const roles = [
+      role('a', '2023-01', 'present'),
+      role('b', '2021-01', '2022-12'),
+      role('c', '2019-01', '2020-12'),
+    ];
+    const kept = distributeBulletsByRecency(
+      roles.flatMap((r) => forRole(r.id, 5)),
+      roles,
+      11,
+    );
+    const n = counts(kept);
+    for (const r of roles) assert.ok(n[r.id] >= 2, `${r.id} was starved (${n[r.id]})`);
+    assert.ok(n.a > n.c, 'and the newest still leads');
+  });
+
+  test('a dateless role loses the taper, never its place on the resume', () => {
+    const dated = role('dated', '2023-01', 'present');
+    const undated = role('undated', '', '');
+    const kept = distributeBulletsByRecency(
+      [...forRole('dated', 5), ...forRole('undated', 5)],
+      [dated, undated],
+      11,
+    );
+    const n = counts(kept);
+    assert.ok(n.undated >= 2, 'an undated job is still a job that happened');
+    assert.ok(n.dated > n.undated, 'but it cannot claim to be the current one');
+  });
+
+  test('within a role the most relevant bullets are the ones kept', () => {
+    const only = role('only', '2023-01', 'present');
+    const kept = distributeBulletsByRecency(forRole('only', 8), [only], 11);
+    assert.deepEqual(
+      kept.map((b) => b.text),
+      ['only bullet 1', 'only bullet 2', 'only bullet 3', 'only bullet 4', 'only bullet 5'],
+      'recency decides how many, retrieval order decides which',
+    );
+  });
+
+  test('with no roles at all the allowance is spent flat, as it was before', () => {
+    const orphans = forRole('missing-role', 15);
+    assert.equal(distributeBulletsByRecency(orphans, [], 11).length, 11);
+  });
+
+  test('the assembled Experience section prints newest first', async () => {
+    const current = role('current', '2023-01', 'present');
+    const old = role('old', '2019-01', '2020-01');
+    const { document } = await assembleResume({
+      userId: 'u1',
+      contact: CONTACT,
+      job: job(),
+      records: [...fullProfile(), ...forRole('old', 3), ...forRole('current', 3)],
+      roles: [old, current],
+      rewrite: false,
+    });
+    const groups = section(document, 'experience')?.groups ?? [];
+    assert.deepEqual(
+      groups.map((g) => g.subtitle),
+      ['current', 'old'],
+      'a reader reads down the page',
+    );
+  });
+});

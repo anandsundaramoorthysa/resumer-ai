@@ -11,6 +11,7 @@
 
 import type { ProfileRecord, ResumeDocument } from '../types';
 import { holdsKeyword, textHoldsKeyword } from './vocabulary';
+import { canonicalSkillName, skillAliases } from '../skills/identity';
 
 export interface SkillsCompletenessResult {
   score: number; // 0..1
@@ -25,15 +26,37 @@ function norm(s: string): string {
   return s.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-/** Everything the profile can legitimately claim, as a normalized set. */
+/**
+ * Everything the profile can legitimately claim, as a normalized set.
+ *
+ * Each term is added under its own spelling *and* its canonical one (AUDIT #11), so a
+ * profile that says "React.js" still evidences a posting that says "React". This is
+ * additive on purpose: the alias table only ever states that two spellings are the same
+ * skill, so widening the vocabulary this way cannot manufacture a claim the profile does
+ * not already make — which is the one thing this set must never do (NFR-8).
+ */
 export function profileVocabulary(records: ProfileRecord[]): Set<string> {
   const vocab = new Set<string>();
+  const add = (term: string) => {
+    const n = norm(term);
+    if (!n) return;
+    vocab.add(n);
+    vocab.add(norm(canonicalSkillName(term)));
+  };
   for (const r of records) {
-    for (const tag of r.tags) vocab.add(norm(tag));
-    if (r.type === 'skill') vocab.add(norm(r.name));
-    if (r.type === 'project') for (const s of r.stack) vocab.add(norm(s));
+    for (const tag of r.tags) add(tag);
+    if (r.type === 'skill') add(r.name);
+    if (r.type === 'project') for (const s of r.stack) add(s);
   }
   return vocab;
+}
+
+/**
+ * The keyword, plus every other spelling of the same skill. A posting writing "Node.js"
+ * and a Skills line writing "Node" are one keyword, and only the alias table knows it.
+ */
+function spellings(keyword: string): string[] {
+  return [keyword, ...skillAliases(keyword)];
 }
 
 export function scoreSkillsCompleteness(
@@ -56,11 +79,10 @@ export function scoreSkillsCompleteness(
   const genuineGaps: string[] = [];
 
   for (const kw of keywords) {
-    const k = norm(kw);
     // Whole-phrase, one-directional matching (see vocabulary.ts). Substring matching
     // here previously let a profile containing "SEO" claim "technical SEO".
-    const inSkills = textHoldsKeyword(skillsText, kw);
-    const held = holdsKeyword(vocab, kw);
+    const inSkills = spellings(kw).some((s) => textHoldsKeyword(skillsText, s));
+    const held = spellings(kw).some((s) => holdsKeyword(vocab, s));
 
     if (inSkills) present.push(kw);
     else if (held) missingButHeld.push(kw);

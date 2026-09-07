@@ -1,0 +1,210 @@
+/**
+ * Skill identity and normalisation — AUDIT #11.
+ *
+ * The same shape of problem roles (`lib/sync/roles.ts`) and education
+ * (`lib/sync/education.ts`) already have: one fact spelled several ways becomes several
+ * rows. Here it is one skill spelled several ways becoming several entries —
+ * "React" / "React.js" / "ReactJS" / "react" — which inflates the Skills section, spends
+ * the section's most valuable real estate (its front) on repeats, and distorts keyword
+ * coverage because a posting saying "Node.js" misses a profile saying "Node".
+ *
+ * The pattern is the established one: normalize -> identity -> merge -> dedupe.
+ *
+ * What differs here is the *identity* step. Roles and education could reduce their
+ * strings algorithmically because the noise in them is structural — legal suffixes,
+ * parentheticals, punctuation. Skill names have no such structure, and every algorithm
+ * that looks like it works destroys a real distinction:
+ *
+ *   - strip a "js" suffix and "JS" reduces to nothing, while "Java" and "JavaScript"
+ *     stay apart only by luck
+ *   - strip punctuation and "C", "C++" and "C#" become one language
+ *   - edit distance loose enough to catch "Postgres"/"PostgreSQL" — the pair anyone
+ *     would loosen it for — is also loose enough to catch "Ruby"/"Rust"
+ *
+ * So identity comes from a curated alias table and nothing else. It is short, it is
+ * auditable, and adding an entry is a decision someone made rather than a threshold that
+ * moved. Everything absent from the table is its own skill, which is the safe default:
+ * failing to merge two spellings costs one duplicated line, whereas merging two different
+ * skills puts a claim on the resume the person cannot back up (NFR-8).
+ *
+ * PAIRS DELIBERATELY KEPT APART — each is one alias-table entry away from being wrong,
+ * and none of them is in it:
+ *
+ *   Java        / JavaScript      different languages, one a prefix of the other
+ *   JS          / Java            "JS" is JavaScript only; nothing shortens to "Java"
+ *   C / C++ / C#                  three languages distinguished only by punctuation
+ *   R           / Ruby, R / Rust  "R" is a statistics language and shortens to nothing
+ *   Go          / Godot           "Go" merges with "Golang" only, never by prefix
+ *   Angular     / AngularJS       Angular 2+ and AngularJS 1.x are separate ecosystems
+ *                                 and postings ask for one of them specifically
+ *   React       / React Native    web and mobile; a React dev is not a React Native dev
+ *   Next.js     / Nest.js         one letter apart, unrelated frameworks
+ *   SQL         / PostgreSQL      "SQL" is the language and PostgreSQL one engine;
+ *                                 merging would let generic SQL claim Postgres
+ *   TS          / TypeScript      NOT merged: "TS" reads as TypeScript in a frontend list
+ *                                 and as nothing in particular anywhere else, and the
+ *                                 point of a curated table is to decline the coin-flips
+ */
+
+/**
+ * Case, spacing and decorative punctuation are the only things reduced before lookup.
+ * Note what survives: `+`, `#` and `.`, because those three characters are the entire
+ * difference between C, C++ and C#, and between Node and Node.js.
+ */
+export function normalizeSkill(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9+#.\s-]/g, ' ')
+    .replace(/[-\s]+/g, ' ')
+    .replace(/\.+$/, '')
+    .trim();
+}
+
+/**
+ * Spelling -> canonical display name. Every spelling is written out; nothing is derived.
+ *
+ * Only pairs actually seen in the wild, or certain to appear in a posting written against
+ * a portfolio that spells them the other way, earn an entry. The canonical side is the
+ * form a posting is most likely to use, because it is the form that gets printed.
+ */
+const ALIASES: Record<string, string> = {
+  // JavaScript and its ecosystem — the family that produced the audit finding.
+  js: 'JavaScript',
+  javascript: 'JavaScript',
+  ecmascript: 'JavaScript',
+  typescript: 'TypeScript',
+  react: 'React',
+  'react.js': 'React',
+  reactjs: 'React',
+  node: 'Node.js',
+  'node.js': 'Node.js',
+  nodejs: 'Node.js',
+  express: 'Express.js',
+  'express.js': 'Express.js',
+  expressjs: 'Express.js',
+  vue: 'Vue.js',
+  'vue.js': 'Vue.js',
+  vuejs: 'Vue.js',
+  // Bare "next" is deliberately absent: it is an ordinary English word, and a skills list
+  // parsed out of free text is exactly where it would match something that is not a tool.
+  'next.js': 'Next.js',
+  nextjs: 'Next.js',
+  'nest.js': 'Nest.js',
+  nestjs: 'Nest.js',
+
+  // Languages whose long and short names are both in common use.
+  golang: 'Go',
+  go: 'Go',
+  python: 'Python',
+  python3: 'Python',
+  'c#': 'C#',
+  csharp: 'C#',
+  'c sharp': 'C#',
+  'c++': 'C++',
+  cpp: 'C++',
+  'c plus plus': 'C++',
+  'objective c': 'Objective-C',
+  objectivec: 'Objective-C',
+
+  // Datastores and platforms written two ways on every portfolio.
+  postgres: 'PostgreSQL',
+  postgresql: 'PostgreSQL',
+  'postgre sql': 'PostgreSQL',
+  mongo: 'MongoDB',
+  mongodb: 'MongoDB',
+  kubernetes: 'Kubernetes',
+  k8s: 'Kubernetes',
+  aws: 'AWS',
+  'amazon web services': 'AWS',
+  gcp: 'Google Cloud',
+  'google cloud': 'Google Cloud',
+  'google cloud platform': 'Google Cloud',
+  '.net': '.NET',
+  dotnet: '.NET',
+  'dot net': '.NET',
+
+  // Markup and styling, where a version digit is decoration rather than a distinction:
+  // nobody lists HTML and HTML5 meaning two different competencies.
+  html: 'HTML',
+  html5: 'HTML',
+  css: 'CSS',
+  css3: 'CSS',
+  tailwind: 'Tailwind CSS',
+  tailwindcss: 'Tailwind CSS',
+  'tailwind css': 'Tailwind CSS',
+};
+
+/**
+ * The key two spellings of one skill share. Anything absent from the table is its own
+ * identity, keyed on its normalised form so at least case and spacing still collapse.
+ */
+export function skillIdentity(name: string): string {
+  const n = normalizeSkill(name);
+  const canonical = ALIASES[n];
+  return canonical ? canonical.toLowerCase() : n;
+}
+
+/** The name to print. An unknown skill keeps whatever the user wrote. */
+export function canonicalSkillName(name: string): string {
+  return ALIASES[normalizeSkill(name)] ?? name.trim();
+}
+
+/**
+ * Every spelling sharing this skill's identity, normalised.
+ *
+ * The keyword gate needs this: a posting asking for "Node.js" against a resume that says
+ * "Node" is a match, and the gate can only know that by being handed the siblings.
+ */
+export function skillAliases(name: string): string[] {
+  const id = skillIdentity(name);
+  const out = new Set<string>([normalizeSkill(name)]);
+  for (const [spelling, canonical] of Object.entries(ALIASES)) {
+    if (canonical.toLowerCase() === id) out.add(spelling);
+  }
+  return [...out].filter(Boolean);
+}
+
+/**
+ * Picks the better of two tellings of one skill, as `mergeRoles` does for jobs.
+ *
+ * The canonical name wins wherever the table knows one, because that is the spelling a
+ * parser and a recruiter both expect. Otherwise the first telling wins: with no table
+ * entry there is nothing to prefer, and stability beats an arbitrary rule.
+ */
+export function mergeSkillNames(a: string, b: string): string {
+  const canonical = ALIASES[normalizeSkill(a)] ?? ALIASES[normalizeSkill(b)];
+  return canonical ?? a.trim();
+}
+
+/** Collapses a list of skill names to one entry per real skill, order preserved. */
+export function dedupeSkillNames(names: string[]): string[] {
+  const byIdentity = new Map<string, string>();
+  for (const name of names) {
+    if (!name?.trim()) continue;
+    const key = skillIdentity(name);
+    if (!key) continue;
+    const existing = byIdentity.get(key);
+    byIdentity.set(
+      key,
+      existing ? mergeSkillNames(existing, name) : canonicalSkillName(name),
+    );
+  }
+  return [...byIdentity.values()];
+}
+
+/**
+ * The same collapse over anything carrying a skill name. The first record seen survives
+ * — retrieval has already ordered them by relevance, and re-ordering here would quietly
+ * undo that.
+ */
+export function dedupeBySkillIdentity<T>(items: T[], nameOf: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    const key = skillIdentity(nameOf(item));
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}

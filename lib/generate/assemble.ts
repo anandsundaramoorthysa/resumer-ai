@@ -40,6 +40,7 @@ import type { DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
 import { coerceHeading } from '../render/headings';
 import { formatDate, formatDateRange } from '../render/dates';
+import { canonicalSkillName, dedupeBySkillIdentity } from '../skills/identity';
 
 /** A second page is only worth opening if there is enough career to fill it. */
 function twoPagesJustified(job: JobRequirement | null, totalYears: number): boolean {
@@ -69,6 +70,169 @@ export function contentLineAllowance(
   totalYears: number,
 ): number {
   return CONTENT_LINES_PER_PAGE * (twoPagesJustified(job, totalYears) ? 2 : 1);
+}
+
+/**
+ * The same page, counted in words instead of lines — AUDIT #7.
+ *
+ * The line budget above cannot see thinness: eleven bullets of four words each occupy
+ * eleven lines and say nothing, which is how a 180-word document scored well enough to
+ * ship. So the same page gets a second reading. The content column is A4 width less
+ * 2×40pt of padding, and at 10.5pt that runs to roughly 95 characters — call it 15 words
+ * — on a full line. Resume lines are not all full (a group title is three words, a date
+ * range two), so ~12 words per content line is the honest average, and 29 × 12 ≈ 350.
+ *
+ * That the derivation lands on 350 matters: the research target for an entry-level
+ * resume is 350–450 words for one page, and this number was reached from the stylesheet
+ * without reference to it. Two independent routes to the same figure is the only reason
+ * to trust either.
+ */
+export const CONTENT_WORDS_PER_PAGE = 350;
+
+export function contentWordAllowance(
+  job: JobRequirement | null,
+  totalYears: number,
+): number {
+  return CONTENT_WORDS_PER_PAGE * (twoPagesJustified(job, totalYears) ? 2 : 1);
+}
+
+/* ------------------------------------------------------ bullets by recency -- */
+
+/**
+ * Per-role bullet counts — AUDIT #8.
+ *
+ * `bulletAllowance` caps the total and nothing spent it per role, so the order bullets
+ * happened to arrive in decided everything: retrieval ranks by relevance to the posting,
+ * and a 2019 internship whose stack matches the job takes four slots while the current
+ * job takes one. A reader scans the top job first and finds it the thinnest thing on the
+ * page.
+ *
+ * Research is consistent on the shape: 3–5 bullets on the most recent role, tapering to
+ * 2–3 on older ones. `MAX` is the top of that band and `MIN` the bottom, and the taper is
+ * one bullet per step down the list — a role at rank 3 or lower is old enough that the
+ * distinction between it and rank 4 is not worth a line.
+ */
+const MIN_BULLETS_PER_ROLE = 2;
+const MAX_BULLETS_PER_ROLE = 5;
+
+function targetForRank(rank: number): number {
+  return Math.max(MIN_BULLETS_PER_ROLE, MAX_BULLETS_PER_ROLE - rank);
+}
+
+/** A 'YYYY-MM' or 'YYYY' date as a sortable month number, or null when unusable. */
+function monthIndex(date: string | undefined): number | null {
+  const m = /^(\d{4})(?:-(\d{1,2}))?/.exec((date ?? '').trim());
+  if (!m) return null;
+  const year = Number(m[1]);
+  if (!Number.isFinite(year) || year < 1950) return null;
+  return year * 12 + (m[2] ? Number(m[2]) - 1 : 0);
+}
+
+/** Sorts above every real date: an ongoing job is more recent than any finished one. */
+const ONGOING = Number.MAX_SAFE_INTEGER;
+
+/** Sorts below every real date. See `rolesByRecency` for why undated roles land here. */
+const UNDATED = -1;
+
+function endIndex(role: RoleRecord): number {
+  const end = (role.endDate ?? '').trim().toLowerCase();
+  // A job you still hold is the most recent one you have, whatever its start date says.
+  // Getting this wrong is the visible failure: a role that began in 2021 and has not
+  // ended outranks one that ran through 2023, and sorting on start date alone reverses
+  // exactly that pair.
+  if (end === 'present' || end === 'current' || end === 'ongoing') return ONGOING;
+  return monthIndex(role.endDate) ?? monthIndex(role.startDate) ?? UNDATED;
+}
+
+/**
+ * Roles newest first.
+ *
+ * A role with no usable dates sorts last, and that is a deliberate choice rather than an
+ * accident of the comparator. It cannot be placed anywhere else honestly — claiming it is
+ * current would let an undated 2019 row outrank the job the person holds today. What it
+ * is NOT allowed to do is disappear: the allocation below seats every role at
+ * `MIN_BULLETS_PER_ROLE` before any role gets a second helping, so an undated role loses
+ * only the taper, never its floor, and drops to zero solely when the total allowance is
+ * too small to seat every role at all. The real fix is upstream — AUDIT #4 makes a
+ * missing start date a write-time error — and this is what happens to the rows that
+ * predate it.
+ */
+export function rolesByRecency(roles: RoleRecord[]): RoleRecord[] {
+  return [...roles].sort((a, b) => {
+    const diff = endIndex(b) - endIndex(a);
+    if (diff !== 0) return diff;
+    // Two jobs both marked present: the one started later is the current one.
+    return (monthIndex(b.startDate) ?? UNDATED) - (monthIndex(a.startDate) ?? UNDATED);
+  });
+}
+
+/**
+ * Spends the bullet allowance across roles by recency instead of taking a flat top-N.
+ *
+ * Two passes, and the order matters. The floor pass seats every role first, so no job
+ * vanishes from the resume because the one above it was interesting; only then does the
+ * taper pass hand out the remainder, newest-first, up to each role's target. Within a
+ * role the bullets keep the order retrieval gave them, so the taper picks the most
+ * job-relevant ones — recency decides how many a role gets, relevance decides which.
+ *
+ * Bullets attached to no role are handled separately at the end. They cannot be given a
+ * per-role target because they are not a role, and capping them would break the baseline
+ * resume (REQ-6.7), which has no roles at all and would otherwise print two bullets.
+ */
+export function distributeBulletsByRecency(
+  bullets: ExperienceBulletRecord[],
+  roles: RoleRecord[],
+  allowance: number,
+): ExperienceBulletRecord[] {
+  if (allowance <= 0) return [];
+
+  const byRole = new Map<string, ExperienceBulletRecord[]>();
+  for (const b of bullets) {
+    if (!b.roleId || !roles.some((r) => r.id === b.roleId)) continue;
+    const list = byRole.get(b.roleId) ?? [];
+    list.push(b);
+    byRole.set(b.roleId, list);
+  }
+
+  const ordered = rolesByRecency(roles).filter((r) => (byRole.get(r.id)?.length ?? 0) > 0);
+  const taken = new Map<string, number>(ordered.map((r) => [r.id, 0]));
+  let left = allowance;
+
+  const give = (roleId: string, upTo: number): void => {
+    const have = taken.get(roleId) ?? 0;
+    const available = (byRole.get(roleId)?.length ?? 0) - have;
+    const n = Math.min(upTo, available, left);
+    if (n <= 0) return;
+    taken.set(roleId, have + n);
+    left -= n;
+  };
+
+  for (const role of ordered) give(role.id, MIN_BULLETS_PER_ROLE);
+
+  // One at a time rather than target-at-once, so the newest role reaches five only after
+  // every role has three — a taper, not a winner-takes-all.
+  for (let round = MIN_BULLETS_PER_ROLE; round < MAX_BULLETS_PER_ROLE && left > 0; round++) {
+    for (const [rank, role] of ordered.entries()) {
+      if (left <= 0) break;
+      if ((taken.get(role.id) ?? 0) < Math.min(targetForRank(rank), round + 1)) {
+        give(role.id, 1);
+      }
+    }
+  }
+
+  const kept = new Set<string>();
+  for (const [roleId, n] of taken) {
+    for (const b of (byRole.get(roleId) ?? []).slice(0, n)) kept.add(b.id);
+  }
+
+  for (const b of bullets) {
+    if (left <= 0) break;
+    if (kept.has(b.id) || byRole.has(b.roleId ?? '')) continue;
+    kept.add(b.id);
+    left -= 1;
+  }
+
+  return bullets.filter((b) => kept.has(b.id));
 }
 
 /**
@@ -173,7 +337,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
   const totalYears = estimateYears(roles);
   const allowance = bulletAllowance(job, totalYears);
   const lineBudget = contentLineAllowance(job, totalYears);
-  const trimmedBullets = bullets.slice(0, allowance);
+  const trimmedBullets = distributeBulletsByRecency(bullets, roles, allowance);
 
   // --- Grounded rewrite (REQ-4.4) --------------------------------------------
   const rewrites = new Map<string, string>();
@@ -224,16 +388,29 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
   if (skills.length > 0) {
     // Ordered so job-required skills lead — the Skills section is weighted heavily
     // by parsers, so what sits at the front of it matters.
-    const ordered = orderSkillsForJob(skills, job);
+    //
+    // Deduplicated after ordering, not before (AUDIT #11): the ordering has already put
+    // the job-relevant spelling first, so the survivor of "React"/"React.js" is the one
+    // the posting asked for. Names print canonically — a Skills line reading
+    // "React, ReactJS, react" costs three of the section's most valuable slots to say
+    // one thing, and gives a parser three tokens where a recruiter sees carelessness.
+    const ordered = dedupeBySkillIdentity(orderSkillsForJob(skills, job), (s) => s.name);
     byKey.skills = {
       key: 'skills',
       heading: coerceHeading('skills', undefined),
-      items: [{ text: ordered.map((s) => s.name).join(', '), sourceRecordId: null }],
+      items: [
+        {
+          text: ordered.map((s) => canonicalSkillName(s.name)).join(', '),
+          sourceRecordId: null,
+        },
+      ],
     };
   }
 
   if (trimmedBullets.length > 0) {
-    const groups = roles
+    // Printed newest-first for the same reason the bullets are allocated that way: a
+    // reader reads down, and the allocation would be invisible under any other order.
+    const groups = rolesByRecency(roles)
       .map((role) => {
         const items = trimmedBullets
           .filter((b) => b.roleId === role.id)

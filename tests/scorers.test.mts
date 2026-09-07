@@ -12,6 +12,7 @@
 import { assert, report, suite, test } from './harness.mjs';
 import { scoreKeywordCoverage, KEYWORD_GATE_THRESHOLD } from '@/lib/quality/keywords';
 import { scoreFormatting } from '@/lib/quality/formatting';
+import { combinedFormattingScore, scoreLength } from '@/lib/quality/length';
 import { scoreSkillsCompleteness, profileVocabulary } from '@/lib/quality/skills';
 import type {
   JobRequirement,
@@ -63,6 +64,16 @@ const job: JobRequirement = {
   flags: [],
 };
 
+/**
+ * A resume of a plausible length, because the quality gate now measures that (AUDIT #7).
+ * The three-line document this fixture used to be is not a resume anyone would send, and
+ * the length cases below need something realistic to vary from.
+ *
+ * The order of the first two entries is load-bearing: cases index `sections[0]` for
+ * Skills and `sections[1]` for Experience, so the padding sections go after them. None of
+ * the added text mentions a job keyword — the coverage cases count matches exactly, and a
+ * stray "TypeScript" in the Summary would silently rewrite their arithmetic.
+ */
 function cleanSections(): ResumeSection[] {
   return [
     {
@@ -85,6 +96,93 @@ function cleanSections(): ResumeSection[] {
               sourceRecordId: 'b1',
             },
           ],
+        },
+        {
+          title: 'Junior Engineer',
+          subtitle: 'Sparks',
+          dateRange: 'Jun 2020 – Mar 2021',
+          items: [
+            {
+              text: 'Took over the internal admin tool nobody owned and cut its unhandled error rate by half over a quarter, mostly by deleting code.',
+              sourceRecordId: 'b4',
+            },
+            {
+              text: 'Wrote the first regression suite for the ordering service, which caught two defects in its first week and has run on every commit since.',
+              sourceRecordId: 'b5',
+            },
+          ],
+        },
+        {
+          title: 'Software Engineer',
+          subtitle: 'Corizo',
+          dateRange: 'Apr 2021 – Dec 2021',
+          items: [
+            {
+              text: 'Rewrote the nightly settlement job so a failed batch could be replayed from the last good record instead of from the start of the day.',
+              sourceRecordId: 'b2',
+            },
+            {
+              text: 'Moved report generation off the request path onto a queue, which took the slowest page in the admin console from a timeout to under two seconds.',
+              sourceRecordId: 'b3',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'summary',
+      heading: 'Summary',
+      items: [
+        {
+          text: 'Engineer who works end to end, from schema design through deployment and the on-call rota that follows it. Happiest on the parts of a system nobody else wants to own: the batch jobs, the migrations, and the reporting that everyone depends on and nobody has looked at in a year.',
+          sourceRecordId: 'sm1',
+        },
+      ],
+    },
+    {
+      key: 'projects',
+      heading: 'Projects',
+      items: [],
+      groups: [
+        {
+          title: 'Ledger',
+          subtitle: 'Billing',
+          items: [
+            {
+              text: 'A double-entry billing service that reconciles against the payment provider every hour and files a report on anything it cannot explain.',
+              sourceRecordId: 'p1',
+            },
+          ],
+        },
+        {
+          title: 'Harbour',
+          subtitle: 'Data',
+          items: [
+            {
+              text: 'A schema-diffing tool that refuses a migration whose down path has never been run, after one release spent a weekend being unpicked by hand.',
+              sourceRecordId: 'p3',
+            },
+          ],
+        },
+        {
+          title: 'Cormorant',
+          subtitle: 'Tooling',
+          items: [
+            {
+              text: 'A small operator console for replaying failed background work, built after the third outage that turned out to be one stuck queue nobody could see.',
+              sourceRecordId: 'p2',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'education',
+      heading: 'Education',
+      items: [
+        {
+          text: 'B.Sc. Computer Science, Loyola College, Chennai — graduated with distinction',
+          sourceRecordId: 'e1',
         },
       ],
     },
@@ -368,6 +466,98 @@ suite('formatting compliance (REQ-5.2 / REQ-6.1)', () => {
 
     assert.ok(scoreFormatting(two).score < scoreFormatting(one).score);
     assert.ok(scoreFormatting(one).score < 1);
+  });
+});
+
+/* ---------------------------------------------------------------- length ---- */
+
+suite('document length (AUDIT #7)', () => {
+  test('a resume of a plausible length is not flagged', () => {
+    assert.equal(scoreLength(doc()).violation, undefined);
+  });
+
+  test('fires: a resume too thin to judge anything by', () => {
+    const d = doc({ sections: [cleanSections()[0], cleanSections()[1]] });
+    d.sections[1].groups = [d.sections[1].groups![0]];
+    const r = scoreLength(d);
+    assert.ok(r.violation, `${r.words} words should have been flagged`);
+    assert.equal(r.violation?.rule, 'plausible-length');
+  });
+
+  test('the floor sits between the resume the audit saw and the research target', () => {
+    // The observed failure was ~180 words; research asks for 350-450 on one page. A floor
+    // that misses the first or fires on the second would be the wrong number.
+    // Fourteen words to a line, which is roughly what a resume bullet runs to — spreading
+    // the same word count one-per-line would trip the upper bound instead and prove
+    // nothing about the floor.
+    const words = (n: number) =>
+      doc({
+        sections: [
+          cleanSections()[0],
+          {
+            key: 'experience',
+            heading: 'Experience',
+            items: Array.from({ length: Math.ceil(n / 14) }, (_, i) => ({
+              text: Array.from({ length: 14 }, (_, w) => `word${i}x${w}`).join(' '),
+              sourceRecordId: null,
+            })),
+          },
+        ],
+      });
+    assert.ok(scoreLength(words(180)).violation, '180 words must be flagged');
+    assert.equal(scoreLength(words(350)).violation, undefined, '350 words must not be');
+  });
+
+  test('fires: a resume that overruns its page budget', () => {
+    const long = doc();
+    long.sections[1].groups![0].items = Array.from({ length: 200 }, (_, i) => ({
+      text: `Shipped a thing that mattered to somebody, number ${i}`,
+      sourceRecordId: null,
+    }));
+    const r = scoreLength(long);
+    assert.equal(r.violation?.rule, 'plausible-length');
+    assert.ok(r.violation?.detail.includes('overruns'));
+  });
+
+  test('a two-page-worthy posting gets two pages of budget', () => {
+    const mid = doc({ jobRequirement: { ...job, seniority: 'entry' } });
+    mid.sections[1].groups![0].items = Array.from({ length: 40 }, (_, i) => ({
+      text: `Shipped a thing that mattered to somebody, number ${i}`,
+      sourceRecordId: null,
+    }));
+    assert.ok(scoreLength(mid).violation, 'this overruns one page');
+
+    const senior = { ...mid, jobRequirement: { ...job, seniority: 'senior' as const } };
+    assert.equal(scoreLength(senior).violation, undefined, 'and fits two');
+  });
+
+  test('a baseline resume with no posting is not judged for length (REQ-6.7)', () => {
+    const tiny = doc({ jobRequirement: null });
+    tiny.sections = [cleanSections()[0]];
+    assert.equal(scoreLength(tiny).violation, undefined);
+  });
+
+  test('an empty document is charged once, by has-substance, not twice', () => {
+    const empty = doc({ sections: [] });
+    assert.ok(rules(empty).includes('has-substance'));
+    assert.equal(scoreLength(empty).violation, undefined);
+  });
+
+  test('length costs exactly one formatting rule, no more and no less', () => {
+    const clean = scoreFormatting(doc());
+    const good = combinedFormattingScore(clean, scoreLength(doc()));
+    assert.equal(good, 1);
+
+    const short = { words: 10, lines: 2, violation: { rule: 'plausible-length', detail: '' } };
+    assert.equal(combinedFormattingScore(clean, short), 10 / 11);
+
+    // One broken formatting rule and a bad length cost the same as each other.
+    const oneRule = doc();
+    oneRule.sections[1].heading = 'My Journey';
+    assert.equal(
+      combinedFormattingScore(scoreFormatting(oneRule), scoreLength(doc())),
+      10 / 11,
+    );
   });
 });
 

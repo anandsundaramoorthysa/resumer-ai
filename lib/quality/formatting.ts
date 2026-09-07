@@ -151,11 +151,23 @@ export function scoreFormatting(doc: ResumeDocument): FormattingResult {
 
   // Score: each distinct violated RULE costs equally, so one repeated mistake does
   // not dominate the score more than a different single mistake.
-  const distinctRules = new Set(violations.map((v) => v.rule)).size;
-  const TOTAL_RULES = 10;
-  const score = Math.max(0, (TOTAL_RULES - distinctRules) / TOTAL_RULES);
+  const score = Math.max(
+    0,
+    (FORMATTING_RULE_COUNT - distinctRuleCount(violations)) / FORMATTING_RULE_COUNT,
+  );
 
   return { score, violations };
+}
+
+/**
+ * How many rules this module can find broken. Exported because the quality gate scores
+ * one more rule of its own — document length, which is not a parsing failure and so is
+ * not judged here (see `quality/length.ts`) — and the two have to price a rule alike.
+ */
+export const FORMATTING_RULE_COUNT = 10;
+
+export function distinctRuleCount(violations: FormattingViolation[]): number {
+  return new Set(violations.map((v) => v.rule)).size;
 }
 
 function truncate(s: string, n = 48): string {
