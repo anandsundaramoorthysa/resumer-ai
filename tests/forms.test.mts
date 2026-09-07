@@ -1,0 +1,110 @@
+/**
+ * The shared field registry — lib/profile/forms.ts.
+ *
+ * The registry exists so the form and the server cannot disagree about what a record is.
+ * These assertions hold that property: every type is complete, every identity field is a
+ * real field, and values survive the trip through the form's string representation.
+ */
+
+import {
+  RECORD_FORMS,
+  EDITABLE_TYPES,
+  coerceFormValues,
+  describeRecord,
+  formFor,
+  identityParts,
+  missingRequired,
+  tagSource,
+} from '../lib/profile/forms';
+import { suite, test, assert } from './harness.mjs';
+
+suite('record form registry', () => {
+  test('every form is internally consistent', () => {
+    for (const type of EDITABLE_TYPES) {
+      const form = RECORD_FORMS[type];
+      assert(form.type === type, `${type}: keyed by its own type`);
+      assert(form.fields.length > 0, `${type}: has fields`);
+      assert(form.identityFields.length > 0, `${type}: has an identity`);
+
+      const names = new Set(form.fields.map((f) => f.name));
+      assert(names.size === form.fields.length, `${type}: no duplicate field names`);
+
+      for (const id of form.identityFields) {
+        // An identity field that is not a form field hashes to the empty string for
+        // every record, so every record of that type collides with every other.
+        assert(names.has(id), `${type}: identity field "${id}" is not one of its fields`);
+      }
+
+      for (const field of form.fields) {
+        if (field.kind === 'select') {
+          assert((field.options?.length ?? 0) > 1, `${type}.${field.name}: select needs options`);
+        }
+        // A required field that is also a select can never be missing, and a required
+        // list would be validated as empty-array rather than empty-string.
+        if (field.required) assert(field.kind !== 'select', `${type}.${field.name}: select cannot be required`);
+      }
+    }
+  });
+
+  test('a required field left blank is reported by its label', () => {
+    const form = formFor('certification')!;
+    const missing = missingRequired(form, coerceFormValues(form, { name: 'AWS SAA', issuer: '  ' }));
+    assert(missing.length === 1, `expected one gap, got ${missing.join(', ')}`);
+    assert(missing[0] === 'Issued by', 'reported by the label the user saw');
+  });
+
+  test('a filled form reports nothing missing', () => {
+    const form = formFor('education')!;
+    const data = coerceFormValues(form, {
+      credential: 'B.Sc.',
+      institution: 'Anna University',
+      field: 'Computer Science',
+      startDate: '',
+      endDate: '',
+    });
+    assert(missingRequired(form, data).length === 0, 'both required fields present');
+    assert(!('startDate' in data), 'an untouched optional field is omitted, not stored empty');
+  });
+
+  test('a list field round-trips through its comma-separated text', () => {
+    const form = formFor('project')!;
+    const data = coerceFormValues(form, {
+      name: 'Resumer AI',
+      description: 'Tailored resumes',
+      stack: 'Next.js, PostgreSQL,  Drizzle ,',
+      links: '',
+      impactMetrics: '',
+    });
+    const stack = data.stack as string[];
+    assert(stack.length === 3, `trailing and empty entries dropped, got ${JSON.stringify(stack)}`);
+    assert(stack[2] === 'Drizzle', 'and each entry is trimmed');
+    assert(Array.isArray(data.links) && (data.links as string[]).length === 0, 'an empty list is an empty array');
+  });
+
+  test('identity parts come from the identity fields, in order', () => {
+    const form = formFor('volunteering')!;
+    const parts = identityParts(form, { role: 'Mentor', organization: 'GDSC' });
+    assert(parts.join('|') === 'GDSC|Mentor', `organization then role, got ${parts.join('|')}`);
+  });
+
+  test('tagging reads every field, not only the name', () => {
+    const form = formFor('project')!;
+    const source = tagSource(form, { name: 'Pipeline', stack: ['React', 'Postgres'] });
+    assert(source.includes('React') && source.includes('Postgres'), 'stack reaches the tagger');
+  });
+
+  test('every type describes itself without falling back to JSON', () => {
+    for (const type of EDITABLE_TYPES) {
+      const form = RECORD_FORMS[type];
+      const data: Record<string, unknown> = {};
+      for (const f of form.fields) data[f.name] = f.kind === 'list' ? ['x'] : `${f.name}-value`;
+      const line = describeRecord(type, data);
+      assert(line.length > 0 && !line.startsWith('{'), `${type}: described as "${line}"`);
+    }
+  });
+
+  test('a bullet still describes itself, though it has no form', () => {
+    assert(formFor('experience-bullet') === null, 'deliberately not in the registry');
+    assert(describeRecord('experience-bullet', { text: 'Shipped it' }) === 'Shipped it', 'still readable');
+  });
+});

@@ -7,6 +7,14 @@ import { hashContent } from '@/lib/sync/reconcile';
 import { deriveTags } from '@/lib/sync/tags';
 import { audit } from '@/lib/server/profile';
 import { composeBulletText } from './bullet';
+import {
+  coerceFormValues,
+  formFor,
+  identityParts,
+  missingRequired,
+  tagSource,
+  type RecordForm,
+} from './forms';
 
 /**
  * Writing profile records by hand.
@@ -52,14 +60,22 @@ export const ProjectInput = z.object({
 
 export const SimpleTextInput = z.object({ text: nonEmpty.max(1200) });
 
-/** Duplicate content is "you already have this", not a database error to leak upward. */
+/**
+ * Duplicate content is "you already have this", not a database error to leak upward.
+ *
+ * The chain is walked because Drizzle wraps driver errors: the thrown error is a plain
+ * `Error` whose message is the SQL, and the PostgresError carrying code 23505 is its
+ * `cause`. Checking only the top-level object matched nothing, so every duplicate
+ * reached the user as "Failed query: insert into ..." instead.
+ */
 function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code?: string }).code === '23505'
-  );
+  for (let e: unknown = err, depth = 0; e && depth < 5; depth++) {
+    if (typeof e === 'object' && 'code' in e && (e as { code?: string }).code === '23505') {
+      return true;
+    }
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 async function insertRecord(args: {
@@ -256,4 +272,99 @@ export async function createSummary(userId: string, text: string): Promise<strin
     hashParts: [parsed.text],
     tagSource: parsed.text,
   });
+}
+
+/*
+ * Generic writes, driven by lib/profile/forms.ts.
+ *
+ * The per-type functions above stay because their inputs are not interchangeable — a
+ * bullet needs a role, a summary replaces rather than accumulates. Everything else is
+ * the same three steps over a different field list, and writing twelve near-identical
+ * functions is how a field ends up validated in one place and dropped in another.
+ */
+
+/** A field longer than the form allows is rejected, not silently cut short. */
+function enforceLimits(form: RecordForm, data: Record<string, unknown>): void {
+  for (const field of form.fields) {
+    const value = data[field.name];
+    if (typeof value === 'string' && field.maxLength && value.length > field.maxLength) {
+      throw new Error(`${field.label} is longer than ${field.maxLength} characters.`);
+    }
+    if (field.kind === 'select' && typeof value === 'string' && field.options) {
+      if (!field.options.includes(value)) throw new Error(`${field.label} is not a valid choice.`);
+    }
+  }
+}
+
+function prepare(type: string, raw: Record<string, string>) {
+  const form = formFor(type);
+  if (!form) throw new Error(`${type} cannot be edited here.`);
+
+  const data = coerceFormValues(form, raw);
+  const missing = missingRequired(form, data);
+  if (missing.length > 0) throw new Error(`${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} required.`);
+  enforceLimits(form, data);
+
+  return { form, data };
+}
+
+export async function createTypedRecord(
+  userId: string,
+  type: string,
+  raw: Record<string, string>,
+): Promise<string> {
+  // The summary is single-valued, so it keeps its replace-rather-than-append path.
+  if (type === 'summary') return createSummary(userId, raw.text ?? '');
+
+  const { form, data } = prepare(type, raw);
+  return insertRecord({
+    userId,
+    type: form.type,
+    data,
+    hashParts: identityParts(form, data),
+    tagSource: tagSource(form, data),
+  });
+}
+
+export async function updateTypedRecord(
+  userId: string,
+  recordId: string,
+  type: string,
+  raw: Record<string, string>,
+): Promise<void> {
+  const { form, data } = prepare(type, raw);
+
+  // The type comes from the client, so it is checked against the row rather than
+  // trusted: a mismatch would rewrite an award as a language and lose both.
+  const [existing] = await db
+    .select({ type: profileRecords.type })
+    .from(profileRecords)
+    .where(and(eq(profileRecords.id, recordId), eq(profileRecords.userId, userId)))
+    .limit(1);
+  if (!existing) throw new Error('That entry no longer exists.');
+  if (existing.type !== form.type) throw new Error('That entry is not a ' + form.singular + '.');
+
+  try {
+    const updated = await db
+      .update(profileRecords)
+      .set({
+        data,
+        contentHash: hashContent([form.type, ...identityParts(form, data)]),
+        tags: deriveTags(tagSource(form, data)),
+        // Editing a synced record promotes it to the user's own, so the next sync stops
+        // competing with the edit — the same rule updateBullet follows.
+        source: 'manual',
+        flaggedForRemoval: false,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(profileRecords.id, recordId), eq(profileRecords.userId, userId)))
+      .returning({ id: profileRecords.id });
+
+    if (updated.length === 0) throw new Error('That entry no longer exists.');
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new DuplicateRecordError();
+    throw err;
+  }
+
+  await audit(userId, recordId, 'update', 'manual', { type: form.type });
 }

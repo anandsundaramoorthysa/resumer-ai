@@ -7,6 +7,8 @@ import { profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { Logo } from '@/components/logo';
 import { FlaggedRecord } from './flagged-record';
 import { BulletEditor, type ExistingBullet } from './bullet-editor';
+import { RecordEditor, type EditableRecord } from './record-editor';
+import { RECORD_FORMS, describeRecord, formFor } from '@/lib/profile/forms';
 import { findProfileGaps } from '@/lib/profile/gaps';
 import type { ProfileRecord, RoleRecord } from '@/lib/types';
 
@@ -14,70 +16,34 @@ export const metadata = { title: 'Profile' };
 export const dynamic = 'force-dynamic';
 
 /**
- * Every record type needs an entry here and a case in `describe()`. A type missing from
- * either does not fail — it renders as a raw JSON blob under a heading like
- * "volunteering", which is how a synced record becomes invisible to the person who is
- * supposed to be reviewing it.
+ * The order sections appear in. Everything editable is listed, including types the
+ * profile has nothing of yet — an absent section is indistinguishable from a section
+ * with no way to fill it, and the gaps here are exactly what the user is meant to fill.
  */
-const TYPE_LABELS: Record<string, string> = {
-  summary: 'Professional summary',
-  skill: 'Skills',
+const SECTION_ORDER = [
+  'summary',
+  'skill',
+  'project',
+  'education',
+  'certification',
+  'publication',
+  'writing',
+  'award',
+  'achievement',
+  'volunteering',
+  'language',
+  'interest',
+];
+
+/** Types shown as chips: a bulleted list of single words reads far longer than it is. */
+const CHIP_TYPES = new Set(['skill', 'language', 'interest']);
+
+const EXTRA_LABELS: Record<string, string> = {
   'experience-bullet': 'Experience bullets',
-  project: 'Projects',
-  education: 'Education',
-  certification: 'Certifications',
-  publication: 'Publications',
-  writing: 'Articles & writing',
-  award: 'Awards',
-  achievement: 'Achievements',
-  volunteering: 'Volunteering & leadership',
-  language: 'Languages',
-  interest: 'Interests',
 };
 
-/** One readable line per record, whatever its type. */
-function describe(type: string, data: Record<string, unknown>): string {
-  const s = (k: string) => (typeof data[k] === 'string' ? (data[k] as string) : '');
-  switch (type) {
-    case 'skill':
-      return s('name');
-    case 'experience-bullet':
-      return s('text') || s('action');
-    case 'project':
-      return `${s('name')}${s('description') ? ` — ${s('description')}` : ''}`;
-    case 'education':
-      return [s('credential'), s('field'), s('institution')].filter(Boolean).join(' · ');
-    case 'certification':
-      return [s('name'), s('issuer')].filter(Boolean).join(' · ');
-    case 'achievement':
-      return [s('title'), s('description')].filter(Boolean).join(' — ');
-    case 'summary':
-      return s('text');
-    case 'publication':
-      // Status is shown only when it isn't "published", so the line never implies a
-      // paper is out when the record says it is still under review.
-      return [
-        s('title'),
-        s('venue'),
-        s('date'),
-        s('doi') ? `DOI ${s('doi')}` : '',
-        s('status') && s('status') !== 'published' ? s('status') : '',
-      ]
-        .filter(Boolean)
-        .join(' · ');
-    case 'writing':
-      return [s('title'), s('venue'), s('date')].filter(Boolean).join(' · ');
-    case 'award':
-      return [s('title'), s('issuer'), s('date')].filter(Boolean).join(' · ');
-    case 'volunteering':
-      return [s('role'), s('organization'), s('date')].filter(Boolean).join(' · ');
-    case 'language':
-      return s('proficiency') ? `${s('name')} — ${s('proficiency')}` : s('name');
-    case 'interest':
-      return s('name');
-    default:
-      return JSON.stringify(data).slice(0, 120);
-  }
+function labelFor(type: string): string {
+  return formFor(type)?.plural ?? EXTRA_LABELS[type] ?? type;
 }
 
 export default async function ProfilePage() {
@@ -218,8 +184,8 @@ export default async function ProfilePage() {
                 <FlaggedRecord
                   key={r.id}
                   id={r.id}
-                  type={TYPE_LABELS[r.type] ?? r.type}
-                  text={describe(r.type, r.data)}
+                  type={labelFor(r.type)}
+                  text={describeRecord(r.type, r.data as Record<string, unknown>)}
                 />
               ))}
             </ul>
@@ -273,45 +239,52 @@ export default async function ProfilePage() {
           </section>
         ) : null}
 
-        <div className="mt-7 space-y-5">
-          {[...grouped.entries()].filter(([type]) => type !== 'experience-bullet').map(([type, list]) => (
-            <section key={type} className="rounded-xl border border-line bg-surface p-5">
-              <div className="flex items-baseline justify-between gap-3">
-                <h2 className="font-display text-lg">{TYPE_LABELS[type] ?? type}</h2>
-                <span className="font-mono text-xs text-muted tabular">{list.length}</span>
-              </div>
+        {/* A profile with nothing in it gets the invitation above instead of twelve
+            empty forms, which read as work to do rather than a place to start. */}
+        <div className={records.length === 0 ? 'hidden' : 'mt-7 space-y-5'}>
+          {SECTION_ORDER.map((type) => {
+            const form = RECORD_FORMS[type];
+            const list: EditableRecord[] = (grouped.get(type) ?? []).map((r) => ({
+              id: r.id,
+              source: r.source,
+              data: r.data as Record<string, unknown>,
+            }));
 
-              {/* Chips for the one-word types; a bulleted list of single words reads
-                  as a much longer section than it is. */}
-              {type === 'skill' || type === 'language' || type === 'interest' ? (
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {list.map((r) => (
-                    <span
-                      key={r.id}
-                      className="rounded-full bg-brand-tint px-2.5 py-1 text-xs font-medium text-brand-dark"
-                      title={r.source === 'manual' ? 'Entered by hand' : 'From your portfolio'}
-                    >
-                      {describe(r.type, r.data)}
-                    </span>
-                  ))}
+            return (
+              <section key={type} className="rounded-xl border border-line bg-surface p-5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h2 className="font-display text-lg">{form.plural}</h2>
+                  <span className="font-mono text-xs text-muted tabular">{list.length}</span>
                 </div>
-              ) : (
+                <RecordEditor
+                  form={form}
+                  records={list}
+                  chips={CHIP_TYPES.has(type)}
+                  single={type === 'summary'}
+                />
+              </section>
+            );
+          })}
+
+          {/* Anything synced whose type predates the registry still has to be visible,
+              even though there is no form for it yet. */}
+          {[...grouped.entries()]
+            .filter(([type]) => type !== 'experience-bullet' && !RECORD_FORMS[type])
+            .map(([type, list]) => (
+              <section key={type} className="rounded-xl border border-line bg-surface p-5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h2 className="font-display text-lg">{labelFor(type)}</h2>
+                  <span className="font-mono text-xs text-muted tabular">{list.length}</span>
+                </div>
                 <ul className="mt-3 space-y-2">
                   {list.map((r) => (
-                    <li key={r.id} className="flex items-start gap-2.5 text-sm">
-                      <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-line" />
-                      <span className="min-w-0">
-                        {describe(r.type, r.data)}
-                        <span className="ml-2 font-mono text-[11px] text-muted">
-                          {r.source === 'manual' ? 'manual' : 'synced'}
-                        </span>
-                      </span>
+                    <li key={r.id} className="text-sm">
+                      {describeRecord(r.type, r.data as Record<string, unknown>)}
                     </li>
                   ))}
                 </ul>
-              )}
-            </section>
-          ))}
+              </section>
+            ))}
         </div>
       </main>
     </div>

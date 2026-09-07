@@ -8,6 +8,8 @@ import {
   createProject,
   createSkill,
   createSummary,
+  createTypedRecord,
+  updateTypedRecord,
   deleteRecord as removeRecord,
   setProjectMetrics,
   updateBullet,
@@ -134,4 +136,26 @@ export async function saveSummary(text: string): Promise<Result> {
   return run(async () => {
     await createSummary(userId, text);
   }, 'Summary saved.');
+}
+
+/**
+ * The generic path, used by every type in `RECORD_FORMS`.
+ *
+ * Values arrive as the raw strings the form held, and are coerced and validated on the
+ * server by the same registry the form rendered from — the client's version of the rules
+ * is a convenience, never the authority.
+ */
+export async function saveRecord(
+  type: string,
+  recordId: string | null,
+  values: Record<string, string>,
+): Promise<Result> {
+  const userId = await requireUserId();
+  return run(
+    async () => {
+      if (recordId) await updateTypedRecord(userId, recordId, type, values);
+      else await createTypedRecord(userId, type, values);
+    },
+    recordId ? 'Saved.' : 'Added.',
+  );
 }
