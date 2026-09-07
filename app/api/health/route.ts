@@ -13,6 +13,8 @@
 import { availableProviders } from '@/lib/ai/models';
 import { isDatabaseConfigured } from '@/lib/db';
 import { getSiteUrl } from '@/lib/site-url';
+import { isEncryptionConfigured } from '@/lib/auth/secret-box';
+import { isMailConfigured, mailProvider } from '@/lib/auth/mail';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,6 +52,19 @@ export async function GET() {
     ai: {
       providers: availableProviders().map((p) => p.label),
       count: availableProviders().length,
+    },
+    /**
+     * Token encryption is reported because its failure mode is silent: with no key,
+     * everything keeps working and the GitHub tokens sit in the database in the clear.
+     * A boolean here is the difference between noticing that and not.
+     */
+    security: {
+      tokenEncryption: isEncryptionConfigured(),
+      cronEnabled: present('CRON_SECRET').set,
+    },
+    mail: {
+      configured: isMailConfigured(),
+      provider: mailProvider(),
     },
     optional: {
       FIRECRAWL_API_KEY: present('FIRECRAWL_API_KEY').set,

@@ -1,5 +1,6 @@
 'use server';
 
+import { getGithubToken } from '@/lib/server/github-token';
 import { revalidatePath } from 'next/cache';
 import { eq } from 'drizzle-orm';
 import { auth } from '@/auth';
@@ -43,13 +44,9 @@ export async function connectRepo(
     };
   }
 
-  const [account] = await db
-    .select()
-    .from(accounts)
-    .where(and(eq(accounts.userId, userId), eq(accounts.provider, 'github')))
-    .limit(1);
+  const token = await getGithubToken(userId);
 
-  if (!account?.access_token) {
+  if (!token) {
     return {
       ok: false,
       message: 'No GitHub token on your account. Sign out and sign in again to grant repo access.',
@@ -57,7 +54,7 @@ export async function connectRepo(
   }
 
   try {
-    await latestCommitSha(ref, account.access_token);
+    await latestCommitSha(ref, token);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('404')) {

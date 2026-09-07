@@ -15,6 +15,7 @@
  * request it exists to avoid.
  */
 
+import { getGithubToken } from '@/lib/server/github-token';
 import { timingSafeEqual } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { and, eq, isNotNull } from 'drizzle-orm';
@@ -95,19 +96,15 @@ async function run(req: NextRequest) {
       continue;
     }
 
-    const [account] = await db
-      .select({ token: accounts.access_token })
-      .from(accounts)
-      .where(and(eq(accounts.userId, user.id), eq(accounts.provider, 'github')))
-      .limit(1);
+    const token = await getGithubToken(user.id);
 
-    if (!account?.token) {
+    if (!token) {
       skipped += 1;
       continue;
     }
 
     try {
-      const sha = await latestCommitSha(ref, account.token);
+      const sha = await latestCommitSha(ref, token);
       checked += 1;
       if (sha === user.lastSyncedSha) continue;
 

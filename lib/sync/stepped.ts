@@ -1,3 +1,4 @@
+import { getGithubToken } from '@/lib/server/github-token';
 import 'server-only';
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
@@ -199,16 +200,12 @@ async function runStep(
     const ref = user?.portfolioRepo ? parseRepoRef(user.portfolioRepo) : null;
     if (!ref) throw new Error('No portfolio repository connected.');
 
-    const [account] = await db
-      .select()
-      .from(accounts)
-      .where(and(eq(accounts.userId, userId), eq(accounts.provider, 'github')))
-      .limit(1);
-    if (!account?.access_token) {
+    const token = await getGithubToken(userId);
+    if (!token) {
       throw new Error('No GitHub token — sign out and back in to re-grant repo access.');
     }
 
-    const sha = await latestCommitSha(ref, account.access_token);
+    const sha = await latestCommitSha(ref, token);
 
     // The SHA gate (NFR-7): unchanged means the whole job is already done.
     if (sha === user?.lastSyncedSha) {
@@ -218,7 +215,7 @@ async function runStep(
       );
     }
 
-    const files = await fetchPortfolioFiles(ref, account.access_token, sha);
+    const files = await fetchPortfolioFiles(ref, token, sha);
     if (files.length === 0) {
       throw new Error(
         'No readable content files found in that repository. Check the repo has your profile data in it.',

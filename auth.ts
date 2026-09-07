@@ -29,6 +29,7 @@ import { accounts, sessions, users, verificationTokens } from '@/lib/db/schema';
 import { verifyPassword } from '@/lib/auth/password';
 import { normalizeEmail } from '@/lib/auth/email-policy';
 import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
+import { encryptIfPossible } from '@/lib/auth/secret-box';
 
 const githubConfigured =
   Boolean(process.env.AUTH_GITHUB_ID) && Boolean(process.env.AUTH_GITHUB_SECRET);
@@ -111,6 +112,26 @@ function normalizingAdapter(base: Adapter): Adapter {
     getUserByEmail: (email) => base.getUserByEmail!(normalizeEmail(email)),
     updateUser: (user) =>
       base.updateUser!({ ...user, email: user.email ? normalizeEmail(user.email) : user.email }),
+
+    /**
+     * Provider tokens are encrypted on the way into the database.
+     *
+     * This is the only write path for them — Auth.js calls `linkAccount` when a provider
+     * is first connected and whenever the grant is renewed — so encrypting here covers
+     * every token that ever reaches the table. Reads go through
+     * `lib/server/github-token.ts`, which is the matching half.
+     *
+     * The GitHub token carries `repo` scope, since GitHub has no read-only variant that
+     * reaches private repositories. A leaked row is therefore read and write access to
+     * everything the user owns, which is why this is worth the indirection.
+     */
+    linkAccount: (account) =>
+      base.linkAccount!({
+        ...account,
+        access_token: encryptIfPossible(account.access_token) ?? undefined,
+        refresh_token: encryptIfPossible(account.refresh_token) ?? undefined,
+        id_token: encryptIfPossible(account.id_token) ?? undefined,
+      }),
   };
 }
 

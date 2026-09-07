@@ -30,6 +30,7 @@ import { roleIdentity, splitMergedTitles } from '@/lib/sync/roles';
 import type { ParseResult } from '@/lib/sync/parse';
 import type { ParsedRecord } from '@/lib/sync/reconcile';
 import { hashContent, reconcile, summarizePlan } from '@/lib/sync/reconcile';
+import { getGithubToken } from '@/lib/server/github-token';
 
 export interface LoadedProfile {
   contact: ContactInfo;
@@ -97,13 +98,9 @@ export async function loadProfileForUser(userId: string): Promise<LoadedProfile>
 
 /* ------------------------------------------------------------------ sync ---- */
 
+/** Delegated so the token is decrypted in exactly one place — see github-token.ts. */
 async function githubTokenFor(userId: string): Promise<string | null> {
-  const [row] = await db
-    .select()
-    .from(accounts)
-    .where(and(eq(accounts.userId, userId), eq(accounts.provider, 'github')))
-    .limit(1);
-  return row?.access_token ?? null;
+  return getGithubToken(userId);
 }
 
 /**
