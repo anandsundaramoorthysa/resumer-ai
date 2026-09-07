@@ -82,3 +82,17 @@ desktop.ini
 /screenshots/
 /.playwright/
 .playwright-mcp/
+
+# ---------------------------------------------------------------------------
+# drizzle-kit's output directory (`out` in drizzle.config.ts).
+#
+# This project applies schema changes with `npm run db:push`, which writes no
+# migration files — so the only thing that ever appears here is an empty
+# meta/_journal.json left behind by `drizzle-kit check`/`studio`. It is a
+# byproduct, not state, and it kept showing up as an untracked change.
+#
+# If migrations are ever adopted (`drizzle-kit generate`, i.e. a db:generate
+# script alongside db:push), DELETE this rule — the generated SQL and its
+# journal are real source and must be committed.
+# ---------------------------------------------------------------------------
+/drizzle/
