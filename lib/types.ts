@@ -3,7 +3,11 @@
  * Mirrors specs/design.md §3. Requirement IDs referenced in comments.
  */
 
-export type RecordSource = 'manual' | 'github-sync' | 'ai-import';
+/**
+ * Where a fact came from. Load-bearing: lib/sync/reconcile.ts only ever rewrites
+ * `github-sync` rows, so every other value is a promise that a sync will not touch it.
+ */
+export type RecordSource = 'manual' | 'github-sync' | 'ai-import' | 'linkedin';
 
 export type RoleCategory =
   | 'seo'

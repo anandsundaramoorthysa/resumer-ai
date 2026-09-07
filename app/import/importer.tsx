@@ -43,21 +43,44 @@ interface Preview {
 
 type Phase = 'choose' | 'reading' | 'review' | 'saved';
 
+/**
+ * Every reviewable type, in the order the sections are shown.
+ *
+ * This listed five types while the extractor produced thirteen, so a publication, award,
+ * language or volunteering role came back from the server, was ticked by default, and
+ * was never drawn — the user confirmed facts they could not see.
+ */
 const TYPE_ORDER = [
+  'summary',
   'skill',
   'project',
   'education',
   'certification',
+  'publication',
+  'writing',
+  'award',
   'achievement',
+  'volunteering',
+  'language',
+  'interest',
 ] as const;
 
 const TYPE_HEADINGS: Record<string, string> = {
+  summary: 'Professional summary',
   skill: 'Skills',
   project: 'Projects',
   education: 'Education',
   certification: 'Certifications',
+  publication: 'Publications',
+  writing: 'Writing',
+  award: 'Awards',
   achievement: 'Achievements',
+  volunteering: 'Volunteering',
+  language: 'Languages',
+  interest: 'Interests',
 };
+
+type ImportSource = 'resume' | 'linkedin';
 
 export function Importer() {
   const router = useRouter();
@@ -70,15 +93,63 @@ export function Importer() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [useContact, setUseContact] = useState(true);
   const [result, setResult] = useState<ImportActionResult | null>(null);
+  const [source, setSource] = useState<ImportSource>('resume');
   const [saving, startSaving] = useTransition();
 
-  const run = async (file: File) => {
+  const begin = (file: File, from: ImportSource) => {
     setError(null);
     setNotice(null);
     setResult(null);
+    setSource(from);
     setFileName(file.name);
     setPhase('reading');
     setProgress({ done: 0, total: 0 });
+  };
+
+  /**
+   * A LinkedIn export needs no model and no stepping — it is CSV with named columns, so
+   * one request returns the whole review list. Reading it with AI would introduce a
+   * paraphrase where the user's own words are already sitting in a field.
+   */
+  const runLinkedIn = async (file: File) => {
+    begin(file, 'linkedin');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/import/linkedin', { method: 'POST', body: form });
+      const data = (await res.json()) as Preview & {
+        error?: string;
+        notes?: string[];
+        filesRead?: string[];
+      };
+      if (!res.ok) {
+        setError(data.error ?? 'That export could not be read.');
+        setPhase('choose');
+        return;
+      }
+
+      const keys = new Set<string>([
+        ...data.records.map((r) => r.key),
+        ...data.roles.flatMap((r) => r.bullets.map((b) => b.key)),
+      ]);
+      setPreview(data);
+      setSelected(keys);
+      setUseContact(Boolean(data.contact));
+      setPhase('review');
+
+      const notes = [...(data.notes ?? [])];
+      if (data.filesRead?.length) {
+        notes.unshift(`Read ${data.filesRead.length} file${data.filesRead.length === 1 ? '' : 's'} from the archive.`);
+      }
+      setNotice(notes.length > 0 ? notes.join(' ') : null);
+    } catch (err) {
+      setError((err as Error).message);
+      setPhase('choose');
+    }
+  };
+
+  const run = async (file: File) => {
+    begin(file, 'resume');
 
     try {
       const form = new FormData();
@@ -199,7 +270,7 @@ export function Importer() {
     if (!preview) return;
     const payload = buildPayload(preview, selected, useContact);
     startSaving(async () => {
-      const res = await commitImportAction(payload);
+      const res = await commitImportAction(payload, source);
       setResult(res);
       if (res.ok) {
         setPhase('saved');
@@ -244,12 +315,73 @@ export function Importer() {
             that is all you have, export a fresh PDF from the original document.
           </p>
         </div>
+
+        <div className="mt-5 rounded-2xl border border-dashed border-line bg-surface p-6 sm:p-8">
+          <h2 className="font-display text-xl">Or import your LinkedIn profile</h2>
+          <p className="mt-2 max-w-prose text-sm text-muted">
+            Not by scraping it. LinkedIn will hand you the same data itself, with every
+            section complete rather than cut off behind &ldquo;show more&rdquo;, and
+            asking them for it puts your account at no risk at all.
+          </p>
+
+          <ol className="mt-4 max-w-prose list-decimal space-y-1.5 pl-5 text-sm text-muted">
+            <li>
+              On LinkedIn, open{' '}
+              <span className="text-ink">Settings &amp; Privacy → Data privacy → Get a copy of your data</span>.
+            </li>
+            <li>
+              Choose <span className="text-ink">Want something in particular?</span> and tick
+              Positions, Education, Skills, Certifications, Languages, Projects,
+              Publications, Honors, Volunteering and Profile.
+            </li>
+            <li>
+              Request the archive. It usually arrives by email within about ten minutes.
+            </li>
+            <li>Upload the .zip here, exactly as it arrived.</li>
+          </ol>
+
+          <label
+            htmlFor="linkedin-file"
+            className="mt-5 inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
+          >
+            Choose your export
+          </label>
+          <input
+            id="linkedin-file"
+            type="file"
+            accept=".zip,.csv,application/zip,text/csv"
+            className="sr-only"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void runLinkedIn(file);
+              e.target.value = '';
+            }}
+          />
+
+          <p className="mt-4 max-w-prose text-xs text-muted">
+            The archive is read in memory and never stored. Your job descriptions come
+            across word for word — those are the accomplishments a portfolio repo cannot
+            tell us, and the ones a resume is mostly made of.
+          </p>
+        </div>
       </div>
     );
   }
 
   /* ------------------------------------------------------------ reading ---- */
   if (phase === 'reading') {
+    if (source === 'linkedin') {
+      return (
+        <div className="rounded-2xl border border-line bg-surface p-6" role="status" aria-live="polite">
+          <h2 className="font-display text-xl">Reading {fileName}</h2>
+          <p className="mt-2 text-sm text-muted">
+            Unpacking the archive and reading each CSV. No model is involved, so this
+            takes about a second.
+          </p>
+        </div>
+      );
+    }
+
     const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
     return (
       <div className="rounded-2xl border border-line bg-surface p-6">
@@ -538,7 +670,12 @@ function buildPayload(
           tags: (b.record.tags as string[]) ?? [],
         })),
     }))
-    .filter((r) => r.bullets.length > 0);
+    // A role is kept when the user left at least one of its bullets ticked, and also
+    // when it never had any to tick: a LinkedIn position with no description is still a
+    // real job, and dropping it would hide it from the profile page that exists to
+    // prompt for exactly those missing accomplishments. Unticking every bullet a role
+    // did have is a decision, though, and is respected.
+    .filter((r, i) => r.bullets.length > 0 || preview.roles[i].bullets.length === 0);
 
   const records = preview.records
     .filter((c) => selected.has(c.key))

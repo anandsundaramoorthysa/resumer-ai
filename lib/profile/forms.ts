@@ -32,8 +32,14 @@ export interface RecordForm {
   singular: string;
   plural: string;
   fields: FieldDef[];
-  /** Which fields identify the record, for the content hash. */
+  /**
+   * Which fields identify the record, for the content hash. These must match the recipe
+   * lib/sync/parse.ts uses for the same type, or a hand-written fact and the synced one
+   * it duplicates hash differently and both survive.
+   */
   identityFields: string[];
+  /** The hash's first element, where it is not the type name — sync writes 'cert'. */
+  hashPrefix?: string;
   /** Builds the one-line display string. */
   describe: (data: Record<string, unknown>) => string;
 }
@@ -61,7 +67,7 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
         options: ['language', 'framework', 'tool', 'platform', 'soft-skill'],
       },
     ],
-    identityFields: ['name'],
+    identityFields: ['name', 'category'],
     describe: (d) => str(d, 'name'),
   },
 
@@ -82,7 +88,7 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
         hint: 'A measurable result. This is what the evidence score reads — a project with none scores nothing.',
       },
     ],
-    identityFields: ['name'],
+    identityFields: ['name', 'description', 'stack'],
     describe: (d) => joined([str(d, 'name'), str(d, 'description').slice(0, 90)], ' — '),
   },
 
@@ -112,7 +118,8 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
       { name: 'issuedDate', label: 'Date', kind: 'text', placeholder: '2025-03' },
       { name: 'credentialUrl', label: 'Link', kind: 'text' },
     ],
-    identityFields: ['name'],
+    identityFields: ['name', 'issuer'],
+    hashPrefix: 'cert',
     describe: (d) => joined([str(d, 'name'), str(d, 'issuer')]),
   },
 
@@ -289,6 +296,11 @@ export function missingRequired(form: RecordForm, data: Record<string, unknown>)
       return typeof v !== 'string' || v.trim().length === 0;
     })
     .map((f) => f.label);
+}
+
+/** The full hash input for a record, prefix included. */
+export function hashInput(form: RecordForm, data: Record<string, unknown>): string[] {
+  return [form.hashPrefix ?? form.type, ...identityParts(form, data)];
 }
 
 export function identityParts(

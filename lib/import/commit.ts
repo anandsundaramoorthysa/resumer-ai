@@ -18,6 +18,8 @@ import { db } from '@/lib/db';
 import { contactInfo, profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { audit } from '@/lib/server/profile';
 import { hashContent } from '@/lib/sync/reconcile';
+import { formFor, hashInput, missingRequired } from '@/lib/profile/forms';
+import type { RecordSource } from '@/lib/types';
 
 const Tags = z.array(z.string()).default([]);
 
@@ -37,44 +39,51 @@ const RoleIn = z.object({
   bullets: z.array(BulletIn).default([]),
 });
 
-const RecordIn = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('skill'),
-    name: z.string().min(1),
-    category: z.enum(['language', 'framework', 'tool', 'platform', 'soft-skill']),
-    tags: Tags,
-  }),
-  z.object({
-    type: z.literal('project'),
-    name: z.string().min(1),
-    description: z.string().default(''),
-    stack: z.array(z.string()).default([]),
-    links: z.array(z.string()).default([]),
-    impactMetrics: z.array(z.string()).default([]),
-    tags: Tags,
-  }),
-  z.object({
-    type: z.literal('education'),
-    institution: z.string().min(1),
-    credential: z.string().default(''),
-    field: z.string().optional(),
-    startDate: z.string().optional(),
-    endDate: z.string().optional(),
-    tags: Tags,
-  }),
-  z.object({
-    type: z.literal('certification'),
-    name: z.string().min(1),
-    issuer: z.string().default(''),
-    tags: Tags,
-  }),
-  z.object({
-    type: z.literal('achievement'),
-    title: z.string().min(1),
-    description: z.string().default(''),
-    tags: Tags,
-  }),
-]);
+/**
+ * A record arrives as its type plus whatever fields that type has.
+ *
+ * This was a hand-written discriminated union of five types, which is why importing a
+ * resume could never bring in a publication, award, language or volunteering role even
+ * though the extractor produced them — the schema silently dropped what it did not
+ * name. The field list now comes from lib/profile/forms.ts, the same registry the
+ * profile editor uses, so a type is importable exactly when it is editable.
+ */
+const RecordIn = z.looseObject({
+  type: z.string().min(1),
+  tags: Tags,
+});
+
+/**
+ * Keeps only the fields the type actually declares, coerced to their declared shape.
+ *
+ * The payload comes from the browser, so an unrecognised key is not stored: a record's
+ * `data` is read back untyped by the assembler, and one stray field there is a value
+ * that appears on a resume having never passed any check.
+ */
+function sanitize(
+  type: string,
+  raw: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const form = formFor(type);
+  if (!form) return null;
+
+  const data: Record<string, unknown> = {};
+  for (const field of form.fields) {
+    const value = raw[field.name];
+    if (field.kind === 'list') {
+      data[field.name] = Array.isArray(value)
+        ? value.filter((v) => typeof v === 'string' && v.trim()).map((v) => String(v).trim())
+        : [];
+      continue;
+    }
+    if (typeof value === 'string' && value.trim()) {
+      data[field.name] = field.maxLength ? value.trim().slice(0, field.maxLength) : value.trim();
+    }
+  }
+
+  if (missingRequired(form, data).length > 0) return null;
+  return data;
+}
 
 export const CommitPayloadSchema = z.object({
   contact: z
@@ -100,28 +109,16 @@ export interface CommitSummary {
   duplicates: number;
   rolesCreated: number;
   contactUpdated: boolean;
+  /** Selected entries that carried no usable content and were skipped. */
+  unreadable: number;
   message: string;
-}
-
-/** Mirrors lib/sync/parse.ts so an imported fact and a synced one hash identically. */
-function hashFor(rec: z.infer<typeof RecordIn>): string {
-  switch (rec.type) {
-    case 'skill':
-      return hashContent(['skill', rec.name, rec.category]);
-    case 'project':
-      return hashContent(['project', rec.name, rec.description, rec.stack.join(',')]);
-    case 'education':
-      return hashContent(['education', rec.institution, rec.credential]);
-    case 'certification':
-      return hashContent(['cert', rec.name, rec.issuer]);
-    case 'achievement':
-      return hashContent(['achievement', rec.title]);
-  }
 }
 
 export async function commitImport(
   userId: string,
   payload: CommitPayload,
+  /** Provenance for everything written, so REQ-1.2 stays truthful per source. */
+  source: RecordSource = 'ai-import',
 ): Promise<CommitSummary> {
   let created = 0;
   let duplicates = 0;
@@ -150,7 +147,7 @@ export async function commitImport(
           company: role.company,
           startDate: role.startDate,
           endDate: role.endDate || 'present',
-          source: 'ai-import',
+          source,
           contentHash: roleHash,
         })
         .returning({ id: rolesTable.id });
@@ -171,32 +168,46 @@ export async function commitImport(
           scale: bullet.scale,
           outcome: bullet.outcome,
         },
-      });
+      }, source);
       if (wrote) created += 1;
       else duplicates += 1;
     }
   }
 
+  let unreadable = 0;
   for (const rec of payload.records) {
-    const { type, tags, ...data } = rec;
-    const wrote = await insertRecord(userId, {
-      type,
-      contentHash: hashFor(rec),
-      tags,
-      data: data as Record<string, unknown>,
-    });
+    const data = sanitize(rec.type, rec as Record<string, unknown>);
+    if (!data) {
+      // A type with no form, or one missing a required field, is counted and reported
+      // rather than dropped in silence: "nothing added" with no reason is the worst
+      // possible end to a review the user just spent time on.
+      unreadable += 1;
+      continue;
+    }
+    const form = formFor(rec.type)!;
+    const wrote = await insertRecord(
+      userId,
+      {
+        type: rec.type,
+        contentHash: hashContent(hashInput(form, data)),
+        tags: rec.tags,
+        data,
+      },
+      source,
+    );
     if (wrote) created += 1;
     else duplicates += 1;
   }
 
-  const contactUpdated = await writeContact(userId, payload.contact ?? null);
+  const contactUpdated = await writeContact(userId, payload.contact ?? null, source);
 
   return {
     created,
     duplicates,
     rolesCreated,
     contactUpdated,
-    message: summarize(created, duplicates, rolesCreated, contactUpdated),
+    unreadable,
+    message: summarize(created, duplicates, rolesCreated, contactUpdated, unreadable),
   };
 }
 
@@ -213,13 +224,14 @@ async function insertRecord(
     tags: string[];
     data: Record<string, unknown>;
   },
+  source: RecordSource,
 ): Promise<boolean> {
   const inserted = await db
     .insert(profileRecords)
     .values({
       userId,
       type: input.type,
-      source: 'ai-import',
+      source,
       contentHash: input.contentHash,
       tags: input.tags ?? [],
       data: input.data,
@@ -230,7 +242,7 @@ async function insertRecord(
   if (inserted.length === 0) return false;
 
   // REQ-10.1 — one audit row per created record, naming the source.
-  await audit(userId, inserted[0].id, 'create', 'ai-import', {
+  await audit(userId, inserted[0].id, 'create', source, {
     type: input.type,
     contentHash: input.contentHash,
   });
@@ -245,6 +257,7 @@ async function insertRecord(
 async function writeContact(
   userId: string,
   contact: CommitPayload['contact'],
+  source: RecordSource,
 ): Promise<boolean> {
   if (!contact) return false;
 
@@ -269,7 +282,7 @@ async function writeContact(
     .values({ userId, ...merged })
     .onConflictDoUpdate({ target: contactInfo.userId, set: merged });
 
-  await audit(userId, null, 'update', 'ai-import', { contact: true });
+  await audit(userId, null, 'update', source, { contact: true });
   return true;
 }
 
@@ -278,8 +291,12 @@ function summarize(
   duplicates: number,
   rolesCreated: number,
   contactUpdated: boolean,
+  unreadable: number,
 ): string {
   if (created === 0 && !contactUpdated && rolesCreated === 0) {
+    if (unreadable > 0) {
+      return `${unreadable} selected entr${unreadable === 1 ? 'y was' : 'ies were'} incomplete and could not be saved.`;
+    }
     return duplicates > 0
       ? `Everything selected was already in your profile — nothing added.`
       : 'Nothing was selected, so nothing was added.';
@@ -288,5 +305,6 @@ function summarize(
   if (rolesCreated > 0) bits.push(`${rolesCreated} role${rolesCreated === 1 ? '' : 's'}`);
   if (duplicates > 0) bits.push(`${duplicates} already present`);
   if (contactUpdated) bits.push('contact details filled in');
+  if (unreadable > 0) bits.push(`${unreadable} incomplete and skipped`);
   return bits.join(', ');
 }

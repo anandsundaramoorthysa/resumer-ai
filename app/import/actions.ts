@@ -16,6 +16,7 @@ export interface ImportActionResult {
  */
 export async function commitImportAction(
   payload: unknown,
+  source: 'resume' | 'linkedin' = 'resume',
 ): Promise<ImportActionResult> {
   const session = await auth();
   const userId = session?.user?.id;
@@ -34,7 +35,11 @@ export async function commitImportAction(
   }
 
   try {
-    const summary = await commitImport(userId, parsed.data);
+    const summary = await commitImport(
+      userId,
+      parsed.data,
+      source === 'linkedin' ? 'linkedin' : 'ai-import',
+    );
     revalidatePath('/profile');
     revalidatePath('/');
     return { ok: true, message: summary.message, created: summary.created };

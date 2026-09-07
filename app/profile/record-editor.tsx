@@ -21,6 +21,22 @@ import {
 } from '@/lib/profile/forms';
 import { deleteProfileRecord, saveRecord, type Result } from './record-actions';
 
+/**
+ * Where a fact came from, said plainly. "synced" for everything that was not typed by
+ * hand was accurate while GitHub was the only other source; with an import and a
+ * LinkedIn export in the mix it stopped telling the user anything.
+ */
+const SOURCE_LABELS: Record<string, string> = {
+  manual: 'typed',
+  'github-sync': 'portfolio',
+  'ai-import': 'imported',
+  linkedin: 'LinkedIn',
+};
+
+export function sourceLabel(source: string): string {
+  return SOURCE_LABELS[source] ?? source;
+}
+
 export interface EditableRecord {
   id: string;
   source: string;
@@ -75,7 +91,7 @@ export function RecordEditor({
             <span
               key={r.id}
               className="inline-flex items-center gap-1.5 rounded-full bg-brand-tint py-1 pl-2.5 pr-1 text-xs font-medium text-brand-dark"
-              title={r.source === 'manual' ? 'Entered by hand' : 'From your portfolio'}
+              title={`Source: ${sourceLabel(r.source)}`}
             >
               {describeRecord(form.type, r.data)}
               <button
@@ -117,7 +133,7 @@ export function RecordEditor({
                 <span className="min-w-0">
                   {describeRecord(form.type, r.data)}
                   <span className="ml-2 font-mono text-[11px] text-muted">
-                    {r.source === 'manual' ? 'manual' : 'synced'}
+                    {sourceLabel(r.source)}
                   </span>
                 </span>
                 <span className="flex flex-none gap-1">

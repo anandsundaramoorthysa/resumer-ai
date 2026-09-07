@@ -10,7 +10,8 @@ import { composeBulletText } from './bullet';
 import {
   coerceFormValues,
   formFor,
-  identityParts,
+  hashInput,
+  RECORD_FORMS,
   missingRequired,
   tagSource,
   type RecordForm,
@@ -82,10 +83,15 @@ async function insertRecord(args: {
   userId: string;
   type: string;
   data: Record<string, unknown>;
-  hashParts: Array<string | undefined>;
+  /**
+   * The complete hash input, prefix included — not just the identifying values. The
+   * prefix is not always the type name (sync writes 'cert' for a certification), and
+   * a prefix this function invented would hash the same fact two ways.
+   */
+  hashParts: string[];
   tagSource: string;
 }): Promise<string> {
-  const contentHash = hashContent([args.type, ...args.hashParts]);
+  const contentHash = hashContent(args.hashParts);
 
   try {
     const [row] = await db
@@ -142,7 +148,7 @@ export async function createBullet(
       scale: parsed.scale || undefined,
       outcome: parsed.outcome || undefined,
     },
-    hashParts: [parsed.roleId, text],
+    hashParts: ['experience-bullet', parsed.roleId, text],
     tagSource: text,
   });
 }
@@ -201,7 +207,7 @@ export async function createSkill(
     userId,
     type: 'skill',
     data: { name: parsed.name, category: parsed.category },
-    hashParts: [parsed.name, parsed.category],
+    hashParts: ['skill', parsed.name, parsed.category],
     tagSource: parsed.name,
   });
 }
@@ -215,7 +221,7 @@ export async function createProject(
     userId,
     type: 'project',
     data: parsed,
-    hashParts: [parsed.name, parsed.description],
+    hashParts: ['project', parsed.name, parsed.description, parsed.stack.join(',')],
     tagSource: `${parsed.name} ${parsed.description} ${parsed.stack.join(' ')}`,
   });
 }
@@ -242,11 +248,10 @@ export async function setProjectMetrics(
     .update(profileRecords)
     .set({
       data,
-      contentHash: hashContent([
-        'project',
-        String(previous.name ?? ''),
-        String(previous.description ?? ''),
-      ]),
+      // Recording an outcome does not change which project this is, so the hash is
+      // rebuilt from the identifying fields — including the stack, which the sync's
+      // recipe includes and this once left out.
+      contentHash: hashContent(hashInput(RECORD_FORMS.project, previous)),
       source: 'manual',
       updatedAt: new Date(),
     })
@@ -269,7 +274,7 @@ export async function createSummary(userId: string, text: string): Promise<strin
     userId,
     type: 'summary',
     data: { text: parsed.text },
-    hashParts: [parsed.text],
+    hashParts: ['summary', parsed.text],
     tagSource: parsed.text,
   });
 }
@@ -321,7 +326,7 @@ export async function createTypedRecord(
     userId,
     type: form.type,
     data,
-    hashParts: identityParts(form, data),
+    hashParts: hashInput(form, data),
     tagSource: tagSource(form, data),
   });
 }
@@ -349,7 +354,7 @@ export async function updateTypedRecord(
       .update(profileRecords)
       .set({
         data,
-        contentHash: hashContent([form.type, ...identityParts(form, data)]),
+        contentHash: hashContent(hashInput(form, data)),
         tags: deriveTags(tagSource(form, data)),
         // Editing a synced record promotes it to the user's own, so the next sync stops
         // competing with the edit — the same rule updateBullet follows.
