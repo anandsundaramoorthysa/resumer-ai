@@ -139,10 +139,34 @@ suite('hash consistency with the sync', () => {
     assert(msc.join('|') !== ma.join('|'), 'an M.Sc. and an M.A. are two qualifications');
   });
 
-  test('every other type still hashes from its identity fields', () => {
+  test('a certification typed by hand hashes like its synced twin', () => {
+    // Certification joined education in hashing a normalised identity rather than its
+    // raw fields, because the sync wrote "Nanodegree in Agentic AI" and "Nanodegree,
+    // Agentic AI" as two rows. Both routes in must agree or the duplicate check cannot
+    // fire between them.
     const form = formFor('certification')!;
-    const parts = hashInput(form, { name: 'AWS SAA', issuer: 'Amazon' });
+    const parts = hashInput(form, { name: 'Nanodegree in Agentic AI', issuer: 'Udacity' });
     assert(parts[0] === 'cert', `the sync's prefix is preserved, got ${parts[0]}`);
-    assert(parts.join('|') === 'cert|AWS SAA|Amazon', `got ${parts.join('|')}`);
+
+    const otherSpelling = hashInput(form, { name: 'Nanodegree, Agentic AI', issuer: 'Udacity' });
+    assert(
+      parts.join('|') === otherSpelling.join('|'),
+      `both spellings hash alike — got ${parts.join('|')} vs ${otherSpelling.join('|')}`,
+    );
+  });
+
+  test('the same certificate from two issuers still hashes apart', () => {
+    const form = formFor('certification')!;
+    const a = hashInput(form, { name: 'Introduction to Data Science', issuer: 'Infosys Springboard' });
+    const b = hashInput(form, { name: 'Introduction to Data Science', issuer: 'Coursera' });
+    assert(a.join('|') !== b.join('|'), 'issuer is part of the identity');
+  });
+
+  test('a type with no override still hashes from its identity fields', () => {
+    // `award` has neither a hashPrefix nor a hashParts override, so it exercises the
+    // default path that every other type still takes.
+    const form = formFor('award')!;
+    const parts = hashInput(form, { title: 'Hackathon winner', issuer: 'Some Org' });
+    assert(parts.join('|') === 'award|Hackathon winner', `got ${parts.join('|')}`);
   });
 });

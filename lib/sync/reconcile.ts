@@ -11,6 +11,7 @@
  * should cost you a review prompt, not a section of your career history.
  */
 
+import { certificationIdentity } from './certifications';
 import { educationIdentity } from './education';
 import { createHash } from 'node:crypto';
 import type { ProfileRecord, RecordSource } from '../types';
@@ -119,7 +120,11 @@ function identityKey(r: ProfileRecord): string {
       // over the other. `educationIdentity` keeps the subject, so they stay two.
       return `education:${educationIdentity(r.institution, r.credential, r.field)}`;
     case 'certification':
-      return `cert:${r.name.toLowerCase().trim()}`;
+      // Name AND issuer, both normalised. Keying on the lower-cased name alone treated
+      // one course offered by two providers as a single record, so reconcile would
+      // update one over the other; and it did not normalise, so the two spellings of
+      // the Udacity nanodegree stayed two.
+      return `cert:${certificationIdentity(r.name, r.issuer ?? '')}`;
     case 'achievement':
       return `achievement:${r.title.toLowerCase().trim()}`;
     case 'award':

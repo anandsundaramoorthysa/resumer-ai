@@ -10,6 +10,7 @@
  * Only the second path costs anything, so a well-structured portfolio syncs for free.
  */
 
+import { certificationHashParts, dedupeCertifications } from './certifications';
 import { z } from 'zod';
 import type { ParsedRecord } from './reconcile';
 import { hashContent } from './reconcile';
@@ -456,17 +457,21 @@ export function toRecords(data: ExtractedProfile): ParseResult {
   }
 
   // A certificate the extractor filed as education joins the real certifications, and
-  // is hashed by the same recipe they are — ['cert', name, issuer], which is what
-  // lib/profile/forms.ts `hashInput` produces for a hand-written one. Anything else and
-  // the same certificate would exist twice, once per route in.
-  for (const c of [...data.certifications, ...reclassified]) {
+  // both are deduped and hashed by the same recipe that lib/profile/forms.ts `hashInput`
+  // produces for a hand-written one. Anything else and the same certificate exists twice,
+  // once per route in.
+  //
+  // The dedupe is new and it is not theoretical: this ran twice over the portfolio and
+  // wrote "Nanodegree in Agentic AI" and "Nanodegree, Agentic AI" as two rows, because
+  // the hash was taken over the raw name and a comma is a different string.
+  for (const c of dedupeCertifications([...data.certifications, ...reclassified])) {
     records.push({
       type: 'certification',
       name: c.name,
       issuer: c.issuer,
-      issuedDate: 'issuedDate' in c ? c.issuedDate : undefined,
+      issuedDate: c.issuedDate,
       tags: [c.name.toLowerCase()],
-      contentHash: hashContent(['cert', c.name, c.issuer]),
+      contentHash: hashContent(certificationHashParts(c)),
       source: 'github-sync',
     } as ParsedRecord);
   }

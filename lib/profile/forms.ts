@@ -10,6 +10,7 @@
  * server action, and in tests.
  */
 
+import { certificationHashParts } from '../sync/certifications';
 import type { ProfileRecord } from '../types';
 import { educationHashParts } from '../sync/education';
 
@@ -136,6 +137,12 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
     ],
     identityFields: ['name', 'issuer'],
     hashPrefix: 'cert',
+    // The same normalised recipe the sync uses. Without it a certificate typed by hand
+    // hashes on its raw text while the synced twin hashes on a normalised identity, so
+    // the duplicate check never fires between the two routes — the education entry below
+    // had exactly that problem.
+    hashParts: (d) =>
+      certificationHashParts({ name: str(d, 'name'), issuer: str(d, 'issuer') }),
     describe: (d) => joined([str(d, 'name'), str(d, 'issuer')]),
   },
 
