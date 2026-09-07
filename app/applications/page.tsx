@@ -74,11 +74,70 @@ export default async function ApplicationsPage() {
               />
             </dl>
 
-            <div className="mt-6 overflow-x-auto rounded-xl border border-line bg-surface">
+            {/*
+              * Below `sm` this is a list of cards, not a table.
+              *
+              * Six columns do not fit a phone. In a horizontal scroller at 320px, 623px
+              * of table sat in 278px — Score, Status, Drafted and the Review link were
+              * all off-screen behind an overlay scrollbar that occupies no layout and
+              * fades out, so the card's rounded right edge sat flush at the viewport and
+              * the whole thing read as a finished table rather than a truncated one.
+              * Nothing indicated there was more.
+              *
+              * The auto table layout also gave the Role cell whatever the other five
+              * columns did not want, which collapsed a long job title to a 95px column
+              * running six lines deep.
+              */}
+            <ul className="mt-6 space-y-3 sm:hidden">
+              {rows.map((r) => (
+                <li key={r.id} className="rounded-xl border border-line bg-surface p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold">{r.roleTitle}</p>
+                      {r.company ? (
+                        <p className="mt-0.5 text-xs text-muted">{r.company}</p>
+                      ) : null}
+                    </div>
+                    <span
+                      className={`flex-none font-mono text-lg font-semibold tabular ${
+                        r.score == null
+                          ? 'text-muted'
+                          : r.score >= 8.5
+                            ? 'text-success'
+                            : 'text-warning'
+                      }`}
+                    >
+                      {r.score?.toFixed(1) ?? '—'}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-brand-tint px-2.5 py-1 text-xs font-semibold text-brand-dark">
+                      {r.category}
+                    </span>
+                    <StatusSelect id={r.id} status={r.status as ApplicationStatus} />
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-2">
+                    <span className="text-xs text-muted">
+                      {r.createdAt.toLocaleDateString()}
+                    </span>
+                    <Link
+                      href={`/resume/${r.resumeSnapshotId}`}
+                      className="inline-flex min-h-11 items-center text-xs font-semibold text-brand-dark hover:underline"
+                    >
+                      Review
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-6 hidden overflow-x-auto rounded-xl border border-line bg-surface sm:block">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
-                    <th className="px-4 py-3 font-medium">Role</th>
+                    <th className="min-w-56 px-4 py-3 font-medium">Role</th>
                     <th className="px-4 py-3 font-medium">Category</th>
                     <th className="px-4 py-3 font-medium">Score</th>
                     <th className="px-4 py-3 font-medium">Status</th>
@@ -89,7 +148,7 @@ export default async function ApplicationsPage() {
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.id} className="border-b border-line last:border-b-0">
-                      <td className="px-4 py-3">
+                      <td className="min-w-56 px-4 py-3">
                         <div className="font-semibold">{r.roleTitle}</div>
                         {r.company ? (
                           <div className="text-xs text-muted">{r.company}</div>
@@ -102,7 +161,11 @@ export default async function ApplicationsPage() {
                       </td>
                       <td
                         className={`px-4 py-3 font-mono font-semibold tabular ${
-                          (r.score ?? 0) >= 8.5 ? 'text-success' : 'text-warning'
+                          r.score == null
+                            ? 'text-muted'
+                            : r.score >= 8.5
+                              ? 'text-success'
+                              : 'text-warning'
                         }`}
                       >
                         {r.score?.toFixed(1) ?? '—'}
@@ -116,7 +179,7 @@ export default async function ApplicationsPage() {
                       <td className="px-4 py-3 text-right">
                         <Link
                           href={`/resume/${r.resumeSnapshotId}`}
-                          className="text-xs font-semibold text-brand-dark hover:underline"
+                          className="inline-flex min-h-11 items-center text-xs font-semibold text-brand-dark hover:underline"
                         >
                           Review
                         </Link>

@@ -132,7 +132,21 @@ export default async function HomePage() {
       </dl>
 
       <div className="grid gap-5 lg:grid-cols-[1.6fr_1fr]">
-        <div className="space-y-5">
+        {/*
+          * `min-w-0` is load-bearing, not tidiness.
+          *
+          * A grid item's automatic minimum size is min-content, so this column was sized
+          * to the widest thing inside it — the Recent drafts table, 394px. On a 320px
+          * phone that widened the LAYOUT VIEWPORT to 394px: the browser zoomed the whole
+          * dashboard out and scrolled it sideways. The `overflow-x-auto` on the table
+          * cannot prevent it, because the automatic minimum only collapses when the grid
+          * ITEM has non-visible overflow, and that div is two levels down.
+          *
+          * It also hid itself from every previous audit: once the layout viewport widens,
+          * `window.innerWidth` and `scrollWidth` both read 394, so an overflow check
+          * comparing the two sees nothing wrong.
+          */}
+        <div className="min-w-0 space-y-5">
           <DraftConsole />
           <RecentDrafts drafts={data.recentDrafts} />
         </div>
@@ -213,7 +227,10 @@ function RecentDrafts({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-muted">
-              <th className="pb-2.5 pr-3 font-medium">Role</th>
+              {/* A floor on the Role column: the auto layout gave it whatever the other
+                  three did not want, collapsing a long job title to a 95px, six-line
+                  ribbon. The container scrolls instead. */}
+              <th className="min-w-48 pb-2.5 pr-3 font-medium">Role</th>
               <th className="pb-2.5 pr-3 font-medium">Category</th>
               <th className="pb-2.5 pr-3 font-medium">Score</th>
               <th className="pb-2.5 font-medium">Drafted</th>
@@ -234,8 +251,16 @@ function RecentDrafts({
                   </span>
                 </td>
                 <td
+                  /* "Not scored yet" and "scored badly" are different facts. The
+                     em-dash for an unscored draft was rendered in the same amber as a
+                     6.2 — the dashboard's own "None yet" stat tile already makes this
+                     distinction, and the tables did not. */
                   className={`py-3 pr-3 font-mono font-semibold tabular ${
-                    (d.score ?? 0) >= 8.5 ? 'text-success' : 'text-warning'
+                    d.score == null
+                      ? 'text-muted'
+                      : d.score >= 8.5
+                        ? 'text-success'
+                        : 'text-warning'
                   }`}
                 >
                   {d.score?.toFixed(1) ?? '—'}

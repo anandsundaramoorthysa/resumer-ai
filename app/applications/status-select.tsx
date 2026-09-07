@@ -13,10 +13,13 @@ const OPTIONS: Array<{ value: ApplicationStatus; label: string }> = [
 
 /** Status carries meaning, so it carries colour — scannable without reading. */
 const TONE: Record<ApplicationStatus, string> = {
+  // Draft is the neutral one — nothing has happened yet. Rejected is an outcome and
+  // now reads as one: both were `border-muted text-muted`, which made the single pair
+  // whose difference matters most the one pair you could not tell apart.
   draft: 'border-muted text-muted',
   applied: 'border-brand text-brand-dark',
   interview: 'border-gold text-gold',
-  rejected: 'border-muted text-muted',
+  rejected: 'border-danger text-danger',
   offer: 'border-success text-success',
 };
 

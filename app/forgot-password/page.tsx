@@ -22,7 +22,10 @@ export default function ForgotPasswordPage() {
           button on the sign-in page instead.
         </p>
 
-        <Link href="/sign-in" className="mt-4 inline-block text-xs text-muted underline hover:text-ink">
+        <Link
+          href="/sign-in"
+          className="mt-4 inline-flex min-h-11 items-center text-xs text-muted underline hover:text-ink"
+        >
           Back to sign in
         </Link>
       </div>

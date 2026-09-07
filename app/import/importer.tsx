@@ -502,7 +502,11 @@ export function Importer() {
           </fieldset>
         ) : null}
 
-        {(preview?.roles ?? []).map((role) => {
+        {/* A LinkedIn position with no description brings no bullets, so its group held
+            only a date line and an "Untick all (0/0)" button that does nothing. The
+            banner above already reports how many positions had no description; an empty
+            fieldset only adds a control the user cannot use. */}
+        {(preview?.roles ?? []).filter((r) => r.bullets.length > 0).map((role) => {
           const keys = role.bullets.map((b) => b.key);
           const on = keys.filter((k) => selected.has(k)).length;
           return (

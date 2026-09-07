@@ -54,8 +54,11 @@ const VIEWPORTS = [
 
 interface Target {
   slug: string;
-  url: string;
+  /** A function when the path is only known after seeding (the snapshot id). */
+  url: string | (() => string);
   auth: boolean;
+  /** Skipped, with a note, when this returns false — e.g. seeding did not run. */
+  available?: () => boolean;
   /** Extra interaction to reach a state a plain load does not show. */
   setup?: (page: Page) => Promise<void>;
 }
@@ -81,6 +84,35 @@ const TARGETS: Target[] = [
       await page.getByRole('tab', { name: 'Create account' }).click();
       await page.locator('input[type="password"]').fill('abc');
       await page.waitForTimeout(200);
+    },
+  },
+  /**
+   * The seeded snapshot, which is also the one every seeded application points at.
+   * `url` is a thunk because the id is generated at seed time, after this array is built.
+   */
+  {
+    slug: 'resume-review',
+    url: () => `/resume/${seededSnapshotId}`,
+    auth: true,
+    available: () => Boolean(seededSnapshotId),
+  },
+  /**
+   * `/import`'s review step. Reached by uploading the LinkedIn fixture built below:
+   * the LinkedIn route is pure CSV parsing, so this lands on the same dense review
+   * screen every run, with no model call and nothing written to the database.
+   */
+  {
+    slug: 'import-review',
+    url: '/import',
+    auth: true,
+    async setup(page) {
+      await page.setInputFiles('#linkedin-file', {
+        name: 'Basic_LinkedInDataExport_2026-01-01.zip',
+        mimeType: 'application/zip',
+        buffer: linkedInFixture(),
+      });
+      await page.getByText(/What was found in/).waitFor({ timeout: 30_000 });
+      await page.waitForTimeout(300);
     },
   },
   {
@@ -126,7 +158,7 @@ const add = (f: Finding) => findings.push(f);
  * page and the numbers would no longer match the screenshot just taken.
  */
 const IN_PAGE = String.raw`(() => {
-  const out = { overflow: null, wide: [], touch: [], clipped: [], squeezed: [], contrast: [], alt: [], unlabelled: [], namelessButtons: [], headings: [], headingIssues: [] };
+  const out = { layoutWidth: window.innerWidth, scrollers: [], overflow: null, wide: [], touch: [], clipped: [], squeezed: [], contrast: [], alt: [], unlabelled: [], namelessButtons: [], headings: [], headingIssues: [] };
   const vw = window.innerWidth;
 
   /* The Next.js dev-mode error overlay is injected tooling, not the product. Everything
@@ -135,7 +167,19 @@ const IN_PAGE = String.raw`(() => {
   const walk = (sel) => [...document.querySelectorAll(sel)].filter((el) => !isChrome(el));
 
   /* 1. horizontal overflow ------------------------------------------------ */
-  const docW = document.documentElement.scrollWidth;
+  /* documentElement.scrollWidth alone under-reports. When the overflowing element is a
+     child of <body> and <html> is not itself scrolled, the root reports the viewport
+     width while the body reports the real content width — which is what a full-page
+     screenshot is sized from, and why a capture came back 394px wide from a 320px
+     viewport with this check silent. Take the larger of the two. */
+  const docW = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+  /* On a phone context Chromium honours the meta viewport, and content that cannot fit
+     widens the LAYOUT viewport rather than overflowing it. window.innerWidth then reports
+     that wider figure, every in-page width is measured against it, and scrollWidth comes
+     back equal to the viewport — so the page looks clean from inside while the real
+     device is showing it shrunk and scrolling sideways. Measuring against the layout
+     width alone therefore misses the most severe mobile failure there is; the caller
+     compares out.layoutWidth to the width it actually asked for. */
   if (docW > vw + 1) {
     out.overflow = { scrollWidth: docW, viewport: vw };
     const seen = new Set();
@@ -234,6 +278,33 @@ const IN_PAGE = String.raw`(() => {
         cls: String(el.className || '').slice(0, 90),
       });
     }
+  }
+
+  /* 3c. horizontal scroll containers -------------------------------------
+     An overflow-x-auto wrapper keeps the page from scrolling sideways, which is right,
+     but it moves the problem rather than solving it. What matters then is whether the
+     hidden columns are discoverable: on a touch device there is no persistent
+     scrollbar, so a table cut off mid-cell just looks like the end of the data. */
+  for (const el of walk('*')) {
+    const cs = getComputedStyle(el);
+    if (!/auto|scroll/.test(cs.overflowX)) continue;
+    if (el.scrollWidth <= el.clientWidth + 2) continue;
+    out.scrollers.push({
+      tag: el.tagName.toLowerCase(),
+      cls: String(el.className || '').slice(0, 90),
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      hidden: el.scrollWidth - el.clientWidth,
+      /* A classic scrollbar takes layout space; an overlay one does not, and phones use
+         overlay scrollbars that fade out entirely when nothing is moving. The element's
+         own border also sits between offsetHeight and clientHeight, so subtract it —
+         otherwise a 1px-bordered card reads as having a 2px scrollbar it does not have. */
+      scrollbarPx: Math.max(
+        0,
+        el.offsetHeight - el.clientHeight
+          - parseFloat(cs.borderTopWidth) - parseFloat(cs.borderBottomWidth),
+      ),
+    });
   }
 
   /* 4. contrast ----------------------------------------------------------- */
@@ -422,7 +493,7 @@ async function checkFocus(page: Page, ctx: Omit<Finding, 'check' | 'severity' | 
  * This resolves the tokens out of a real `:root` in a real browser and recomputes each
  * documented pair, which is the only way to tell a verified claim from a plausible one.
  */
-const TOKEN_PAIRS: Array<{ fg: string; bg: string; use: string; large?: boolean }> = [
+const TOKEN_PAIRS: Array<{ fg: string; bg: string; use: string; large?: boolean; min?: number }> = [
   { fg: 'ink', bg: 'surface', use: 'body text on a card' },
   { fg: 'ink', bg: 'paper', use: 'body text on the page ground' },
   { fg: 'muted', bg: 'surface', use: 'secondary text on a card' },
@@ -443,7 +514,10 @@ const TOKEN_PAIRS: Array<{ fg: string; bg: string; use: string; large?: boolean 
   { fg: 'danger', bg: 'danger-tint', use: 'error banner' },
   /* Non-text pairs, held to 1.4.11's 3:1 rather than 4.5:1. */
   { fg: 'muted', bg: 'surface', use: 'form control boundary (border-muted)', large: true },
-  { fg: 'line', bg: 'surface', use: 'card edge — decorative, 3:1 not required', large: true },
+  /* Recorded, never failed: a card edge is decoration under WCAG 1.4.11, which applies
+     only to controls and meaningful graphics. Held to 3:1 it reported a value the
+     stylesheet already documents as intentional. */
+  { fg: 'line', bg: 'surface', use: 'card edge — decorative, no minimum applies', min: 0 },
   { fg: 'brand', bg: 'paper', use: 'focus ring against the page ground', large: true },
   { fg: 'brand', bg: 'surface', use: 'focus ring against a card', large: true },
 ];
@@ -477,8 +551,12 @@ async function probePalette(browser: Browser, scheme: 'light' | 'dark') {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: scheme });
   const page = await ctx.newPage();
   await page.goto(`${BASE}/sign-in`, { waitUntil: 'networkidle', timeout: 60_000 });
-  const rows = (await page.evaluate(PALETTE_PROBE as unknown as string, TOKEN_PAIRS)) as Array<{
-    fg: string; bg: string; use: string; large?: boolean; missing?: boolean;
+  /* The pairs are baked into the expression rather than passed as an argument: this
+     probe is a string, and Playwright only forwards an argument to a string it decides
+     is a function body — which this parenthesised arrow is not, so the argument arrived
+     as undefined and the map ran over nothing. */
+  const rows = (await page.evaluate(`${PALETTE_PROBE}(${JSON.stringify(TOKEN_PAIRS)})`)) as Array<{
+    fg: string; bg: string; use: string; large?: boolean; min?: number; missing?: boolean;
     ratio?: number; fgHex?: string; bgHex?: string;
   }>;
   for (const row of rows) {
@@ -487,7 +565,7 @@ async function probePalette(browser: Browser, scheme: 'light' | 'dark') {
       add({ ...base, check: 'palette', severity: 'major', detail: `--color-${row.fg} or --color-${row.bg} does not resolve` });
       continue;
     }
-    const need = row.large ? 3 : 4.5;
+    const need = row.min ?? (row.large ? 3 : 4.5);
     const ratio = row.ratio ?? 0;
     if (ratio < need - 0.005) {
       add({
@@ -541,7 +619,10 @@ async function seedUser() {
     insert into "user" (id, name, email, "emailVerified", password_hash, created_at)
     values (${seededId}, ${'UI Audit'}, ${TEST_EMAIL}, now(), ${hash}, now())`;
 
-  if (!has('empty-profile')) await seedRecords(sql);
+  if (!has('empty-profile')) {
+    await seedRecords(sql);
+    await seedApplications(sql);
+  }
   console.log(`seeded ${TEST_EMAIL}${has('empty-profile') ? ' (empty profile)' : ' with sample records'}`);
 }
 
@@ -962,12 +1043,14 @@ interface InPageResult {
   touch: Measured[];
   clipped: Measured[];
   squeezed: Measured[];
+  scrollers: Measured[];
   contrast: Measured[];
   alt: Measured[];
   unlabelled: Measured[];
   namelessButtons: Measured[];
   headings: Measured[];
   headingIssues: string[];
+  layoutWidth: number;
   [key: string]: unknown;
 }
 
@@ -1023,9 +1106,10 @@ async function capture(
    */
   await page.addInitScript(HIDE_DEV_CHROME);
 
+  const targetUrl = typeof target.url === 'function' ? target.url() : target.url;
   let landedOn = '';
   try {
-    await page.goto(BASE + target.url, { waitUntil: 'networkidle', timeout: 60_000 });
+    await page.goto(BASE + targetUrl, { waitUntil: 'networkidle', timeout: 60_000 });
     landedOn = new URL(page.url()).pathname;
     if (target.setup) {
       await target.setup(page).catch((e) =>
@@ -1047,12 +1131,12 @@ async function capture(
   await page.screenshot({ path: shotPath, fullPage: true });
   shotHashes.set(`${target.slug}|${vp.name}|${scheme}`, sha(await readFile(shotPath)));
 
-  if (signedOut && !landedOn.startsWith(target.url.split('?')[0])) {
+  if (signedOut && !landedOn.startsWith(targetUrl.split('?')[0])) {
     add({
       ...base,
       check: 'auth',
       severity: 'info',
-      detail: `signed out: redirected to ${landedOn} — this capture is the sign-in page, not ${target.url}`,
+      detail: `signed out: redirected to ${landedOn} — this capture is the sign-in page, not ${targetUrl}`,
     });
   }
 
@@ -1062,6 +1146,18 @@ async function capture(
    * contributes, strict about the fact that none of them are objects or functions.
    */
   const r = (await page.evaluate(IN_PAGE)) as InPageResult;
+
+  if (r.layoutWidth > vp.width + 1) {
+    const widest = [...r.wide, ...r.scrollers]
+      .slice(0, 3)
+      .map((w: Measured) => `<${w.tag} class="${w.cls}">`);
+    add({
+      ...base,
+      check: 'viewport-widened',
+      severity: 'blocker',
+      detail: `something on the page cannot fit ${vp.width}px, so the layout viewport widened to ${r.layoutWidth}px (+${r.layoutWidth - vp.width}px). A real phone renders this shrunk and scrolling sideways. Every other measurement on this page was taken against ${r.layoutWidth}px, not ${vp.width}px.${widest.length ? ' Candidates: ' + widest.join(' | ') : ''}`,
+    });
+  }
 
   if (r.overflow) {
     const worst = r.wide
@@ -1080,6 +1176,15 @@ async function capture(
       .slice(0, 6)
       .map((t: Measured) => `<${t.tag}${t.type ? ' ' + t.type : ''}> ${t.w}x${t.h}${t.text ? ` "${t.text}"` : ''}`);
     add({ ...base, check: 'touch-target', severity: 'minor', detail: `${r.touch.length} control(s) under 44px: ${list.join(' | ')}` });
+  }
+
+  for (const sc of r.scrollers ?? []) {
+    add({
+      ...base,
+      check: 'x-scroller',
+      severity: vp.phone && Number(sc.scrollbarPx ?? 0) === 0 ? 'major' : 'info',
+      detail: `<${sc.tag} class="${sc.cls}"> scrolls sideways: ${sc.scrollWidth}px of content in ${sc.clientWidth}px (${sc.hidden}px hidden). Scrollbar occupies ${sc.scrollbarPx}px of layout — ${Number(sc.scrollbarPx ?? 0) === 0 ? 'an overlay/absent bar, so the cut-off edge is the only cue' : 'a visible track'}`,
+    });
   }
 
   if (r.clipped.length) {
@@ -1153,7 +1258,20 @@ async function capture(
     add({ ...base, check: 'console-error', severity: devOnly ? 'info' : 'major', detail: e });
   }
   for (const f of collapseByHost(dedupe(failed), 'network')) {
-    add({ ...base, check: 'network', severity: /BLOCKED/.test(f) ? 'major' : 'minor', detail: f });
+    /**
+     * next/link prefetches every visible link as an RSC request and cancels the ones it
+     * no longer needs — including all of them when the context closes at the end of a
+     * capture. Those arrive here as ERR_ABORTED and are the single largest source of
+     * noise in the report, while saying nothing about the page. A real failure is a
+     * status code or a request that was never cancelled, and both still come through.
+     */
+    const prefetchAbort = /_rsc=/.test(f) && /ERR_ABORTED/.test(f);
+    add({
+      ...base,
+      check: 'network',
+      severity: prefetchAbort ? 'info' : /BLOCKED/.test(f) ? 'major' : 'minor',
+      detail: prefetchAbort ? `${f} — a cancelled next/link RSC prefetch, not a failure` : f,
+    });
   }
 
   await ctx.close();
@@ -1178,10 +1296,20 @@ async function main() {
     }
   }
 
-  const targets = TARGETS.filter((t) => !PAGE_FILTER || PAGE_FILTER.some((f) => t.slug.includes(f)));
+  const targets = TARGETS.filter((t) => !PAGE_FILTER || PAGE_FILTER.some((f) => t.slug.includes(f))).filter(
+    (t) => {
+      if (t.available && !t.available()) {
+        add({ page: t.slug, viewport: '(all)', scheme: 'light', check: 'skipped', severity: 'info', detail: 'not captured: the seed it depends on did not run' });
+        return false;
+      }
+      return true;
+    },
+  );
   const viewports = VIEWPORTS.filter((v) => !VIEW_FILTER || VIEW_FILTER.includes(v.name));
 
   const browser = await chromium.launch();
+  await probePalette(browser, 'light');
+  await probePalette(browser, 'dark');
   for (const t of targets) {
     for (const v of viewports) {
       process.stdout.write(`  ${t.slug} @ ${v.name} … `);

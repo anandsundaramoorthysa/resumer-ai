@@ -40,7 +40,10 @@ export default async function ResetPasswordPage({
           </p>
         )}
 
-        <Link href="/sign-in" className="mt-5 inline-block text-xs text-muted underline hover:text-ink">
+        <Link
+          href="/sign-in"
+          className="mt-5 inline-flex min-h-11 items-center text-xs text-muted underline hover:text-ink"
+        >
           Back to sign in
         </Link>
       </div>
