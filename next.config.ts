@@ -9,9 +9,18 @@ const nextConfig: NextConfig = {
    * with their own asset/font resolution. Keeping all four external is what makes the
    * round-trip self-test (REQ-6.6) work in a built app rather than only in dev.
    *
-   * nodemailer is here for a different reason: it loads transport and encoding modules
-   * by dynamic path, and bundling it produces a build that only fails when someone
-   * actually tries to send mail.
+   * nodemailer is deliberately NOT here, and the reason is worth recording. It was,
+   * as a precaution against its dynamic requires — and that precaution broke every
+   * dynamic route in production. Turbopack rewrites an external package to a hashed
+   * specifier, and Netlify's Lambda cannot resolve it:
+   *
+   *   Failed to load external module nodemailer-9c35dd349a8aaa9f:
+   *   Cannot find package 'nodemailer-9c35dd349a8aaa9f'
+   *
+   * Every page that reaches lib/auth/mail.ts returned 500 — /sign-in, /api/health, the
+   * lot — while the same build served perfectly under  locally, because
+   * locally the real package is one directory away. It is bundled now, which is what a
+   * pure-JS package should be.
    */
   serverExternalPackages: [
     'pdf-parse',
@@ -19,7 +28,6 @@ const nextConfig: NextConfig = {
     '@react-pdf/renderer',
     'docx',
     'mammoth',
-    'nodemailer',
   ],
 
   /**
