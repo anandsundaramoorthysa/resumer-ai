@@ -7,6 +7,18 @@ import { oauthSignInAction } from './sign-in-actions';
 export const metadata = { title: 'Sign in' };
 
 /**
+ * Rendered per request, not prerendered.
+ *
+ * This page asks three runtime questions — is GitHub configured, is Google configured,
+ * can we send mail — and Next was prerendering it at build time, freezing the answers
+ * into static HTML. The effect is a trap rather than a slow page: setting SMTP_USER or
+ * AUTH_GOOGLE_ID in the host's dashboard changes nothing until someone happens to
+ * redeploy, and until then the page says email sign-up is unavailable while /api/health
+ * reports the provider working. That exact contradiction is how this was found.
+ */
+export const dynamic = 'force-dynamic';
+
+/**
  * GitHub stays first, and says why.
  *
  * It is not merely another provider here: the same grant carries the repo access the

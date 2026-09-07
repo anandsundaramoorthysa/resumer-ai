@@ -81,3 +81,4 @@ desktop.ini
 # ---------------------------------------------------------------------------
 /screenshots/
 /.playwright/
+.playwright-mcp/
