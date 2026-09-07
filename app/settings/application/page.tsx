@@ -1,10 +1,9 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { applicationFormFields } from '@/lib/db/schema';
-import { Logo } from '@/components/logo';
+import { AppHeader } from '@/components/app-header';
 import { ApplicationFieldsForm } from './application-form';
 
 export const metadata = { title: 'Application answers' };
@@ -22,21 +21,7 @@ export default async function ApplicationFieldsPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-5 py-3.5">
-          <Link href="/" className="inline-flex min-h-11 items-center">
-            <Logo />
-          </Link>
-          <nav className="flex flex-wrap items-center gap-4 text-sm">
-            <Link href="/settings/portfolio" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Portfolio
-            </Link>
-            <Link href="/" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Dashboard
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <AppHeader current="/settings/application" width="3xl" />
 
       <main className="mx-auto max-w-3xl px-5 py-8">
         <h1 className="font-display text-3xl">Application answers</h1>

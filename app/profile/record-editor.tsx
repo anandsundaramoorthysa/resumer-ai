@@ -13,6 +13,7 @@
 
 import { useState, useTransition } from 'react';
 import {
+  RECORD_FORMS,
   coerceFormValues,
   describeRecord,
   missingRequired,
@@ -63,18 +64,28 @@ function blankValues(form: RecordForm): Record<string, string> {
   return values;
 }
 
+/**
+ * The type is passed, not the form object.
+ *
+ * A `RecordForm` carries a `describe` function, and a function cannot cross the server /
+ * client boundary — React refuses to serialise it and the whole page returns 500. Passing
+ * the type string and looking the form up here keeps one definition without sending a
+ * function over the wire. `lib/profile/forms.ts` is pure and dependency-free precisely so
+ * that it can be imported on both sides.
+ */
 export function RecordEditor({
-  form,
+  type,
   records,
   chips,
   single,
 }: {
-  form: RecordForm;
+  type: string;
   records: EditableRecord[];
   chips?: boolean;
   /** One record is the most this type can hold — a summary, not a list of them. */
   single?: boolean;
 }) {
+  const form = RECORD_FORMS[type];
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [result, setResult] = useState<Result | null>(null);

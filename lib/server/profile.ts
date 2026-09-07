@@ -26,6 +26,7 @@ import type {
 import type { PipelineOutput } from '@/lib/pipeline/run';
 import { latestCommitSha, parseRepoRef } from '@/lib/sync/github';
 import { roleIdentity, splitMergedTitles } from '@/lib/sync/roles';
+import { educationIdentity } from '@/lib/sync/education';
 import type { ParseResult } from '@/lib/sync/parse';
 import type { ParsedRecord } from '@/lib/sync/reconcile';
 import { hashContent, reconcile, summarizePlan } from '@/lib/sync/reconcile';
@@ -177,7 +178,7 @@ export async function applyParsedProfile(
   // Deduped in place so the summary reports rows actually written. Two slices of one
   // file can yield the same fact, and counting the plan rather than the result made the
   // sync tell the user "163 added" when 161 rows landed.
-  plan.toInsert = dedupeByHash(plan.toInsert);
+  plan.toInsert = dropResurrectedEducation(dedupeByHash(plan.toInsert), existing);
 
   const inserts = plan.toInsert.map((rec) => {
     const { type, tags, contentHash, ...data } = rec as unknown as Record<
@@ -362,6 +363,42 @@ async function syncRoles(
  * Drops repeats within one batch. `profile_record` is unique on (userId, contentHash),
  * and two slices of the same file can legitimately yield the same fact.
  */
+/**
+ * Last line of defence against a degree coming back a second time.
+ *
+ * `reconcile()` matches an education record against stored rows using its own loose key
+ * (credential *level* plus the institution's leading words). That key is broad enough to
+ * update the right row, but it is not the key the parser deduplicates on, so a spelling
+ * it happens to treat as distinct would arrive here as a fresh insert and the profile
+ * would grow a second copy of a degree it already holds — exactly how three M.Sc. rows
+ * accumulated. Identity here is the same one lib/sync/education.ts uses, checked against
+ * both the batch and what is already stored.
+ *
+ * Manual rows count as already-stored on purpose: they are the user's own, sync may
+ * never touch them (see lib/profile/records.ts), so re-adding a synced twin of one is
+ * the one outcome worse than skipping the insert.
+ */
+function dropResurrectedEducation(
+  records: ParsedRecord[],
+  existing: ProfileRecord[],
+): ParsedRecord[] {
+  const isEducation = (r: { type: string }) => r.type === 'education';
+  const keyOf = (r: unknown) => {
+    const e = r as { institution: string; credential: string; field?: string };
+    return educationIdentity(e.institution, e.credential, e.field);
+  };
+
+  const taken = new Set(existing.filter(isEducation).map(keyOf));
+
+  return records.filter((rec) => {
+    if (!isEducation(rec as unknown as { type: string })) return true;
+    const key = keyOf(rec);
+    if (taken.has(key)) return false;
+    taken.add(key);
+    return true;
+  });
+}
+
 function dedupeByHash(records: ParsedRecord[]): ParsedRecord[] {
   const seen = new Set<string>();
   return records.filter((r) => {

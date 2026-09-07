@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { profileRecords, roles as rolesTable } from '@/lib/db/schema';
-import { Logo } from '@/components/logo';
+import { AppHeader } from '@/components/app-header';
 import { FlaggedRecord } from './flagged-record';
 import { BulletEditor, type ExistingBullet } from './bullet-editor';
 import { RecordEditor, type EditableRecord } from './record-editor';
@@ -108,27 +108,7 @@ export default async function ProfilePage() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-5 py-3.5">
-          <Link href="/" className="inline-flex min-h-11 items-center">
-            <Logo />
-          </Link>
-          <nav className="flex flex-wrap items-center gap-4 text-sm">
-            <Link href="/import" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Import
-            </Link>
-            <Link href="/settings/portfolio" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Portfolio
-            </Link>
-            <Link href="/settings/application" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Application answers
-            </Link>
-            <Link href="/" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Dashboard
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <AppHeader current="/profile" width="4xl" />
 
       <main className="mx-auto max-w-4xl px-5 py-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -257,7 +237,7 @@ export default async function ProfilePage() {
                   <span className="font-mono text-xs text-muted tabular">{list.length}</span>
                 </div>
                 <RecordEditor
-                  form={form}
+                  type={type}
                   records={list}
                   chips={CHIP_TYPES.has(type)}
                   single={type === 'summary'}

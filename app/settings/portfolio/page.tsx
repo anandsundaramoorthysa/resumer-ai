@@ -1,10 +1,9 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { eq, sql } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { profileRecords, users } from '@/lib/db/schema';
-import { Logo } from '@/components/logo';
+import { AppHeader } from '@/components/app-header';
 import { PortfolioForm } from './portfolio-form';
 import { AppInstallPanel } from './app-install';
 
@@ -33,21 +32,7 @@ export default async function PortfolioSettingsPage({
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-5 py-3.5">
-          <Link href="/" className="inline-flex min-h-11 items-center">
-            <Logo />
-          </Link>
-          <nav className="flex flex-wrap items-center gap-4 text-sm">
-            <Link href="/settings/application" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Application answers
-            </Link>
-            <Link href="/" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Back to dashboard
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <AppHeader current="/settings/portfolio" width="3xl" />
 
       <main className="mx-auto max-w-3xl px-5 py-8">
         <h1 className="font-display text-3xl">Portfolio connection</h1>

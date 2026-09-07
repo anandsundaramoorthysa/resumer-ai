@@ -1,7 +1,6 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { Logo } from '@/components/logo';
+import { AppHeader } from '@/components/app-header';
 import { Importer } from './importer';
 
 export const metadata = { title: 'Import an existing resume' };
@@ -13,21 +12,7 @@ export default async function ImportPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-5 py-3.5">
-          <Link href="/" className="inline-flex min-h-11 items-center">
-            <Logo />
-          </Link>
-          <nav className="flex items-center gap-4 text-sm">
-            <Link href="/profile" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Profile
-            </Link>
-            <Link href="/" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Dashboard
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <AppHeader current="/import" width="3xl" />
 
       <main className="mx-auto max-w-3xl px-5 py-8">
         <h1 className="font-display text-3xl">Import an existing resume</h1>

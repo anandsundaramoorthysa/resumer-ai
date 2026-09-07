@@ -75,3 +75,9 @@ dev.log
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---------------------------------------------------------------------------
+# UI audit output (scripts/ui-audit.mts) — regenerated on demand, never committed.
+# ---------------------------------------------------------------------------
+/screenshots/
+/.playwright/

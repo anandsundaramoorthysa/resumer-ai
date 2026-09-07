@@ -1,10 +1,9 @@
-import Link from 'next/link';
 import { redirect, notFound } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { resumeSnapshots } from '@/lib/db/schema';
-import { Logo } from '@/components/logo';
+import { AppHeader } from '@/components/app-header';
 import { ResumeEditor } from './resume-editor';
 import { ExtrasPanel } from './extras-panel';
 import type { QualityGateResult, ResumeDocument } from '@/lib/types';
@@ -36,16 +35,7 @@ export default async function ResumePage({
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3.5">
-          <Link href="/" className="inline-flex min-h-11 items-center">
-            <Logo />
-          </Link>
-          <Link href="/" className="inline-flex min-h-11 items-center text-muted hover:text-ink text-sm">
-            Back to dashboard
-          </Link>
-        </div>
-      </header>
+      <AppHeader width="5xl" />
 
       <main className="mx-auto max-w-5xl px-5 py-8">
         <ResumeEditor

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { auth, isAuthConfigured } from '@/auth';
 import { isDatabaseConfigured } from '@/lib/db';
 import { hasAnyProvider, availableProviders } from '@/lib/ai/models';
-import { Logo } from '@/components/logo';
+import { AppHeader } from '@/components/app-header';
 import { DraftConsole } from '@/components/draft-console';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { getDashboardData } from '@/lib/server/dashboard';
@@ -146,22 +146,7 @@ function Shell({
 }) {
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3.5">
-          <Logo />
-          <nav className="flex items-center gap-5 text-sm">
-            <Link href="/profile" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Profile
-            </Link>
-            <Link href="/applications" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Applications
-            </Link>
-            {userName ? (
-              <span className="hidden text-muted sm:inline">{userName}</span>
-            ) : null}
-          </nav>
-        </div>
-      </header>
+      <AppHeader current="/" userName={userName} width="6xl" />
       <main className="mx-auto max-w-6xl px-5 py-8">{children}</main>
     </div>
   );

@@ -17,6 +17,7 @@ import { generateStructured } from '../ai/chain';
 import type { DraftBudget } from '../ai/budget';
 import type { RepoFile } from './github';
 import { deriveTags } from './tags';
+import { educationHashParts, partitionEducation } from './education';
 
 const ExtractionSchema = z.object({
   contact: z
@@ -430,7 +431,17 @@ export function toRecords(data: ExtractedProfile): ParseResult {
     records.push(...bullets);
   }
 
-  for (const ed of data.education) {
+  // One row per real qualification, whatever the source called it.
+  //
+  // Extraction runs per file and the same degree is written differently in each, so the
+  // raw strings arrive in several spellings and a hash over them cannot collide. Both
+  // problems are settled before a record exists: `partitionEducation` moves misfiled
+  // certificates out and collapses the rest by normalised identity, and the hash is
+  // taken over that same normalised key so a re-worded source updates the row it already
+  // has instead of adding another. See lib/sync/education.ts.
+  const { education, certifications: reclassified } = partitionEducation(data.education);
+
+  for (const ed of education) {
     records.push({
       type: 'education',
       institution: ed.institution,
@@ -439,16 +450,21 @@ export function toRecords(data: ExtractedProfile): ParseResult {
       startDate: ed.startDate,
       endDate: ed.endDate,
       tags: [ed.credential.toLowerCase(), ed.field?.toLowerCase() ?? ''].filter(Boolean),
-      contentHash: hashContent(['education', ed.institution, ed.credential]),
+      contentHash: hashContent(educationHashParts(ed)),
       source: 'github-sync',
     } as ParsedRecord);
   }
 
-  for (const c of data.certifications) {
+  // A certificate the extractor filed as education joins the real certifications, and
+  // is hashed by the same recipe they are — ['cert', name, issuer], which is what
+  // lib/profile/forms.ts `hashInput` produces for a hand-written one. Anything else and
+  // the same certificate would exist twice, once per route in.
+  for (const c of [...data.certifications, ...reclassified]) {
     records.push({
       type: 'certification',
       name: c.name,
       issuer: c.issuer,
+      issuedDate: 'issuedDate' in c ? c.issuedDate : undefined,
       tags: [c.name.toLowerCase()],
       contentHash: hashContent(['cert', c.name, c.issuer]),
       source: 'github-sync',

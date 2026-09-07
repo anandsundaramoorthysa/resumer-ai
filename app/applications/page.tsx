@@ -4,7 +4,7 @@ import { desc, eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { applications } from '@/lib/db/schema';
-import { Logo } from '@/components/logo';
+import { AppHeader } from '@/components/app-header';
 import { StatusSelect } from './status-select';
 import type { ApplicationStatus } from './actions';
 
@@ -29,21 +29,7 @@ export default async function ApplicationsPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3.5">
-          <Link href="/" className="inline-flex min-h-11 items-center">
-            <Logo />
-          </Link>
-          <nav className="flex gap-4 text-sm">
-            <Link href="/profile" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Profile
-            </Link>
-            <Link href="/" className="inline-flex min-h-11 items-center text-muted hover:text-ink">
-              Dashboard
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <AppHeader current="/applications" width="5xl" />
 
       <main className="mx-auto max-w-5xl px-5 py-8">
         <h1 className="font-display text-3xl">Applications</h1>

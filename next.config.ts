@@ -48,9 +48,20 @@ const nextConfig: NextConfig = {
       "object-src 'none'",
       "form-action 'self'",
       "img-src 'self' data: https:",
-      "script-src 'self' 'unsafe-inline'",
+      // React's development build uses eval() to reconstruct stack traces across the
+      // server/client boundary, and without it the dev error overlay degrades to a
+      // message about the CSP rather than the actual error. Production React never
+      // calls eval, so this is not relaxed where it would matter.
+      process.env.NODE_ENV === 'production'
+        ? "script-src 'self' 'unsafe-inline'"
+        : "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://api.fontshare.com",
-      "font-src 'self' data: https://fonts.gstatic.com https://api.fontshare.com",
+      // The stylesheet and the font files come from DIFFERENT hosts. Fontshare serves
+      // CSS from api.fontshare.com and the woff2 files from cdn.fontshare.com, so
+      // allowing only the first let the stylesheet load and silently blocked every font
+      // in it — the page rendered fine in a system fallback and nothing failed loudly.
+      // Caught by loading the built app in a real browser and reading the console.
+      "font-src 'self' data: https://fonts.gstatic.com https://api.fontshare.com https://cdn.fontshare.com",
       "connect-src 'self'",
     ].join('; ');
 
