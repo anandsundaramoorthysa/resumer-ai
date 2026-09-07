@@ -28,6 +28,13 @@ export const users = pgTable('user', {
   name: text('name'),
   email: text('email').unique(),
   emailVerified: timestamp('emailVerified', { mode: 'date' }),
+  /**
+   * Set only for accounts created with a password. Null means this user signs in with
+   * GitHub or Google, and a password sign-in attempt against them must fail exactly as
+   * a wrong password does — a distinguishable failure tells a stranger which addresses
+   * have OAuth accounts.
+   */
+  passwordHash: text('password_hash'),
   image: text('image'),
   githubLogin: text('github_login'),
   /** REQ-2.2 — last portfolio commit SHA we parsed, the sync gate's cache key. */
@@ -74,6 +81,52 @@ export const verificationTokens = pgTable(
     expires: timestamp('expires', { mode: 'date' }).notNull(),
   },
   (t) => [primaryKey({ columns: [t.identifier, t.token] })],
+);
+
+/**
+ * Single-use tokens for email verification and password reset.
+ *
+ * Separate from `verificationToken`, which belongs to the Auth.js adapter and has its
+ * own lifecycle. Only a hash of the token is stored: the database is the thing most
+ * likely to leak, and a stored plaintext reset token is a password reset for anyone who
+ * reads it. `usedAt` makes a link single-use even before it expires.
+ */
+export const authTokens = pgTable(
+  'auth_token',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    /** The email address, normalised. Not a userId: a reset must work before sign-in. */
+    identifier: text('identifier').notNull(),
+    tokenHash: text('token_hash').notNull().unique(),
+    purpose: text('purpose').notNull(), // verify-email | reset-password
+    expires: timestamp('expires', { mode: 'date' }).notNull(),
+    usedAt: timestamp('used_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [index('auth_token_identifier_idx').on(t.identifier, t.purpose)],
+);
+
+/**
+ * Rate-limit counters.
+ *
+ * In the database rather than in memory because every request may run in a different
+ * function instance — an in-process counter on a serverless host limits one instance
+ * and lets an attacker walk straight past it.
+ */
+export const authAttempts = pgTable(
+  'auth_attempt',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    /** What is being limited: an email address, or an IP address. */
+    subject: text('subject').notNull(),
+    action: text('action').notNull(), // sign-in | sign-up | reset-request | verify
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [index('auth_attempt_idx').on(t.subject, t.action, t.createdAt)],
 );
 
 /* --------------------------------------------------------------- profile ---- */
