@@ -30,5 +30,12 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "//exclude": [
+    "scripts and tests are dev tooling with their own tsconfig, their own dependencies",
+    "(@playwright/test, postgres, dotenv) and their own server-only stub. next build",
+    "type-checks everything in `include`, so a Playwright harness was gating the",
+    "production deploy — and did: eight consecutive Netlify builds failed here while",
+    "local work stayed green. `npm run typecheck` still covers them, via scripts/tsconfig."
+  ],
+  "exclude": ["node_modules", "scripts", "tests"]
 }

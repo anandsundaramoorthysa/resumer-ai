@@ -9,7 +9,7 @@
     "lint": "eslint",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p scripts/tsconfig.json",
     "test": "tsx --tsconfig scripts/tsconfig.json tests/run.mts"
   },
   "dependencies": {

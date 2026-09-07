@@ -2,8 +2,24 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@/*": ["../*"],
-      "server-only": ["./stubs/server-only.ts"]
+      "@/*": [
+        "../*"
+      ],
+      "server-only": [
+        "./stubs/server-only.ts"
+      ]
     }
-  }
+  },
+  "include": [
+    "../scripts/**/*.mts",
+    "../scripts/**/*.ts",
+    "../tests/**/*.mts",
+    "../lib/**/*.ts",
+    "../app/**/*.ts",
+    "../app/**/*.tsx",
+    "../*.ts"
+  ],
+  "exclude": [
+    "../node_modules"
+  ]
 }
