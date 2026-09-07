@@ -14,6 +14,17 @@
   publish = ".next"
 
 [build.environment]
+  # Netlify scans build output for the VALUES of environment variables, because anything
+  # written into a browser bundle is public forever. NEXT_PUBLIC_SITE_URL trips it, and
+  # that is a false positive by construction: the NEXT_PUBLIC_ prefix is Next.js telling
+  # the compiler to inline a value into the client, and this one is the site's own public
+  # address — it appears in canonical links, the sitemap and robots.txt because it is
+  # meant to. Omitting the key keeps the scan on for every genuine secret.
+  #
+  # This is what failed ten consecutive deploys with 'exit code 2' and no readable
+  # reason: the failure text lives only in the deploy UI, not in the API.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SITE_URL"
+
   # Pinned rather than floating. Next 16 requires Node 20.9+, and "20" resolves to
   # whatever the build image ships that day — a moving target under a framework with a
   # hard floor. 22 is the current LTS and what Next 16 is developed against.
