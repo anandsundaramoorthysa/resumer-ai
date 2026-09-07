@@ -19,6 +19,7 @@ import React from 'react';
 import {
   Circle,
   Document,
+  Font,
   Page,
   Path,
   Svg,
@@ -29,6 +30,21 @@ import {
   renderToBuffer,
 } from '@react-pdf/renderer';
 import type { ResumeDocument } from '../types';
+
+/**
+ * Never break a word across lines.
+ *
+ * @react-pdf hyphenates by default, and the hyphen it inserts survives text extraction —
+ * which is the one thing this document must not do. Round-tripping a generated resume
+ * through a parser produced "produc-tion-grade", "bench-marked" and "resolu-tions": an
+ * ATS scanning for "production-grade" finds neither half, and the keyword the whole
+ * pipeline optimised for is silently lost at the last step.
+ *
+ * The callback returns the word as a single part, which is how @react-pdf is told a word
+ * has no break points. The cost is slightly looser right margins on narrow columns —
+ * a fair trade against losing keywords, and invisible next to what it prevents.
+ */
+Font.registerHyphenationCallback((word) => [word]);
 import { coerceHeading } from './headings';
 import { rendersAsPlainLine } from './sections';
 
