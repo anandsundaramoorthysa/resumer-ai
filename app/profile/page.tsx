@@ -143,6 +143,15 @@ export default async function ProfilePage() {
               >
                 Connect your portfolio
               </Link>
+              {/* The third route, which the dashboard's first-run card already promises
+                  by name ("Add your details by hand") and which used to lead nowhere,
+                  because every section was hidden while the profile was empty. */}
+              <a
+                href="#sections"
+                className="inline-flex min-h-11 items-center rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
+              >
+                Add your details by hand
+              </a>
             </div>
           </div>
         ) : null}
@@ -221,8 +230,20 @@ export default async function ProfilePage() {
 
         {/* A profile with nothing in it gets the invitation above instead of twelve
             empty forms, which read as work to do rather than a place to start. */}
-        <div className={records.length === 0 ? 'hidden' : 'mt-7 space-y-5'}>
-          {SECTION_ORDER.map((type) => {
+        {/*
+          * Sections that hold something get a card. The rest share one.
+          *
+          * Every type used to render a full bordered card whether or not it held
+          * anything, so a realistic profile showed five identical "Nothing recorded yet"
+          * cards in a row and ran to 2,955px on a desktop for twelve facts — the content
+          * you have outnumbered by the content you do not.
+          *
+          * The whole block also used to be hidden while the profile was empty, which
+          * broke the dashboard's own first-run card: it links here promising "Add your
+          * details by hand" and landed on a page with no way to do that.
+          */}
+        <div id="sections" className="mt-7 space-y-5">
+          {SECTION_ORDER.filter((type) => (grouped.get(type) ?? []).length > 0).map((type) => {
             const form = RECORD_FORMS[type];
             const list: EditableRecord[] = (grouped.get(type) ?? []).map((r) => ({
               id: r.id,
@@ -245,6 +266,34 @@ export default async function ProfilePage() {
               </section>
             );
           })}
+
+          {(() => {
+            const empty = SECTION_ORDER.filter((type) => (grouped.get(type) ?? []).length === 0);
+            if (empty.length === 0) return null;
+            return (
+              <section className="rounded-xl border border-dashed border-line p-5">
+                <h2 className="font-display text-lg">Add something else</h2>
+                <p className="mt-1 max-w-prose text-sm text-muted">
+                  Nothing recorded under these yet. Anything you add here is yours — a
+                  sync will never overwrite it.
+                </p>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  {empty.map((type) => (
+                    <div key={type}>
+                      <h3 className="text-sm font-semibold">{RECORD_FORMS[type].plural}</h3>
+                      <RecordEditor
+                        type={type}
+                        records={[]}
+                        chips={CHIP_TYPES.has(type)}
+                        single={type === 'summary'}
+                        compact
+                      />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            );
+          })()}
 
           {/* Anything synced whose type predates the registry still has to be visible,
               even though there is no form for it yet. */}

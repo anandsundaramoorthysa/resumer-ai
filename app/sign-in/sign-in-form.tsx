@@ -66,7 +66,9 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
               setMode(m);
               setResult(null);
             }}
-            className={`min-h-11 flex-1 rounded-md text-sm font-semibold ${
+            /* text-xs until `sm`: at 320px the tab box is 102px and "Create account"
+               needs 104, so the label touched both rounded edges. */
+            className={`min-h-11 flex-1 rounded-md px-1 text-xs font-semibold sm:text-sm ${
               mode === m ? 'bg-brand text-on-brand' : 'text-muted hover:text-ink'
             }`}
           >
@@ -125,8 +127,12 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
             ) : strength.ok ? (
               <li className="text-xs text-success">✓ That will do.</li>
             ) : (
+              /* Warning, not muted: an unmet rule rendered in the same grey as the
+                 neutral pre-typing hint directly above it, so the two were
+                 indistinguishable. Warning rather than danger — nothing has been
+                 submitted or rejected, it is a rule still to meet. */
               strength.problems.map((p) => (
-                <li key={p} className="text-xs text-muted">
+                <li key={p} className="text-xs text-warning">
                   ○ {p}
                 </li>
               ))
@@ -160,7 +166,10 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
       ) : null}
 
       <div className="mt-3 flex flex-wrap justify-between gap-3 text-xs">
-        <Link href="/forgot-password" className="text-muted underline hover:text-ink">
+        <Link
+          href="/forgot-password"
+          className="inline-flex min-h-11 items-center text-muted underline hover:text-ink"
+        >
           Forgot your password?
         </Link>
         {/* Offered unconditionally rather than only after a failed sign-in: the sign-in
@@ -170,7 +179,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
           type="button"
           onClick={resend}
           disabled={pending || email.trim().length < 4}
-          className="text-muted underline hover:text-ink disabled:opacity-50"
+          className="inline-flex min-h-11 items-center text-muted underline hover:text-ink disabled:opacity-50"
         >
           Resend the confirmation email
         </button>

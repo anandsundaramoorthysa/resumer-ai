@@ -50,8 +50,34 @@
   --font-mono: 'Spline Sans Mono', ui-monospace, 'Courier New', monospace;
 }
 
+/**
+ * The dark palette, as plain CSS rather than a second `@theme`.
+ *
+ * This was `@media (prefers-color-scheme: dark) { @theme { … } }`, which does not do what
+ * it reads as. Tailwind v4 only honours `@theme` at the top level: it hoists the
+ * declarations out of the media query into the single `:root` block, where these values —
+ * being second — overwrote the light ones unconditionally. The compiled stylesheet
+ * contained `--color-paper: #14161c` and nothing else, not one `prefers-color-scheme`
+ * block, and no light value anywhere. Every visitor got dark mode whatever their system
+ * was set to, and the light palette above had never once rendered.
+ *
+ * Redefining the same custom properties in ordinary CSS works because the utilities
+ * compile to `var(--color-*)` — the variable is resolved at use, so overriding it inside
+ * a media query is exactly the right lever. `@theme` above still declares the tokens and
+ * generates the utility classes; this only changes their values.
+ *
+ * `color-scheme` is set alongside, which was missing entirely: without it the browser
+ * renders native selects, scrollbars and autofill backgrounds in light form against a
+ * dark UI.
+ */
+:root {
+  color-scheme: light;
+}
+
 @media (prefers-color-scheme: dark) {
-  @theme {
+  :root {
+    color-scheme: dark;
+
     --color-paper: #14161c;
     --color-surface: #1b1e26;
     --color-ink: #eaebef;

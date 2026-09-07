@@ -150,7 +150,11 @@ export function ApplicationFieldsForm({ values }: { values: ApplicationFieldValu
           onClick={() =>
             startClearing(async () => setCleared(await clearApplicationFields()))
           }
-          className="min-h-11 rounded-lg px-4 py-2.5 text-sm font-semibold text-muted hover:text-danger disabled:opacity-50"
+          /* Coloured at rest and pushed away from Save. It wipes every stored answer and
+             was styled identically to a Cancel link until hovered — and on touch there is
+             no hover, so the only warning never appeared. This matches the delete button
+             in app/profile/record-editor.tsx. */
+          className="ml-auto min-h-11 rounded-lg px-4 py-2.5 text-sm font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
         >
           {clearing ? 'Clearing…' : 'Clear everything'}
         </button>

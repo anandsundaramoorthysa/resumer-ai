@@ -64,14 +64,16 @@ export function BulletEditor({
           ) : (
             <li
               key={b.id}
-              className="flex items-start justify-between gap-3 rounded-lg border border-line px-3.5 py-2.5"
+              /* Stacked below `sm` for the same reason as the record rows: a bullet is
+                 the longest text in the app and suffered worst from the squeeze. */
+              className="flex flex-col items-start gap-2 rounded-lg border border-line px-3.5 py-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
             >
               <span className="min-w-0 text-sm">{b.text}</span>
-              <span className="flex flex-none gap-1">
+              <span className="flex flex-none gap-1 self-end sm:self-auto">
                 <button
                   type="button"
                   onClick={() => setEditing(b.id)}
-                  className="min-h-11 rounded-lg px-2.5 text-xs font-semibold text-brand-dark hover:bg-paper"
+                  className="min-h-11 rounded-lg px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
                 >
                   Edit
                 </button>

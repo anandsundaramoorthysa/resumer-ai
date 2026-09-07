@@ -106,11 +106,21 @@ export default async function HomePage() {
 
       <dl className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Resumes drafted" value={String(data.draftCount)} />
+        {/*
+          * "None yet" rather than an em-dash.
+          *
+          * At 24px in a monospace face, accented with the dark theme's LIGHT teal, a bare
+          * "—" rendered as a solid teal bar exactly where a number should be — beside
+          * three tiles showing real values it read as a skeleton loader, not as "no data".
+          * The accent is dropped when there is nothing to accent, matching the
+          * "Profile last synced / Never" tile which already handled this correctly.
+          */}
         <Stat
           label="Average ATS score"
-          value={data.averageScore ? data.averageScore.toFixed(1) : '—'}
+          value={data.averageScore ? data.averageScore.toFixed(1) : 'None yet'}
           suffix={data.averageScore ? '/ 10' : undefined}
-          accent="brand"
+          accent={data.averageScore ? 'brand' : undefined}
+          small={!data.averageScore}
         />
         <Stat label="Applications tracked" value={String(data.applicationCount)} />
         <Stat

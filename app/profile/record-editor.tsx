@@ -78,12 +78,18 @@ export function RecordEditor({
   records,
   chips,
   single,
+  compact,
 }: {
   type: string;
   records: EditableRecord[];
   chips?: boolean;
   /** One record is the most this type can hold — a summary, not a list of them. */
   single?: boolean;
+  /**
+   * Used where several empty types share one card. "Nothing recorded yet." repeated six
+   * times says nothing the absence of content did not already say.
+   */
+  compact?: boolean;
 }) {
   const form = RECORD_FORMS[type];
   const [editing, setEditing] = useState<string | null>(null);
@@ -95,7 +101,9 @@ export function RecordEditor({
   return (
     <div>
       {records.length === 0 ? (
-        <p className="mt-3 text-sm text-muted">Nothing recorded yet.</p>
+        compact ? null : (
+          <p className="mt-3 text-sm text-muted">Nothing recorded yet.</p>
+        )
       ) : chips ? (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {records.map((r) => (
@@ -113,7 +121,9 @@ export function RecordEditor({
                   setAdding(false);
                 }}
                 aria-label={`Edit ${describeRecord(form.type, r.data)}`}
-                className="rounded-full px-1 hover:bg-surface"
+                /* 24x24 is WCAG 2.2 AA's floor (2.5.8). At px-1 this was 20x16, which is
+                   not reliably hittable with a thumb. Sized without inflating the chip. */
+                className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-full hover:bg-surface"
               >
                 &#9998;
               </button>
@@ -139,7 +149,11 @@ export function RecordEditor({
             ) : (
               <li
                 key={r.id}
-                className="flex items-start justify-between gap-3 rounded-lg border border-line px-3.5 py-2.5 text-sm"
+                /* Stacked below `sm`. Side by side, the actions are flex-none and take
+                   their width first, leaving the text an 83px column that ran to twenty
+                   lines at 320px — nothing overflowed or clipped, it just became an
+                   unreadable ribbon. */
+                className="flex flex-col items-start gap-2 rounded-lg border border-line px-3.5 py-2.5 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-3"
               >
                 <span className="min-w-0">
                   {describeRecord(form.type, r.data)}
@@ -147,7 +161,7 @@ export function RecordEditor({
                     {sourceLabel(r.source)}
                   </span>
                 </span>
-                <span className="flex flex-none gap-1">
+                <span className="flex flex-none gap-1 self-end sm:self-auto">
                   <button
                     type="button"
                     onClick={() => {
@@ -155,7 +169,9 @@ export function RecordEditor({
                       setEditing(r.id);
                       setAdding(false);
                     }}
-                    className="min-h-11 rounded-lg px-2.5 text-xs font-semibold text-brand-dark hover:bg-paper"
+                    /* px-3 rather than px-2.5: at 2.5 the box measured 43px, one pixel
+                       under the 44px touch target this codebase holds itself to. */
+                    className="min-h-11 rounded-lg px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
                   >
                     Edit
                   </button>

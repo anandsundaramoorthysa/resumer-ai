@@ -68,16 +68,19 @@ export function findProfileGaps(
   const parts: string[] = [];
   if (rolesWithoutBullets.length > 0) {
     parts.push(
+      // The verb agrees with the LEADING count, not the total: "1 of 1 role have no
+      // accomplishments" is the common single-role case, and a grammar error in the
+      // most prominent copy on the page undercuts a product about careful writing.
       `${rolesWithoutBullets.length} of ${roles.length} role${
         roles.length === 1 ? '' : 's'
-      } have no accomplishments recorded`,
+      } ${rolesWithoutBullets.length === 1 ? 'has' : 'have'} no accomplishments recorded`,
     );
   }
   if (projectsWithoutMetrics.length > 0) {
     parts.push(
       `${projectsWithoutMetrics.length} of ${projects.length} project${
         projects.length === 1 ? '' : 's'
-      } have no measurable outcome`,
+      } ${projectsWithoutMetrics.length === 1 ? 'has' : 'have'} no measurable outcome`,
     );
   }
 
