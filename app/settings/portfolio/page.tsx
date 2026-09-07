@@ -36,7 +36,7 @@ export default async function PortfolioSettingsPage({
 
       <main className="mx-auto max-w-3xl px-5 py-8">
         <h1 className="font-display text-3xl">Portfolio connection</h1>
-        <p className="mt-2 max-w-prose text-sm text-muted">
+        <p className="mt-2 text-sm text-muted">
           Resumer AI reads your skills, projects and experience from the repository behind
           your portfolio site. Before every draft it checks whether that repo has changed —
           a single API call — and only re-reads it when the commit is new.

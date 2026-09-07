@@ -25,7 +25,7 @@ export default async function ApplicationFieldsPage() {
 
       <main className="mx-auto max-w-3xl px-5 py-8">
         <h1 className="font-display text-3xl">Application answers</h1>
-        <p className="mt-2 max-w-prose text-sm text-muted">
+        <p className="mt-2 text-sm text-muted">
           The questions every application portal asks that have nothing to do with your
           resume — work authorization, sponsorship, salary, notice, and the voluntary
           self-identification block.
@@ -38,7 +38,7 @@ export default async function ApplicationFieldsPage() {
         */}
         <div className="mt-5 rounded-xl border border-gold bg-gold-tint/40 p-4">
           <h2 className="text-sm font-semibold text-gold">Nothing reads these yet</h2>
-          <p className="mt-1 max-w-prose text-sm text-muted">
+          <p className="mt-1 text-sm text-muted">
             No resume, cover letter or export uses any of it, and it is never sent to an AI
             provider. It is stored now so the planned browser-extension autofill can be
             built later without a database migration — and because these answers are

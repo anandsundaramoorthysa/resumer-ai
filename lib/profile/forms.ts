@@ -11,6 +11,7 @@
  */
 
 import type { ProfileRecord } from '../types';
+import { educationHashParts } from '../sync/education';
 
 export type FieldKind = 'text' | 'textarea' | 'list' | 'select';
 
@@ -40,6 +41,15 @@ export interface RecordForm {
   identityFields: string[];
   /** The hash's first element, where it is not the type name — sync writes 'cert'. */
   hashPrefix?: string;
+  /**
+   * Replaces the whole hash input for types whose identity is not a plain field list.
+   *
+   * Education needs it: the sync hashes a normalised identity so that "M.Sc." and
+   * "M.Sc. Data Science" at "Loyola College" and "Loyola College (Autonomous), Chennai"
+   * collide. Hashing the raw fields here instead meant a hand-typed degree would not
+   * collide with its synced twin, so the duplicate check never fired for that one type.
+   */
+  hashParts?: (data: Record<string, unknown>) => string[];
   /** Builds the one-line display string. */
   describe: (data: Record<string, unknown>) => string;
 }
@@ -104,6 +114,12 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
       { name: 'endDate', label: 'Finished', kind: 'text', placeholder: '2026-05' },
     ],
     identityFields: ['institution', 'credential'],
+    hashParts: (d) =>
+      educationHashParts({
+        institution: str(d, 'institution'),
+        credential: str(d, 'credential'),
+        field: str(d, 'field') || undefined,
+      }),
     describe: (d) =>
       joined([str(d, 'credential'), str(d, 'field'), str(d, 'institution')]),
   },
@@ -300,6 +316,7 @@ export function missingRequired(form: RecordForm, data: Record<string, unknown>)
 
 /** The full hash input for a record, prefix included. */
 export function hashInput(form: RecordForm, data: Record<string, unknown>): string[] {
+  if (form.hashParts) return form.hashParts(data);
   return [form.hashPrefix ?? form.type, ...identityParts(form, data)];
 }
 

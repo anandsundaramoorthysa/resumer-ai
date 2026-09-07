@@ -75,17 +75,63 @@ export async function testAsync(
   }
 }
 
-/** Call at the end of a suite file. Exits non-zero if anything failed. */
-export function report(label: string): void {
+/**
+ * The summary, emitted automatically when the suite process exits.
+ *
+ * This used to be a `report()` that each suite file had to remember to call at the end,
+ * and **not one of the seventeen suites called it**. The consequence was not a missing
+ * summary line — it was that `process.exitCode` was never set, every suite exited 0
+ * whatever its assertions did, and `npm test` printed "All 17 suites passed" over a
+ * deliberately failing assertion. Every green run was unverified.
+ *
+ * So it is no longer something a file can forget. `process.on('exit')` fires however the
+ * suite ends, the handler is synchronous, and assigning `process.exitCode` from inside it
+ * still determines the code the process returns.
+ */
+let summarised = false;
+
+function summarise(): void {
+  if (summarised) return;
+  summarised = true;
+
   console.log('');
   if (failures.length === 0) {
-    console.log(`${label}: ${passCount} passed.`);
+    console.log(`${passCount} passed.`);
     return;
   }
-  console.log(`${label}: ${passCount} passed, ${failures.length} FAILED`);
+
+  console.log(`${passCount} passed, ${failures.length} FAILED`);
   for (const f of failures) {
-    console.log(`\n  ${f.suite} — ${f.name}`);
+    console.log(`
+  ${f.suite} — ${f.name}`);
     console.log(`  ${f.message}`);
   }
   process.exitCode = 1;
+}
+
+process.on('exit', summarise);
+
+/**
+ * An unhandled rejection must fail the suite too.
+ *
+ * A `testAsync` whose promise rejects outside the try — or a stray floating promise —
+ * would otherwise print nothing and let the process exit 0, which is the same silent
+ * pass this file exists to prevent.
+ */
+process.on('unhandledRejection', (reason) => {
+  failures.push({
+    suite: currentSuite || '(module scope)',
+    name: 'unhandled rejection',
+    message: reason instanceof Error ? reason.message : String(reason),
+  });
+  console.log(`  FAIL unhandled rejection`);
+  process.exitCode = 1;
+});
+
+/**
+ * Kept as a no-op for the suites that call it, and for anyone reading an old example.
+ * The summary happens on exit now whether or not this is called.
+ */
+export function report(_label?: string): void {
+  void _label;
 }

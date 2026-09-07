@@ -12,6 +12,7 @@ import {
   coerceFormValues,
   describeRecord,
   formFor,
+  hashInput,
   identityParts,
   missingRequired,
   tagSource,
@@ -106,5 +107,42 @@ suite('record form registry', () => {
   test('a bullet still describes itself, though it has no form', () => {
     assert(formFor('experience-bullet') === null, 'deliberately not in the registry');
     assert(describeRecord('experience-bullet', { text: 'Shipped it' }) === 'Shipped it', 'still readable');
+  });
+});
+
+suite('hash consistency with the sync', () => {
+  test('a hand-typed degree hashes the same as its synced twin', () => {
+    // The sync normalises education identity so that one degree spelled several ways is
+    // one record. The registry hashed the raw fields, so a degree typed by hand did not
+    // collide with the synced row it duplicated and the duplicate check never fired.
+    const form = formFor('education')!;
+    const typed = hashInput(form, {
+      credential: 'M.Sc.',
+      field: 'Data Science',
+      institution: 'Loyola College',
+    });
+    const synced = hashInput(form, {
+      credential: 'M.Sc. Data Science',
+      field: 'Data Science',
+      institution: 'Loyola College (Autonomous), Chennai',
+    });
+    assert(
+      typed.join('|') === synced.join('|'),
+      `same degree, same hash input — got ${typed.join('|')} vs ${synced.join('|')}`,
+    );
+  });
+
+  test('two different degrees at one institution still hash apart', () => {
+    const form = formFor('education')!;
+    const msc = hashInput(form, { credential: 'M.Sc.', field: 'Physics', institution: 'Loyola College' });
+    const ma = hashInput(form, { credential: 'M.A.', field: 'History', institution: 'Loyola College' });
+    assert(msc.join('|') !== ma.join('|'), 'an M.Sc. and an M.A. are two qualifications');
+  });
+
+  test('every other type still hashes from its identity fields', () => {
+    const form = formFor('certification')!;
+    const parts = hashInput(form, { name: 'AWS SAA', issuer: 'Amazon' });
+    assert(parts[0] === 'cert', `the sync's prefix is preserved, got ${parts[0]}`);
+    assert(parts.join('|') === 'cert|AWS SAA|Amazon', `got ${parts.join('|')}`);
   });
 });

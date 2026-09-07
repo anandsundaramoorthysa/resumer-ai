@@ -11,6 +11,7 @@
  * should cost you a review prompt, not a section of your career history.
  */
 
+import { educationIdentity } from './education';
 import { createHash } from 'node:crypto';
 import type { ProfileRecord, RecordSource } from '../types';
 
@@ -112,7 +113,11 @@ function identityKey(r: ProfileRecord): string {
     case 'project':
       return `project:${r.name.toLowerCase().trim()}`;
     case 'education':
-      return `education:${institutionKey(r.institution)}:${credentialLevel(r.credential)}`;
+      // The full normalised identity, not just the level. `credentialLevel` maps every
+      // masters-shaped credential to the literal string "masters", so an M.Sc. and an
+      // M.A. at one institution were the same record here and reconcile would update one
+      // over the other. `educationIdentity` keeps the subject, so they stay two.
+      return `education:${educationIdentity(r.institution, r.credential, r.field)}`;
     case 'certification':
       return `cert:${r.name.toLowerCase().trim()}`;
     case 'achievement':
@@ -137,29 +142,6 @@ function identityKey(r: ProfileRecord): string {
       // Bullets have no natural key; first 40 chars of the action is a decent proxy.
       return `bullet:${r.action.toLowerCase().trim().slice(0, 40)}`;
   }
-}
-
-/** "M.Sc.", "MSc", "M.Sc. Data Science" all reduce to the same level. */
-function credentialLevel(credential: string): string {
-  const c = credential.toLowerCase().replace(/[.\s]/g, '');
-  if (/^(msc|ms|mtech|meng|ma|mba|mca|master)/.test(c)) return 'masters';
-  if (/^(bsc|be|btech|beng|ba|bba|bca|bachelor)/.test(c)) return 'bachelors';
-  if (/^(phd|dphil|doctor)/.test(c)) return 'doctorate';
-  if (/^(hsc|12th|intermediate|highschool|diploma)/.test(c)) return 'secondary';
-  return c.slice(0, 24) || 'other';
-}
-
-/** Leading words of an institution, so parenthetical and city suffixes don't split it. */
-function institutionKey(institution: string): string {
-  return institution
-    .toLowerCase()
-    .replace(/\(.*?\)/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .slice(0, 3)
-    .join(' ');
 }
 
 function sameTags(a: string[], b: string[]): boolean {
