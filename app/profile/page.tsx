@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
 import { FlaggedRecord } from './flagged-record';
+import { ProposedBulkControls, ProposedRecord } from './proposed-record';
 import { BulletEditor, type ExistingBullet } from './bullet-editor';
 import { RecordEditor, type EditableRecord } from './record-editor';
 import { RECORD_FORMS, describeRecord, formFor } from '@/lib/profile/forms';
@@ -55,13 +56,51 @@ export default async function ProfilePage() {
     .select()
     .from(profileRecords)
     .where(eq(profileRecords.userId, userId));
-  const roles = await db
+  const allRoles = await db
     .select()
     .from(rolesTable)
     .where(eq(rolesTable.userId, userId));
 
-  const flagged = records.filter((r) => r.flaggedForRemoval);
-  const active = records.filter((r) => !r.flaggedForRemoval);
+  /*
+   * Three states, and the page has to keep them apart.
+   *
+   * `pending` is what the last sync proposed and nobody has accepted yet. It is not the
+   * profile: `loadProfileForUser` will not hand it to a draft, so showing it in the
+   * sections below would tell the user they have a fact that no resume can use. It gets
+   * its own queue at the top instead.
+   *
+   * `rejected` rows are tombstones that keep sync from re-proposing a claim — see
+   * lib/server/sync-review.ts. They are not shown anywhere; the user has already
+   * answered.
+   */
+  const proposed = records.filter((r) => r.reviewState === 'pending');
+  const decided = records.filter((r) => r.reviewState === 'approved');
+  const roles = allRoles.filter((r) => r.reviewState === 'approved');
+  const proposedRoles = allRoles.filter((r) => r.reviewState === 'pending');
+  const reviewCount = proposed.length + proposedRoles.length;
+
+  const flagged = decided.filter((r) => r.flaggedForRemoval);
+  const active = decided.filter((r) => !r.flaggedForRemoval);
+
+  /** Job labels for every role, proposed ones included, so a bullet can name its job. */
+  const roleLabels = new Map(
+    allRoles.map((r) => [r.id, `${r.title} — ${r.company}`] as const),
+  );
+
+  const proposedByType = new Map<string, typeof records>();
+  for (const r of proposed) {
+    const list = proposedByType.get(r.type) ?? [];
+    list.push(r);
+    proposedByType.set(r.type, list);
+  }
+  // Same order the rest of the page uses, bullets first because they follow the jobs
+  // they belong to. Row order otherwise comes out of the database unsorted, so the queue
+  // rearranges itself every time one item is decided.
+  const reviewOrder = ['experience-bullet', ...SECTION_ORDER];
+  const proposedSections = [...proposedByType.entries()].sort(
+    (a, b) =>
+      (reviewOrder.indexOf(a[0]) + 1 || 99) - (reviewOrder.indexOf(b[0]) + 1 || 99),
+  );
 
   // The gap summary is the point of this page for a profile like this one: sync cannot
   // write accomplishments that the portfolio never stated, so the hole has to be visible
@@ -122,7 +161,7 @@ export default async function ProfilePage() {
           </div>
         </div>
 
-        {records.length === 0 ? (
+        {decided.length === 0 && reviewCount === 0 ? (
           <div className="mt-8 rounded-xl border border-dashed border-line p-8 text-center">
             <p className="font-display text-xl">Nothing here yet</p>
             <p className="mx-auto mt-2 max-w-md text-sm text-muted">
@@ -154,6 +193,75 @@ export default async function ProfilePage() {
               </a>
             </div>
           </div>
+        ) : null}
+
+        {/*
+          * The sync review queue.
+          *
+          * Above the flagged list on purpose: that one asks about facts already in the
+          * profile, this one is the gate everything from the repository has to pass
+          * before it is a fact at all. A repository is parsed by an LLM, and an LLM
+          * reading a file that tells it to invent a job at Stripe invents a job at
+          * Stripe — which every later check would then verify against, and pass. The
+          * queue is the only place a person sees the claim before that happens.
+          */}
+        {reviewCount > 0 ? (
+          <section className="mt-7 rounded-xl border border-gold bg-gold-tint/40 p-5">
+            <h2 className="font-display text-lg text-gold">
+              {reviewCount} new item{reviewCount === 1 ? '' : 's'} from your portfolio,
+              waiting for you
+            </h2>
+            <p className="mt-1.5 max-w-prose text-sm text-muted">
+              Your last sync read these out of your repository. They are not part of your
+              profile yet and no resume can use them until you approve them — what a repo
+              says is a proposal, and a resume is a claim you sign. Approving keeps a
+              record in step with the repo on later syncs; rejecting is remembered, so a
+              later sync will not offer the same item again. Approving a bullet also
+              approves the job it belongs to.
+            </p>
+
+            <ProposedBulkControls count={reviewCount} />
+
+            {proposedRoles.length > 0 ? (
+              <div className="mt-5">
+                <h3 className="text-sm font-semibold">Jobs</h3>
+                <ul className="mt-2 space-y-2">
+                  {proposedRoles.map((role) => (
+                    <ProposedRecord
+                      key={role.id}
+                      id={role.id}
+                      kind="role"
+                      text={`${role.title} — ${role.company}`}
+                      context={`${role.startDate || 'no start'} → ${role.endDate}`}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {proposedSections.map(([type, list]) => (
+              <div key={type} className="mt-5">
+                <h3 className="text-sm font-semibold">{labelFor(type)}</h3>
+                <ul className="mt-2 space-y-2">
+                  {list.map((r) => (
+                    <ProposedRecord
+                      key={r.id}
+                      id={r.id}
+                      kind="record"
+                      text={describeRecord(r.type, r.data as Record<string, unknown>)}
+                      context={
+                        r.type === 'experience-bullet'
+                          ? roleLabels.get(
+                              String((r.data as Record<string, unknown>).roleId ?? ''),
+                            )
+                          : undefined
+                      }
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </section>
         ) : null}
 
         {flagged.length > 0 ? (

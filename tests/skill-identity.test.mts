@@ -125,6 +125,7 @@ suite('the scorers consume it', () => {
     userId: 'u1',
     source: 'manual' as const,
     flaggedForRemoval: false,
+    reviewState: 'approved' as const,
     createdAt: new Date('2024-01-01'),
     updatedAt: new Date('2024-01-01'),
   };

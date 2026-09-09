@@ -31,6 +31,7 @@ const base = {
   userId: 'u1',
   source: 'manual' as const,
   flaggedForRemoval: false,
+  reviewState: 'approved' as const,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -54,7 +55,7 @@ const records: ProfileRecord[] = [
 ];
 
 const roles: RoleRecord[] = [
-  { id: 'r1', userId: 'u1', title: 'Engineer', company: 'Acme', startDate: '2022-01', endDate: 'present', source: 'manual', contentHash: 'rh1' },
+  { id: 'r1', userId: 'u1', title: 'Engineer', company: 'Acme', startDate: '2022-01', endDate: 'present', source: 'manual', contentHash: 'rh1', reviewState: 'approved' },
 ];
 
 const job: JobRequirement = {

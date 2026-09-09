@@ -51,6 +51,7 @@ function base(tags: string[] = []) {
     contentHash: `h${seq}`,
     tags,
     flaggedForRemoval: false,
+    reviewState: 'approved' as const,
     createdAt: new Date('2024-01-01'),
     updatedAt: new Date('2024-01-01'),
   };
@@ -72,6 +73,7 @@ const ROLE: RoleRecord = {
   endDate: 'present',
   source: 'github-sync',
   contentHash: 'rh1',
+  reviewState: 'approved',
 };
 
 function job(overrides: Partial<JobRequirement> = {}): JobRequirement {
@@ -532,6 +534,7 @@ suite('per-role bullet distribution (AUDIT #8)', () => {
     endDate,
     source: 'github-sync',
     contentHash: `h-${id}`,
+    reviewState: 'approved',
   });
 
   const forRole = (roleId: string, n: number): ExperienceBulletRecord[] =>

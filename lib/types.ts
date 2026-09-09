@@ -9,6 +9,16 @@
  */
 export type RecordSource = 'manual' | 'github-sync' | 'ai-import' | 'linkedin';
 
+/**
+ * Whether a fact is part of the profile yet.
+ *
+ * Only a sync produces anything other than `approved`: a portfolio repository is
+ * parsed by an LLM, and an LLM reading attacker-authored text writes whatever that
+ * text tells it to. A new claim from that path is a proposal until the user accepts
+ * it, and nothing but an `approved` record is ever loaded into a draft.
+ */
+export type ReviewState = 'approved' | 'pending' | 'rejected';
+
 export type RoleCategory =
   | 'seo'
   | 'full-stack'
@@ -26,6 +36,8 @@ export interface ProfileRecordBase {
   contentHash: string; // REQ-1.2 / REQ-2.4 reconciliation key
   tags: string[]; // skills/keywords this record demonstrates
   flaggedForRemoval: boolean; // REQ-2.4 — flagged, never auto-deleted
+  /** Rows reaching a draft are always 'approved'; see ReviewState. */
+  reviewState: ReviewState;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,6 +72,8 @@ export interface RoleRecord {
   endDate: string | 'present';
   source: RecordSource;
   contentHash: string;
+  /** A role a sync invented is an employment claim, so it waits for review too. */
+  reviewState: ReviewState;
 }
 
 export interface ProjectRecord extends ProfileRecordBase {

@@ -254,8 +254,22 @@ export function DraftConsole() {
         )}
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          {/*
+            The disclosure belongs where the decision is made, not only in settings.
+            This is the button that sends someone's name, employers and history to a
+            third-party AI company, and until now nothing on the way to it said so or
+            named one.
+          */}
           <span className="text-xs text-muted">
-            Your portfolio is re-checked for changes before drafting.
+            Your portfolio is re-checked for changes before drafting. This sends your
+            profile and the job description to a third-party AI provider —{' '}
+            <a
+              href="/settings/application#where-your-data-goes"
+              className="font-semibold text-ink underline"
+            >
+              which ones, and what is sent
+            </a>
+            .
           </span>
           <button
             type="button"
