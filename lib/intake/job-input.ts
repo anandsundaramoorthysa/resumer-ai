@@ -153,10 +153,11 @@ export interface CombinedJobText {
  *
  * The rules, and why:
  *
- * 1. When only one half exists, it is returned untouched — no header, no wrapper. The
- *    text-only path has to stay byte-identical to what it was, because `looksLikeUrl`
- *    rejects anything containing whitespace: a decorated bare URL would silently stop
- *    being scraped.
+ * 1. Typed text alone is returned untouched — no header, no wrapper. That path has to
+ *    stay byte-identical to what it was, because `looksLikeUrl` rejects anything
+ *    containing whitespace: a decorated bare URL would silently stop being scraped.
+ *    A file alone still gets its label, which costs nothing — an extracted document
+ *    contains whitespace and so could never have been mistaken for a URL anyway.
  * 2. Typed text comes first, the document second under a labelled fence. The typed box
  *    is where the user says what they mean in this session ("this role, but the team is
  *    the AI one") while the document is bulk material; putting the short deliberate

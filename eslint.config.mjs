@@ -18,6 +18,10 @@ const eslintConfig = defineConfig([
     ".netlify/**",
     // Playwright MCP scratch: page snapshots and throwaway audit scripts.
     ".playwright-mcp/**",
+    // Agent worktrees. Each carries its own node_modules, and one left behind after a
+    // merge turned a clean lint run into 1,310 errors in code this project did not
+    // write — the same way .netlify did before it was ignored.
+    ".*/**",
   ]),
 ]);
 
