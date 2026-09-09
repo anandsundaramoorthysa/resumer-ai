@@ -68,16 +68,25 @@ export function Logo({
   size = 30,
   showWordmark = true,
   className = '',
+  wordmarkClassName = '',
 }: {
   size?: number;
   showWordmark?: boolean;
   className?: string;
+  /**
+   * Extra classes on the wordmark alone.
+   *
+   * The header uses this to drop the name between `sm` and `md`, where the six navigation
+   * links and the name cannot both fit on one row and the links are the more useful of the
+   * two. The mark keeps the identity there; the name is back from `md` up.
+   */
+  wordmarkClassName?: string;
 }) {
   return (
     <span className={`inline-flex items-center gap-2.5 ${className}`}>
       <LogoMark size={size} />
       {showWordmark ? (
-        <span className="font-display text-[1.15rem] leading-none text-ink">
+        <span className={`font-display text-[1.15rem] leading-none text-ink ${wordmarkClassName}`}>
           Resumer <span className="text-brand-dark">AI</span>
         </span>
       ) : null}

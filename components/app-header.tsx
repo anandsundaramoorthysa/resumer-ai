@@ -15,10 +15,19 @@
  * everything visible, but six chips became two or three rows and ate about a third of a
  * 320px screen before any content appeared. Hiding navigation is only acceptable if the
  * control behaves the way people expect, which is what that component is careful about.
+ *
+ * The bar is one row: wordmark, links, account. It used to be two — the wordmark and sign
+ * out on top, the links on a second row below — which cost 123px of every page and left a
+ * gap between the two that read as a mistake. The links also sat in rounded chips with the
+ * active one filled in, so six equally-weighted buttons competed with each other and with
+ * the page heading underneath. Now they are plain text on the baseline of the bar and the
+ * current page is marked by a 2px rule sitting on the header's own bottom border, which is
+ * quieter and says the same thing.
  */
 
 import Link from 'next/link';
 import { auth, signOut } from '@/auth';
+import { AccountMenu } from '@/components/account-menu';
 import { Logo } from '@/components/logo';
 import { MobileNav } from '@/components/mobile-nav';
 import { NAV_LINKS } from '@/components/nav-links';
@@ -69,13 +78,17 @@ export async function AppHeader({
   if (!signedIn) {
     return (
       <header className="border-b border-line bg-surface">
-        <div className={`${container} flex items-center justify-between gap-3 py-3`}>
-          <Link href="/" className="inline-flex min-h-11 items-center" aria-label="Resumer AI">
-            <Logo />
+        <div className={`${container} flex h-14 items-center justify-between gap-3`}>
+          <Link
+            href="/"
+            className="inline-flex min-h-11 items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            aria-label="Resumer AI"
+          >
+            <Logo size={28} />
           </Link>
           <Link
             href="/sign-in"
-            className="inline-flex min-h-11 items-center rounded-lg border border-line px-3.5 text-sm font-semibold hover:bg-paper"
+            className="inline-flex min-h-11 items-center rounded-lg border border-line px-3.5 text-sm font-semibold hover:bg-paper focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           >
             Sign in
           </Link>
@@ -100,68 +113,62 @@ export async function AppHeader({
     // `relative` so the phone menu can position against the header rather than the page,
     // which keeps it under the bar when the page is scrolled.
     <header className="relative border-b border-line bg-surface">
-      <div className={`${container} flex items-center justify-between gap-3 py-3`}>
+      <div className={`${container} flex h-14 items-center gap-2 lg:gap-4`}>
         <Link
           href="/"
-          className="inline-flex min-h-11 items-center rounded-lg"
+          className="inline-flex min-h-11 shrink-0 items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           aria-label="Resumer AI — dashboard"
         >
-          <Logo />
+          {/* The name is dropped between `sm` and `md` only. That band is the one width
+              where the six links and the wordmark cannot share a row, and navigation is
+              the thing this header exists to provide; the mark still carries the identity,
+              and on a phone — where the links are behind the menu — the name is back. */}
+          <Logo size={28} wordmarkClassName="sm:hidden md:inline" />
         </Link>
 
-        <div className="flex items-center gap-2">
-          {/* Hidden on the narrowest screens: the name is reassurance, not navigation,
-              and it is the first thing worth sacrificing for room. */}
-          {name ? (
-            <span className="hidden max-w-[16ch] truncate text-sm text-muted sm:inline">
-              {name}
-            </span>
-          ) : null}
+        {/*
+          * The links, from `sm` up only, on the same row as everything else.
+          *
+          * The list is full-height (`items-stretch`, `h-full`) so the active rule can sit
+          * on the header's bottom border rather than floating above it. The links
+          * themselves still declare `min-h-11`: the row is 56px, but the constraint should
+          * not depend on that number staying where it is.
+          */}
+        <nav className="hidden min-w-0 flex-1 self-stretch sm:block" aria-label="Main">
+          <ul className="flex h-full items-stretch">
+            {NAV_LINKS.map((link) => {
+              const active = isCurrent(link.href, current);
+              return (
+                <li key={link.href} className="flex">
+                  <Link
+                    href={link.href}
+                    aria-current={active ? 'page' : undefined}
+                    className={`relative inline-flex h-full min-h-11 items-center rounded-md px-2 text-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-brand lg:px-3 ${
+                      active ? 'font-semibold text-ink' : 'font-medium text-muted hover:text-ink'
+                    }`}
+                  >
+                    {link.label}
+                    {/* Decorative: `aria-current` above is what actually says "you are
+                        here". The rule overlaps the header border by a pixel so the two
+                        read as one line rather than a bar stacked on another bar. */}
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none absolute inset-x-1.5 -bottom-px h-0.5 rounded-full lg:inset-x-2.5 ${
+                        active ? 'bg-brand' : 'bg-transparent'
+                      }`}
+                    />
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
 
-          {/* From `sm` up the links are always on screen, so sign out belongs here. On a
-              phone it moves inside the menu, where everything else lives. */}
-          <form action={signOutAction} className="hidden sm:block">
-            <button
-              type="submit"
-              className="inline-flex min-h-11 items-center rounded-lg border border-line px-3 text-sm font-semibold text-muted hover:bg-paper hover:text-ink"
-            >
-              Sign out
-            </button>
-          </form>
-
-          <MobileNav links={NAV_LINKS} current={current} signOut={signOutAction} />
+        <div className="ml-auto flex shrink-0 items-center sm:ml-0">
+          <AccountMenu name={name} signOut={signOutAction} />
+          <MobileNav links={NAV_LINKS} current={current} userName={name} signOut={signOutAction} />
         </div>
       </div>
-
-      {/*
-        * The wrapping row, from `sm` up only.
-        *
-        * Below that it became two or three rows of chips and took about a third of a
-        * 320px screen before any content appeared. Everything visible was the right
-        * instinct while there was no menu; a menu that behaves properly is better.
-        */}
-      <nav className={`${container} hidden pb-2.5 sm:block`} aria-label="Main">
-        <ul className="flex flex-wrap gap-1.5">
-          {NAV_LINKS.map((link) => {
-            const active = isCurrent(link.href, current);
-            return (
-              <li key={link.href}>
-                <Link
-                  href={link.href}
-                  aria-current={active ? 'page' : undefined}
-                  className={`inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium ${
-                    active
-                      ? 'bg-brand-tint text-brand-dark'
-                      : 'text-muted hover:bg-paper hover:text-ink'
-                  }`}
-                >
-                  {link.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
     </header>
   );
 }
