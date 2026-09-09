@@ -96,6 +96,132 @@ export async function installationCoversRepo(
   return repos.some((r) => r.toLowerCase() === fullName.toLowerCase());
 }
 
+/* ------------------------------------------------- who may connect a repo ---- */
+
+/** The `permissions` block GitHub returns on `GET /repos/{owner}/{repo}`. */
+export interface RepoPermissions {
+  admin?: boolean;
+  maintain?: boolean;
+  push?: boolean;
+  pull?: boolean;
+}
+
+/**
+ * Whether a repository is the caller's to sync, judged by what they can do to it.
+ *
+ * Read access is not the question, which is the mistake this replaces. `connectRepo`
+ * used to accept any repository the user's token could read — and an OAuth token can
+ * read every public repository on GitHub, so "connect your portfolio" accepted a
+ * stranger's repo, whose files an LLM then parsed into the user's profile.
+ *
+ * Write access is the right line for two reasons. It is the property that makes the
+ * content the user's responsibility: someone who can push to a repository can already
+ * put anything they like in it, so requiring write adds no capability an attacker
+ * lacks, while read-only access to a repository is something the whole internet has.
+ * And it keeps the legitimate organisation case working — a portfolio living in an org
+ * the user belongs to is connectable as long as they are a member with push rights,
+ * which is exactly the set of people who maintain it. A member with read-only access to
+ * an org repository is told to install the GitHub App instead, which is an explicit
+ * grant by someone who administers that account rather than a default of membership.
+ *
+ * `maintain` counts: GitHub's maintain role includes push. `triage` and `pull` do not.
+ *
+ * What this does NOT stop, and is not meant to: a user forking a hostile "portfolio
+ * template" into their own account and connecting that. The fork is genuinely theirs by
+ * every measure GitHub has. That vector is the review queue's job — see
+ * lib/sync/reconcile.ts — and this check is the cheap half that removes the rest.
+ */
+export function canConnectWithPermissions(perms: RepoPermissions | undefined): boolean {
+  if (!perms) return false;
+  return Boolean(perms.admin || perms.maintain || perms.push);
+}
+
+export type ConnectVerdict =
+  | { ok: true; via: 'installation' | 'write-access' }
+  | { ok: false; code: 'no-access' | 'read-only' | 'not-found' | 'error'; message: string };
+
+/**
+ * Decides whether this user may connect `owner/name` as their portfolio.
+ *
+ * Installations are checked first and exhaustively rather than via `getRepoAccess`,
+ * which picks one candidate by owner name and stops. That shortcut is right during a
+ * sync, where the cost of an extra API call is measured against a step budget; here it
+ * would refuse a repository the user really does have an installation on, and connect
+ * happens once.
+ */
+export async function canConnectRepo(
+  userId: string,
+  repo: { owner: string; name: string },
+): Promise<ConnectVerdict> {
+  const fullName = `${repo.owner}/${repo.name}`;
+
+  if (isGitHubAppConfigured()) {
+    for (const installation of await installationsFor(userId)) {
+      if (await installationCoversRepo(installation.id, fullName)) {
+        return { ok: true, via: 'installation' };
+      }
+    }
+  }
+
+  const token = await getGithubToken(userId);
+  if (!token) {
+    return {
+      ok: false,
+      code: 'no-access',
+      message: isGitHubAppConfigured()
+        ? `No access to ${fullName}. Install the GitHub App on it below, or sign in with GitHub.`
+        : `No GitHub token on your account. Sign out and sign in again to grant repo access.`,
+    };
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      cache: 'no-store',
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      code: 'error',
+      message: `Couldn't reach GitHub: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  if (res.status === 404) {
+    return {
+      ok: false,
+      code: 'not-found',
+      message: `Can't see ${fullName}. Either it doesn't exist, or your sign-in didn't include private-repo access — sign out and back in to re-grant it.`,
+    };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: 'error',
+      message: `GitHub rejected the request: ${res.status} ${(await res.text().catch(() => '')).slice(0, 120)}`,
+    };
+  }
+
+  const body = (await res.json().catch(() => null)) as {
+    permissions?: RepoPermissions;
+  } | null;
+
+  if (canConnectWithPermissions(body?.permissions)) {
+    return { ok: true, via: 'write-access' };
+  }
+
+  return {
+    ok: false,
+    code: 'read-only',
+    message: `You can read ${fullName} but not write to it, so it isn't yours to sync. Everything in a connected repository is read as your career history, and read access to a public repo is something everyone has. Connect a repository you can push to, or install the GitHub App on this one.`,
+  };
+}
+
 /** Records an installation against a user, replacing any earlier row for the same id. */
 export async function recordInstallation(input: {
   id: number;

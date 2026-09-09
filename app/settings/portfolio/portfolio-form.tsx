@@ -20,12 +20,15 @@ export function PortfolioForm({
   recordCount,
   syncedCount,
   flaggedCount,
+  pendingCount,
 }: {
   currentRepo: string | null;
   lastSyncedAt: string | null;
   recordCount: number;
   syncedCount: number;
   flaggedCount: number;
+  /** New claims the last sync proposed that nobody has accepted yet. */
+  pendingCount: number;
 }) {
   const [connectState, connectAction, connecting] = useActionState<
     ActionResult | null,
@@ -143,6 +146,9 @@ export function PortfolioForm({
             <Row k="Last checked" v={formatWhen(lastSyncedAt)} />
             <Row k="Profile facts" v={String(recordCount)} />
             <Row k="From your portfolio" v={String(syncedCount)} />
+            {pendingCount > 0 ? (
+              <Row k="Waiting for approval" v={`${pendingCount} new`} warn />
+            ) : null}
             {flaggedCount > 0 ? (
               <Row k="Awaiting your review" v={`${flaggedCount} flagged`} warn />
             ) : null}
@@ -157,6 +163,14 @@ export function PortfolioForm({
             >
               {syncing ? 'Syncing…' : 'Sync now'}
             </button>
+            {pendingCount > 0 ? (
+              <Link
+                href="/profile"
+                className="inline-flex min-h-11 items-center rounded-lg border border-gold px-4 py-2.5 text-sm font-semibold text-gold hover:bg-gold-tint"
+              >
+                Approve {pendingCount} new
+              </Link>
+            ) : null}
             {flaggedCount > 0 ? (
               <Link
                 href="/profile"

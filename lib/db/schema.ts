@@ -204,6 +204,8 @@ export const roles = pgTable(
     endDate: text('end_date').notNull().default('present'),
     source: text('source').notNull().default('manual'),
     contentHash: text('content_hash').notNull(),
+    /** approved | pending | rejected — see profile_record.review_state. */
+    reviewState: text('review_state').notNull().default('approved'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => [index('role_user_idx').on(t.userId)],
@@ -230,6 +232,20 @@ export const profileRecords = pgTable(
     data: jsonb('data').$type<Record<string, unknown>>().notNull(),
     /** REQ-2.4 — flagged for review, never silently deleted. */
     flaggedForRemoval: boolean('flagged_for_removal').notNull().default(false),
+    /**
+     * Whether this record counts as part of the profile yet.
+     *
+     *   approved  in the profile; every draft is built and verified against it
+     *   pending   a sync proposed it and the user has not yet accepted it
+     *   rejected  the user said no; kept as a tombstone so sync stops re-proposing it
+     *
+     * The default is `approved` on purpose. Everything the user typed, imported or
+     * already had is approved by definition, so the column arrives without a backfill
+     * and no existing profile changes. Only `lib/server/profile.ts` writes `pending`,
+     * and only for a github-sync record that is new — see lib/sync/reconcile.ts for
+     * the rule and why updates are exempt from it.
+     */
+    reviewState: text('review_state').notNull().default('approved'),
     embedding: jsonb('embedding').$type<number[] | null>(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),

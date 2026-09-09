@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
-import { profileRecords, users } from '@/lib/db/schema';
+import { profileRecords, roles as rolesTable, users } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
 import { PortfolioForm } from './portfolio-form';
 import { AppInstallPanel } from './app-install';
@@ -26,9 +26,16 @@ export default async function PortfolioSettingsPage({
       total: sql<number>`count(*)::int`,
       synced: sql<number>`count(*) filter (where ${profileRecords.source} = 'github-sync')::int`,
       flagged: sql<number>`count(*) filter (where ${profileRecords.flaggedForRemoval})::int`,
+      pending: sql<number>`count(*) filter (where ${profileRecords.reviewState} = 'pending')::int`,
     })
     .from(profileRecords)
     .where(eq(profileRecords.userId, userId));
+
+  // Roles are proposed for review too, and a job is the claim most worth noticing.
+  const [pendingRoles] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(rolesTable)
+    .where(and(eq(rolesTable.userId, userId), eq(rolesTable.reviewState, 'pending')));
 
   return (
     <div className="min-h-screen min-h-dvh">
@@ -60,6 +67,7 @@ export default async function PortfolioSettingsPage({
           recordCount={counts?.total ?? 0}
           syncedCount={counts?.synced ?? 0}
           flaggedCount={counts?.flagged ?? 0}
+          pendingCount={(counts?.pending ?? 0) + (pendingRoles?.n ?? 0)}
         />
 
         <section className="mt-10 rounded-xl border border-line bg-surface p-5">
@@ -71,6 +79,19 @@ export default async function PortfolioSettingsPage({
               only for content hardcoded inside components.
             </li>
             <li>
+              <strong className="text-ink">Nothing new is added without you.</strong> A
+              sync proposes what it finds; it does not write it. Anything the repository
+              says for the first time waits on your profile page until you approve it, and
+              no resume can use it before then. Changes to things you already approved are
+              applied as they happen — you are asked about new claims, not about wording.
+            </li>
+            <li>
+              <strong className="text-ink">Only repositories you can push to.</strong> A
+              repo you can merely read is one everybody can read, and everything in a
+              connected repo is read as your career history. Connect one you own or can
+              write to, or install the GitHub App on it.
+            </li>
+            <li>
               <strong className="text-ink">Your manual edits win.</strong> Anything you type
               into your profile by hand is never modified or removed by a sync, no matter
               what changes upstream.
@@ -80,6 +101,18 @@ export default async function PortfolioSettingsPage({
               something disappears from your portfolio, the matching record is flagged for
               you to review — a parsing miss should cost you a moment&apos;s attention, not a
               piece of your work history.
+            </li>
+            <li>
+              <strong className="text-ink">An AI reads the parts it has to.</strong> Files
+              that are not structured data are sent to a third-party AI provider to be
+              read —{' '}
+              <a
+                href="/settings/application#where-your-data-goes"
+                className="font-semibold text-ink underline"
+              >
+                which ones, and what is sent
+              </a>
+              .
             </li>
           </ul>
         </section>

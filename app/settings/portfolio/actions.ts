@@ -1,6 +1,6 @@
 'use server';
 
-import { getRepoAccess } from '@/lib/server/repo-access';
+import { canConnectRepo, getRepoAccess } from '@/lib/server/repo-access';
 import { isGitHubAppConfigured } from '@/lib/github/app';
 import { revalidatePath } from 'next/cache';
 import { eq } from 'drizzle-orm';
@@ -23,9 +23,20 @@ async function requireUserId(): Promise<string> {
 }
 
 /**
- * Saves the portfolio repo, but only after proving we can actually read it.
- * Storing an unreadable repo would turn every future draft into a confusing
- * "sync failed" — better to fail here, once, with a specific reason.
+ * Saves the portfolio repo, but only after proving two things: that this user has any
+ * business connecting it, and that we can actually read it.
+ *
+ * The first check is new. This used to accept any repository the user's token could
+ * read, and an OAuth `repo` grant reads every public repository on GitHub — so the
+ * field accepted a stranger's repo, and the sync then parsed that stranger's files with
+ * an LLM and wrote the results into this user's profile. `canConnectRepo` requires push
+ * access or a GitHub App installation; the reasoning, including why read access is the
+ * wrong test and how organisation-hosted portfolios still work, is in
+ * lib/server/repo-access.ts.
+ *
+ * The second check is the original one: storing an unreadable repo would turn every
+ * future draft into a confusing "sync failed" — better to fail here, once, with a
+ * specific reason.
  */
 export async function connectRepo(
   _prev: ActionResult | null,
@@ -43,6 +54,9 @@ export async function connectRepo(
       message: `"${input}" doesn't look like a repository. Use owner/name or a GitHub URL.`,
     };
   }
+
+  const verdict = await canConnectRepo(userId, { owner: ref.owner, name: ref.repo });
+  if (!verdict.ok) return { ok: false, message: verdict.message };
 
   const access = await getRepoAccess(userId, { owner: ref.owner, name: ref.repo });
 
@@ -77,7 +91,7 @@ export async function connectRepo(
   revalidatePath('/');
   return {
     ok: true,
-    message: `Connected ${ref.owner}/${ref.repo}. Run a sync to pull your profile in.`,
+    message: `Connected ${ref.owner}/${ref.repo}. Run a sync — anything new it finds waits on your profile page for you to approve before it counts.`,
   };
 }
 

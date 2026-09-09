@@ -6,7 +6,7 @@
  */
 
 import 'server-only';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
   applications,
@@ -21,6 +21,7 @@ import type {
   ContactInfo,
   ProfileRecord,
   RecordSource,
+  ReviewState,
   RoleRecord,
 } from '@/lib/types';
 import type { PipelineOutput } from '@/lib/pipeline/run';
@@ -46,6 +47,7 @@ function rowToRecord(row: typeof profileRecords.$inferSelect): ProfileRecord {
     contentHash: row.contentHash,
     tags: row.tags ?? [],
     flaggedForRemoval: row.flaggedForRemoval,
+    reviewState: row.reviewState as ReviewState,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     type: row.type,
@@ -53,6 +55,16 @@ function rowToRecord(row: typeof profileRecords.$inferSelect): ProfileRecord {
   } as ProfileRecord;
 }
 
+/**
+ * The profile as the engine sees it.
+ *
+ * The `review_state = 'approved'` filter is the whole of the sync-injection defence,
+ * so it lives here rather than in each caller: this is the one function the pipeline,
+ * the retriever, the grounding check and the vocabulary check all read through. A
+ * record a sync proposed but the user has not accepted does not exist to any of them,
+ * which is what makes those checks mean something again — they are measuring against
+ * facts a human vouched for rather than against whatever the last commit said.
+ */
 export async function loadProfileForUser(userId: string): Promise<LoadedProfile> {
   const [contactRow] = await db
     .select()
@@ -63,12 +75,14 @@ export async function loadProfileForUser(userId: string): Promise<LoadedProfile>
   const recordRows = await db
     .select()
     .from(profileRecords)
-    .where(eq(profileRecords.userId, userId));
+    .where(
+      and(eq(profileRecords.userId, userId), eq(profileRecords.reviewState, 'approved')),
+    );
 
   const roleRows = await db
     .select()
     .from(rolesTable)
-    .where(eq(rolesTable.userId, userId))
+    .where(and(eq(rolesTable.userId, userId), eq(rolesTable.reviewState, 'approved')))
     .orderBy(desc(rolesTable.startDate));
 
   return {
@@ -92,6 +106,7 @@ export async function loadProfileForUser(userId: string): Promise<LoadedProfile>
       endDate: r.endDate as string | 'present',
       source: r.source as RecordSource,
       contentHash: r.contentHash,
+      reviewState: r.reviewState as ReviewState,
     })),
   };
 }
@@ -138,8 +153,14 @@ export function buildSyncStep(userId: string) {
 
 /**
  * Writes a parsed portfolio into the profile, applying the reconciliation policy:
- * add and update automatically, flag disappearances for review, never touch a manual
- * record (REQ-2.4).
+ * propose new claims for review, update approved ones automatically, flag
+ * disappearances, never touch a manual record (REQ-2.4).
+ *
+ * "Propose" is the part that changed. Everything this function inserts arrives from an
+ * LLM that read a git repository, and a repository can say anything; the rule and the
+ * reasoning are in lib/sync/reconcile.ts. Nothing inserted here is part of the profile
+ * until the user approves it on /profile — `loadProfileForUser` will not return it and
+ * no draft can see it.
  */
 export async function applyParsedProfile(
   userId: string,
@@ -150,13 +171,22 @@ export async function applyParsedProfile(
   // lib/generate/assemble.ts groups bullets by real role id — so the hashes have to be
   // exchanged for row ids before any bullet is written, or every bullet lands in the
   // orphan bucket and the experience section comes out empty.
-  const roleIdByHash = await syncRoles(userId, parsed.roles);
-  const records = parsed.records.map((rec) => {
-    const bullet = rec as unknown as { type: string; roleId?: string };
-    if (bullet.type !== 'experience-bullet' || !bullet.roleId) return rec;
-    const roleId = roleIdByHash.get(bullet.roleId);
-    return roleId ? ({ ...rec, roleId } as ParsedRecord) : rec;
-  });
+  const { idByHash: roleIdByHash, rejectedRoleIds } = await syncRoles(userId, parsed.roles);
+  const records = parsed.records
+    .map((rec) => {
+      const bullet = rec as unknown as { type: string; roleId?: string };
+      if (bullet.type !== 'experience-bullet' || !bullet.roleId) return rec;
+      const roleId = roleIdByHash.get(bullet.roleId);
+      return roleId ? ({ ...rec, roleId } as ParsedRecord) : rec;
+    })
+    // A bullet belonging to a job the user rejected is that job's claim in another
+    // form, so it does not go back in the queue either. Without this, rejecting the
+    // invented employer still left its invented achievements to be approved one by one.
+    .filter((rec) => {
+      const bullet = rec as unknown as { type: string; roleId?: string };
+      if (bullet.type !== 'experience-bullet' || !bullet.roleId) return true;
+      return !rejectedRoleIds.has(bullet.roleId);
+    });
 
   const existing = (
     await db.select().from(profileRecords).where(eq(profileRecords.userId, userId))
@@ -190,7 +220,7 @@ export async function applyParsedProfile(
       recordId: null,
       action: 'create',
       source: 'github-sync',
-      diff: { type },
+      diff: { type, reviewState: 'pending' },
     });
     return {
       userId,
@@ -199,6 +229,7 @@ export async function applyParsedProfile(
       contentHash,
       tags: tags ?? [],
       data: data as Record<string, unknown>,
+      reviewState: 'pending',
     };
   });
 
@@ -231,7 +262,13 @@ export async function applyParsedProfile(
             updatedAt: new Date(),
           })
           .where(
-            and(eq(profileRecords.id, id), eq(profileRecords.source, 'github-sync')),
+            and(
+              eq(profileRecords.id, id),
+              eq(profileRecords.source, 'github-sync'),
+              // reconcile() never plans an update against a rejected row; this says so
+              // in SQL as well, for the same reason the source check is here.
+              ne(profileRecords.reviewState, 'rejected'),
+            ),
           );
       }),
     );
@@ -249,6 +286,8 @@ export async function applyParsedProfile(
             chunk.map((f) => f.id),
           ),
           eq(profileRecords.source, 'github-sync'),
+          // Only an approved record can be flagged as missing — see reconcile().
+          eq(profileRecords.reviewState, 'approved'),
         ),
       );
     for (const { id, reason } of chunk) {
@@ -283,11 +322,17 @@ export async function applyParsedProfile(
  * The `role` table has no unique constraint on contentHash, so the previous
  * `onConflictDoNothing()` was a no-op: every sync appended a fresh copy of every role.
  * De-duplication has to happen here, in code, against what is already stored.
+ *
+ * A role a sync has never seen before goes in `pending`, exactly like a record. "Senior
+ * Platform Engineer, Stripe, 2019-2024" is the fabrication the whole review exists to
+ * catch, and it is a role rather than a record: an unreviewed one would put a job on
+ * the profile page and count toward the years of experience the summary claims, even
+ * before a single bullet under it was approved.
  */
 async function syncRoles(
   userId: string,
   roles: ParseResult['roles'],
-): Promise<Map<string, string>> {
+): Promise<{ idByHash: Map<string, string>; rejectedRoleIds: Set<string> }> {
   const stored = await db
     .select({
       id: rolesTable.id,
@@ -297,9 +342,17 @@ async function syncRoles(
       startDate: rolesTable.startDate,
       endDate: rolesTable.endDate,
       location: rolesTable.location,
+      reviewState: rolesTable.reviewState,
     })
     .from(rolesTable)
     .where(eq(rolesTable.userId, userId));
+
+  // Rejected roles stay in the matching maps below on purpose: that is what makes the
+  // next sync recognise the job it already offered and skip it, rather than proposing
+  // it again every time the repository is read.
+  const rejectedRoleIds = new Set(
+    stored.filter((r) => r.reviewState === 'rejected').map((r) => r.id),
+  );
 
   const idByHash = new Map(stored.map((r) => [r.contentHash, r.id]));
 
@@ -348,6 +401,7 @@ async function syncRoles(
           endDate: role.endDate,
           source: 'github-sync',
           contentHash: role.contentHash,
+          reviewState: 'pending',
         })),
       )
       .returning({ id: rolesTable.id, contentHash: rolesTable.contentHash });
@@ -356,7 +410,7 @@ async function syncRoles(
     }
   }
 
-  return idByHash;
+  return { idByHash, rejectedRoleIds };
 }
 
 /**
