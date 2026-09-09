@@ -667,3 +667,59 @@ suite('per-role bullet distribution (AUDIT #8)', () => {
     );
   });
 });
+
+/**
+ * A project with no description.
+ *
+ * `lib/profile/forms.ts` does not mark a project's description required, and `sanitize()`
+ * in lib/import/commit.ts omits a blank field rather than storing an empty string — so a
+ * real PDF import produced a project row with no `description` key at all. The assembler
+ * trusted the declared type and put `undefined` into a resume item; `sanitizeText` in
+ * lib/generate/revise.ts then called `.replace` on it and took the entire draft down,
+ * after the model work had already been paid for. The error surfaced three layers from
+ * its cause as "Cannot read properties of undefined (reading 'replace')".
+ */
+suiteAsync('a project with no description', () => {
+  testAsync('still appears, and contributes no empty item', async () => {
+    const project = {
+      ...base(['docker']),
+      type: 'project' as const,
+      name: 'Auto-Dock It',
+      stack: ['Python', 'Docker'],
+      links: [],
+      impactMetrics: [],
+    };
+    // The shape the importer actually writes: no `description` key whatsoever.
+    assert(!('description' in project), 'the fixture must reproduce the missing key');
+
+    const { document } = await build([...fullProfile(), project as unknown as ProfileRecord]);
+    const group = section(document, 'projects')?.groups?.find((g) => g.title === 'Auto-Dock It');
+
+    assert(group !== undefined, 'the project belongs on the resume — its name and stack are the point');
+    assert.equal(group?.items.length, 0, 'and it contributes no bullet rather than an empty one');
+  });
+
+  testAsync('every assembled item carries real text', async () => {
+    const project = {
+      ...base(['docker']),
+      type: 'project' as const,
+      name: 'No Description Here',
+      stack: ['Go'],
+      links: [],
+      impactMetrics: ['', '   '],
+    };
+    const { document } = await build([...fullProfile(), project as unknown as ProfileRecord]);
+    for (const s of document.sections) {
+      for (const i of s.items) {
+        assert.equal(typeof i.text, 'string', `${s.key} item text must be a string`);
+      }
+      for (const g of s.groups ?? []) {
+        assert.equal(typeof g.title, 'string', `${s.key} group title must be a string`);
+        for (const i of g.items) {
+          assert.equal(typeof i.text, 'string', `${s.key} group item text must be a string`);
+          assert(i.text.trim().length > 0, `${s.key} must not carry a blank bullet`);
+        }
+      }
+    }
+  });
+});

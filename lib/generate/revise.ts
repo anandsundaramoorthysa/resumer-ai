@@ -144,8 +144,13 @@ function applyKeywordFix(
 
 /** Mechanical formatting repairs — no judgment needed, so no model call. */
 function sanitizeText(doc: ResumeDocument): ResumeDocument {
+  // Tolerates a non-string. The types say every one of these is a string, but the
+  // document is assembled from JSONB read back with a cast, so a record missing a field
+  // used to arrive here as `undefined` and take the entire draft down at the first
+  // `.replace` — after the model work was already paid for. Losing one line is
+  // recoverable; losing the resume is not.
   const clean = (s: string): string =>
-    s
+    (typeof s === 'string' ? s : '')
       .replace(/[►◆★➤▪▸●■◦‣⁃✦✧✱❖]/gu, '')
       .replace(/\p{Extended_Pictographic}/gu, '')
       .replace(/\t/g, ' ')

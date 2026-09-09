@@ -445,9 +445,15 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
       groups: projects.map((p) => ({
         title: p.name,
         subtitle: p.stack.slice(0, 6).join(', '),
+        // A project with no description still belongs on the resume — its name and
+        // stack are the point — but it must not contribute an item with no text.
         items: [
-          { text: p.description, sourceRecordId: p.id },
-          ...p.impactMetrics.map((m) => ({ text: m, sourceRecordId: p.id })),
+          ...(p.description?.trim()
+            ? [{ text: p.description.trim(), sourceRecordId: p.id }]
+            : []),
+          ...p.impactMetrics
+            .filter((m) => typeof m === 'string' && m.trim())
+            .map((m) => ({ text: m.trim(), sourceRecordId: p.id })),
         ],
       })),
     };

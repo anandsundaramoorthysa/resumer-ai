@@ -47,7 +47,7 @@ export function recordText(r: ProfileRecord): string {
       parts.push(r.text, r.action, r.scale ?? '', r.outcome ?? '');
       break;
     case 'project':
-      parts.push(r.name, r.description, ...r.stack, ...r.impactMetrics);
+      parts.push(r.name, r.description ?? '', ...r.stack, ...r.impactMetrics);
       break;
     case 'education':
       parts.push(r.institution, r.credential, r.field ?? '');

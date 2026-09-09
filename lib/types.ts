@@ -65,7 +65,19 @@ export interface RoleRecord {
 export interface ProjectRecord extends ProfileRecordBase {
   type: 'project';
   name: string;
-  description: string;
+  /**
+   * Optional, because the importer can legitimately produce a project without one.
+   *
+   * `lib/profile/forms.ts` does not mark description required — a project is identified
+   * by its name and stack — and `sanitize()` in lib/import/commit.ts omits a key whose
+   * value is blank rather than storing an empty string. So a real import wrote a project
+   * with no `description` key at all, while this said `string`. Nothing caught it: the
+   * record's `data` is JSONB, read back with a cast. The assembler then trusted the type
+   * and put `undefined` into a resume item, and the crash surfaced three layers away as
+   * "Cannot read properties of undefined (reading 'replace')" — with the whole draft
+   * lost. Optional here makes the compiler ask about it at every read.
+   */
+  description?: string;
   stack: string[];
   links: string[];
   impactMetrics: string[];
