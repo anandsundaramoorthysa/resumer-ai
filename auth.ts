@@ -35,6 +35,7 @@ import { db, isDatabaseConfigured } from '@/lib/db';
 import { accounts, sessions, users, verificationTokens } from '@/lib/db/schema';
 import { verifyPassword } from '@/lib/auth/password';
 import { normalizeEmail } from '@/lib/auth/email-policy';
+import { linkedAccountPatch } from '@/lib/auth/account-linking';
 import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
 import { encryptIfPossible } from '@/lib/auth/secret-box';
 import { isGitHubAppConfigured } from '@/lib/github/app';
@@ -210,10 +211,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (verifiedClaim !== true && verifiedClaim !== 'true') return false;
       }
 
+      // Verifying the address must not also bless a password nobody proved they own —
+      // see lib/auth/account-linking.ts for the takeover this prevents.
+      const [before] = await db
+        .select({ emailVerified: users.emailVerified })
+        .from(users)
+        .where(eq(users.id, user.id!))
+        .limit(1);
+
       // Scoped to the row being signed in, not to every row matching the address.
       await db
         .update(users)
-        .set({ emailVerified: new Date() })
+        .set(linkedAccountPatch(before?.emailVerified))
         .where(eq(users.id, user.id!));
       return true;
     },

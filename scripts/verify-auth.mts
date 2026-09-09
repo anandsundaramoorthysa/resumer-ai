@@ -119,9 +119,78 @@ check(
   'and the old one no longer does',
 );
 
+/* ------------------------------------------- pre-hijack account takeover ---- */
+
+/**
+ * The attack this guards against.
+ *
+ * Sign-up writes a row for any address that has no row yet, holding the submitted
+ * password with `emailVerified` null. On its own that is safe — `authorize()` refuses an
+ * unverified row, so the password is inert. It stops being safe if that row can later be
+ * verified by someone else: an attacker signs up as an address they do not own and never
+ * opens the mail, the real owner later signs in with Google or GitHub, account linking
+ * finds the row by email, and stamping it verified hands the attacker's password the
+ * last gate it was missing.
+ *
+ * So the `signIn` callback discards a password on a row that was not already verified.
+ * What is reproduced here is that exact sequence against the real column.
+ */
+const VICTIM = `zzauthcheck-victim-${Date.now()}@example.invalid`;
+
+const [dormant] = await sql<{ id: string }[]>`
+  insert into "user" (id, email, name, password_hash)
+  values (${randomUUID()}, ${VICTIM}, 'ZZ Victim', ${await hashPassword("attacker's chosen phrase")})
+  returning id`;
+
+const [beforeLink] = await sql<{ password_hash: string | null; emailVerified: Date | null }[]>`
+  select password_hash, "emailVerified" from "user" where id = ${dormant.id}`;
+check(
+  beforeLink.emailVerified === null && beforeLink.password_hash !== null,
+  'an unclaimed address can be signed up for, and sits unverified with a password on it',
+);
+
+// What auth.ts does when an OAuth sign-in links to this row.
+const [priorState] = await sql<{ emailVerified: Date | null }[]>`
+  select "emailVerified" from "user" where id = ${dormant.id}`;
+await sql`
+  update "user"
+  set "emailVerified" = now(),
+      password_hash = ${priorState.emailVerified ? sql`password_hash` : null}
+  where id = ${dormant.id}`;
+
+const [afterLink] = await sql<{ password_hash: string | null; emailVerified: Date | null }[]>`
+  select password_hash, "emailVerified" from "user" where id = ${dormant.id}`;
+check(afterLink.emailVerified !== null, 'signing in with a provider verifies the address');
+check(
+  afterLink.password_hash === null,
+  'and discards the password nobody proved they owned — otherwise it is account takeover',
+);
+
+// The other direction must be untouched: a verified account keeps its password when it
+// later links a provider, or everyone who does that loses the ability to sign in.
+const [ownedByUser] = await sql<{ id: string }[]>`
+  insert into "user" (id, email, name, password_hash, "emailVerified")
+  values (${randomUUID()}, ${'owner-' + VICTIM}, 'ZZ Owner',
+          ${await hashPassword('a phrase its owner set')}, now())
+  returning id`;
+const [ownerPrior] = await sql<{ emailVerified: Date | null }[]>`
+  select "emailVerified" from "user" where id = ${ownedByUser.id}`;
+await sql`
+  update "user"
+  set "emailVerified" = now(),
+      password_hash = ${ownerPrior.emailVerified ? sql`password_hash` : null}
+  where id = ${ownedByUser.id}`;
+const [ownerAfter] = await sql<{ password_hash: string | null }[]>`
+  select password_hash from "user" where id = ${ownedByUser.id}`;
+check(
+  ownerAfter.password_hash !== null &&
+    (await verifyPassword('a phrase its owner set', ownerAfter.password_hash)),
+  'a verified account that adds a provider keeps the password it already proved',
+);
+
 /* -------------------------------------------------------------- cleanup ---- */
 
-await sql`delete from "user" where id = ${created.id}`;
+await sql`delete from "user" where id in (${created.id}, ${dormant.id}, ${ownedByUser.id})`;
 await sql`delete from auth_token where identifier in (${EMAIL}, ${'other-' + EMAIL})`;
 await sql`delete from auth_attempt where subject in (${'email:' + EMAIL}, ${'ip:' + IP}, ${'email:other-' + EMAIL})`;
 

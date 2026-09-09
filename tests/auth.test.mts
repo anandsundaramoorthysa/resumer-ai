@@ -17,6 +17,7 @@ import {
   normalizeEmail,
 } from '../lib/auth/email-policy';
 import { hashToken } from '../lib/auth/tokens';
+import { linkedAccountPatch } from '../lib/auth/account-linking';
 import { suite, test, assert } from './harness.mjs';
 
 suite('password hashing', () => {
@@ -157,5 +158,48 @@ suite('link tokens', () => {
   test('hashing is deterministic, so a link can be looked up', () => {
     assert(hashToken('same') === hashToken('same'), 'same in, same out');
     assert(hashToken('same') !== hashToken('other'), 'different in, different out');
+  });
+});
+
+/**
+ * Pre-hijack account takeover, the rule that prevents it.
+ *
+ * Sign-up writes a row for any address that has no row yet, holding the submitted
+ * password with `emailVerified` null. Inert on its own, because `authorize()` refuses an
+ * unverified row. The danger is a row created by one person and verified by another: an
+ * attacker signs up as an address they do not own and never opens the mail, the real
+ * owner later signs in with Google or GitHub, account linking matches by email, and
+ * verifying the row would hand the attacker's password the last gate it was missing.
+ *
+ * Both directions are pinned here, because getting either wrong is serious — one is
+ * account takeover, the other locks every user who adds a provider out of the password
+ * they already proved.
+ */
+suite('account linking and the password it may not bless', () => {
+  test('an unverified row loses its password when a provider verifies it', () => {
+    const patch = linkedAccountPatch(null);
+    assert.equal(patch.passwordHash, null, 'the password nobody proved must be discarded');
+    assert.ok(patch.emailVerified instanceof Date, 'and the address is still verified');
+  });
+
+  test('undefined is treated the same as never verified', () => {
+    assert.equal(linkedAccountPatch(undefined).passwordHash, null);
+  });
+
+  test('an already verified row keeps the password its owner set', () => {
+    const patch = linkedAccountPatch(new Date('2026-01-01'));
+    assert.ok(
+      !('passwordHash' in patch),
+      'adding a second way to sign in must not remove the first',
+    );
+  });
+
+  test('the patch never carries a password other than null', () => {
+    // Belt and braces: this object is spread straight into an UPDATE, so a non-null
+    // passwordHash appearing here would silently overwrite a real credential.
+    for (const prior of [null, undefined, new Date()]) {
+      const patch = linkedAccountPatch(prior);
+      if ('passwordHash' in patch) assert.equal(patch.passwordHash, null);
+    }
   });
 });
