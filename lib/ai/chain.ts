@@ -194,9 +194,19 @@ export async function generateStructured<T>(args: {
     timeoutMs = DEFAULT_ATTEMPT_TIMEOUT_MS,
     deadlineMs,
   } = options;
-  const deadlineAt = deadlineMs ? Date.now() + deadlineMs : Infinity;
+  const deadlineAt = deadlineFrom(deadlineMs);
   const providers = usableProviders();
   const attempts: Attempt[] = [];
+
+  // Asked once, for the whole call, rather than before every provider attempt.
+  //
+  // The counter now moves on failures too (see `recordFailedAttempt`), and asking again
+  // mid-chain would read that as "the budget is spent" and abandon the remaining
+  // providers — turning one slow provider into a failed call, which is precisely what the
+  // fallback chain exists to prevent. Callers with a one-call budget (the importer, and
+  // now the sync) would have lost their fallback entirely. So the budget answers "may
+  // this call start", and what bounds the inside of a call is the deadline above.
+  budget?.assertCanSpend();
 
   // Providers benched by a failure inside THIS call. Kept separate from the global
   // cooldown map on purpose: usableProviders() deliberately hands back everything when
@@ -204,8 +214,6 @@ export async function generateStructured<T>(args: {
   const benched = new Set<ProviderId>();
 
   for (const cfg of providers) {
-    budget?.assertCanSpend();
-
     const a = attemptWindow(deadlineAt, timeoutMs);
     if (!a.viable) break;
 
@@ -224,6 +232,8 @@ export async function generateStructured<T>(args: {
       return { data: result.object as T, provider: cfg.label };
     } catch (err) {
       if (err instanceof BudgetExceededError) throw err;
+      // The prompt went out and was billed before this failed, so it counts.
+      budget?.recordFailedAttempt();
       const msg = errText(err);
       if (noteFailure(cfg.id, msg, a.cutShort)) benched.add(cfg.id);
       attempts.push({ provider: cfg.label, error: msg });
@@ -244,7 +254,6 @@ export async function generateStructured<T>(args: {
     // Rather than treat that as "this provider is broken", we take the text and do the
     // structuring on our side. Zod still validates, so nothing malformed gets through —
     // this widens which models work, it does not weaken the contract.
-    budget?.assertCanSpend();
     try {
       const result = await generateText({
         model: resolveModel(cfg, tier),
@@ -269,6 +278,7 @@ export async function generateStructured<T>(args: {
       });
     } catch (err) {
       if (err instanceof BudgetExceededError) throw err;
+      budget?.recordFailedAttempt();
       const msg = errText(err);
       if (noteFailure(cfg.id, msg, b.cutShort)) benched.add(cfg.id);
       attempts.push({ provider: `${cfg.label} (json)`, error: msg });
@@ -276,6 +286,16 @@ export async function generateStructured<T>(args: {
   }
 
   throw new AllProvidersFailedError(attempts);
+}
+
+/**
+ * A caller's overall deadline as an absolute instant.
+ *
+ * Read explicitly rather than truthily: a computed `0` means "no time left", and treating
+ * it as "no deadline" would hand the call the unbounded run it was asked not to have.
+ */
+function deadlineFrom(deadlineMs: number | undefined): number {
+  return typeof deadlineMs === 'number' ? Date.now() + Math.max(0, deadlineMs) : Infinity;
 }
 
 /** Pulls the JSON object out of a response that may be fenced or prose-wrapped. */
@@ -300,15 +320,35 @@ function extractJson(text: string): unknown {
   }
 }
 
-/** A compact shape hint for models that can't take a real JSON schema. */
+/**
+ * A compact shape hint for models that can't take a real JSON schema.
+ *
+ * Cached per schema object. Every schema in the app is a module-level constant, so the
+ * conversion result can never differ between calls — and it was being recomputed on every
+ * text-fallback attempt: convert the whole Zod tree to JSON Schema, stringify it, throw
+ * away everything past 4,000 chars. That ran on the path that had already fallen back
+ * once, on the cheapest models, in the tightest part of the clock.
+ *
+ * A WeakMap rather than a Map so a schema built per request (nothing does today) cannot
+ * pin its description in memory for the life of the process.
+ */
+const schemaDescriptions = new WeakMap<z.ZodType<unknown>, string>();
+
 function describeSchema(schema: z.ZodType<unknown>): string {
+  const cached = schemaDescriptions.get(schema);
+  if (cached !== undefined) return cached;
+
+  let described: string;
   try {
     // Zod 4 ships JSON Schema conversion; keep it terse so it doesn't eat the prompt.
     const json = z.toJSONSchema(schema as z.ZodType);
-    return JSON.stringify(json).slice(0, 4000);
+    described = JSON.stringify(json).slice(0, 4000);
   } catch {
-    return '(object)';
+    described = '(object)';
   }
+
+  schemaDescriptions.set(schema, described);
+  return described;
 }
 
 /** Plain text generation with the same fallback semantics. */
@@ -325,13 +365,14 @@ export async function generatePlainText(args: {
     timeoutMs = DEFAULT_ATTEMPT_TIMEOUT_MS,
     deadlineMs,
   } = options;
-  const deadlineAt = deadlineMs ? Date.now() + deadlineMs : Infinity;
+  const deadlineAt = deadlineFrom(deadlineMs);
   const providers = usableProviders();
   const attempts: Attempt[] = [];
 
-  for (const cfg of providers) {
-    budget?.assertCanSpend();
+  // Once for the call, not once per provider — same reasoning as generateStructured.
+  budget?.assertCanSpend();
 
+  for (const cfg of providers) {
     const a = attemptWindow(deadlineAt, timeoutMs);
     if (!a.viable) break;
 
@@ -348,6 +389,7 @@ export async function generatePlainText(args: {
       return { text: result.text, provider: cfg.label };
     } catch (err) {
       if (err instanceof BudgetExceededError) throw err;
+      budget?.recordFailedAttempt();
       const msg = errText(err);
       noteFailure(cfg.id, msg, a.cutShort);
       attempts.push({ provider: cfg.label, error: msg });

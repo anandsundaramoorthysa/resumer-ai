@@ -10,11 +10,14 @@
 import { z } from 'zod';
 import type { JobRequirement, ResumeDocument } from '../types';
 import { generateStructured } from '../ai/chain';
-import type { DraftBudget } from '../ai/budget';
+import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { findUngroundedTokens } from './grounding';
 
+// No `greeting` here on purpose: it is the one line that has to name the role and the
+// company, and those are the two strings the grounding check must not be widened to
+// accept. It is templated below from the extractor's own fields instead — see
+// `greetingFor`.
 const LetterSchema = z.object({
-  greeting: z.string(),
   opening: z.string().describe('Why this role, in one or two sentences'),
   body: z
     .array(z.string())
@@ -37,7 +40,24 @@ Rules:
 - No filler ("I am writing to express my keen interest"), no flattery about the company, no adjectives about yourself that the evidence doesn't earn.
 - Three short paragraphs maximum. A hiring manager should be able to read it in under thirty seconds.
 - Refer to specific work, not to qualities. "Cut p95 latency 40% on a 200K-request/day service" beats "I am passionate about performance".
-- Plain professional English. No em dashes.`;
+- Plain professional English. No em dashes.
+- The role title and company name are already printed in the letter's greeting, so do not restate them. Never describe the candidate using words from the posting — write only what the resume evidences.`;
+
+/**
+ * The one line that may name the role and the company.
+ *
+ * Templated rather than written by the model because the grounding check below is now
+ * strictly resume-only: a sentence naming the employer would be dropped as unsupported,
+ * which is correct for a claim and absurd for a salutation. Putting it here means the
+ * letter still says what it is applying for, and the model never has a reason to reach for
+ * the posting's vocabulary in the paragraphs where a claim would be read into it.
+ */
+function greetingFor(job: JobRequirement): string {
+  const role = job.roleTitle.trim();
+  const company = job.company?.trim();
+  if (company) return `Dear ${company} Hiring Team,\n\nRe: ${role}`;
+  return `Dear Hiring Manager,\n\nRe: ${role}`;
+}
 
 export async function generateCoverLetter(
   doc: ResumeDocument,
@@ -70,14 +90,20 @@ export async function generateCoverLetter(
     ]
       .filter(Boolean)
       .join('\n'),
-    options: { budget, temperature: 0.4 },
+    options: draftCallOptions(budget, { temperature: 0.4 }),
   });
 
-  // Same verification as the resume: a paragraph that introduces a number or proper
-  // noun absent from the resume is dropped rather than shipped.
+  // Same verification as the resume, against the resume and NOTHING else.
+  //
+  // The source used to be `${resumeText} ${job.roleTitle} ${job.company}`, and the last two
+  // are extractor output derived from the posting — unbounded, and phrased by whoever wrote
+  // the ad. A posting titled "Senior Kubernetes / Terraform / AWS Engineer, 10+ years,
+  // ex-Google" made every one of those terms "grounded", so the letter could claim
+  // Kubernetes, Terraform, AWS and a decade of experience while the resume, correctly,
+  // claimed none of them. That is the exact failure this file's header says cannot happen.
   const removed: string[] = [];
   const keep = (text: string): boolean => {
-    const violations = findUngroundedTokens(text, `${resumeText} ${job.roleTitle} ${job.company ?? ''}`);
+    const violations = findUngroundedTokens(text, resumeText);
     if (violations.length === 0) return true;
     removed.push(`${text.slice(0, 60)}… (unsupported: ${violations.map((v) => v.token).join(', ')})`);
     return false;
@@ -86,7 +112,7 @@ export async function generateCoverLetter(
   const paragraphs = [data.opening, ...data.body].filter(keep);
 
   return {
-    greeting: data.greeting,
+    greeting: greetingFor(job),
     paragraphs,
     closing: data.closing,
     removed,

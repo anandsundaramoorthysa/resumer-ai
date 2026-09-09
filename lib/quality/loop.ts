@@ -40,11 +40,25 @@ export interface ScoreBreakdown {
   genuineGaps: string[];
 }
 
+/**
+ * How much the overall score has to move for an iteration to have been worth its calls.
+ *
+ * The evidence sub-score is the only one a model produces, and asking the same model the
+ * same question twice moves it by a few hundredths on its own. Below this, the loop is
+ * measuring that noise rather than an improvement it caused.
+ */
+export const MIN_MEANINGFUL_GAIN = 0.05;
+
+/** Consecutive iterations that may fail to move the score before the loop gives up. */
+const MAX_STAGNANT_ITERATIONS = 2;
+
 /** One scoring pass. No mutation, no revision — just measurement. */
 export async function scoreDocument(
   doc: ResumeDocument,
   records: ProfileRecord[],
   budget?: DraftBudget,
+  /** Bullets an earlier revision already proved it cannot strengthen — see evidence.ts. */
+  alreadyTried: readonly string[] = [],
 ): Promise<ScoreBreakdown> {
   const keywords = scoreKeywordCoverage(doc);
   const formatting = scoreFormatting(doc);
@@ -55,7 +69,7 @@ export async function scoreDocument(
   const skills = scoreSkillsCompleteness(doc, records);
 
   // Only spend a model call once the cheap deterministic checks are in hand.
-  const evidence = await scoreEvidence(doc, budget);
+  const evidence = await scoreEvidence(doc, budget, alreadyTried);
 
   const overall =
     (formattingScore * WEIGHTS.formatting +
@@ -74,6 +88,22 @@ export async function scoreDocument(
     });
   }
 
+  // Formatting critiques are kept, and only some of them have a fix path. That is
+  // deliberate, so it is worth writing down which.
+  //
+  // `reviseDocument` repairs four of these rules mechanically and unconditionally, without
+  // reading the critique at all: icon glyphs, decorative bullet characters, tabs and
+  // numeric dates. The rest — length, the heading allow-list, a missing Skills section, a
+  // document with no substance, the contact block, hyperlink text, presentation mode — are
+  // decided during assembly or by the profile behind it, and no rewrite of the finished
+  // document can close them. Before this change, a document failing on length was told so
+  // four times and failed identically each time.
+  //
+  // They are still emitted rather than suppressed: they are the record of WHY the resume
+  // did not clear the bar, they reach the user through the halt explanation, and a
+  // critique nobody can act on is still true. What changed is that the loop no longer
+  // treats "issues remain" as evidence that another iteration will help — the no-progress
+  // halt below is what stops it re-serving these.
   for (const v of [...formatting.violations, ...(length.violation ? [length.violation] : [])]) {
     critiques.push({
       subScore: 'formatting',
@@ -117,11 +147,35 @@ export async function scoreDocument(
   return { result, genuineGaps: skills.genuineGaps };
 }
 
+/**
+ * What one revision pass did — the contract between the loop and whatever revises for it.
+ *
+ * It used to be just a document, so the loop could not tell a real revision from a no-op.
+ * On a thin profile a no-op is the common case (no evidence targets, or none whose rewrite
+ * survives grounding, and no missing skill the profile actually holds), every
+ * deterministic sub-score then came back bit-identical, and only model noise on the
+ * evidence score moved at all. Iterations 2 through 4 cost a judge call and a revise call
+ * each and could not, by construction, produce anything different.
+ *
+ * Declared here rather than in `generate/revise.ts` so this module keeps knowing nothing
+ * about generation and stays testable with a stub.
+ */
+export interface ReviseOutcome {
+  document: ResumeDocument;
+  /** False when the pass handed back a document identical to the one it was given. */
+  changed: boolean;
+  /**
+   * Bullets sent for a rewrite that came back unusable — identical, empty, or rejected by
+   * the grounding check. Fed to the next scoring pass so it stops re-flagging them.
+   */
+  unimprovable: string[];
+}
+
 export type ReviseFn = (
   doc: ResumeDocument,
   critiques: Critique[],
   budget?: DraftBudget,
-) => Promise<ResumeDocument>;
+) => Promise<ReviseOutcome>;
 
 export interface GateOutcome {
   document: ResumeDocument;
@@ -149,10 +203,18 @@ export async function runQualityGate(args: {
   let best: { doc: ResumeDocument; breakdown: ScoreBreakdown } | null = null;
   const history: GateOutcome['history'] = [];
 
+  // Bullets a revision pass has already proved it cannot strengthen. Carried forward so
+  // the evidence scorer stops charging for the same verdict every iteration.
+  const unimprovable = new Set<string>();
+
+  // Consecutive iterations whose score did not move meaningfully.
+  let stagnant = 0;
+  let previousOverall: number | null = null;
+
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     let breakdown: ScoreBreakdown;
     try {
-      breakdown = await scoreDocument(current, records, budget);
+      breakdown = await scoreDocument(current, records, budget, [...unimprovable]);
     } catch (err) {
       if (err instanceof BudgetExceededError) {
         return haltForBudget(best, current, history, err.message);
@@ -184,6 +246,24 @@ export async function runQualityGate(args: {
 
     if (iteration === MAX_ITERATIONS) break;
 
+    // Two revisions in a row that failed to move the score are two revisions that were
+    // not revisions. The gain is measured against the previous iteration rather than
+    // against the best seen, because a score that dips and recovers is still movement —
+    // it is the flat line that says the loop has nothing left to try.
+    if (previousOverall !== null) {
+      const gain = breakdown.result.overall - previousOverall;
+      stagnant = gain >= MIN_MEANINGFUL_GAIN ? 0 : stagnant + 1;
+    }
+    previousOverall = breakdown.result.overall;
+
+    if (stagnant >= MAX_STAGNANT_ITERATIONS) {
+      return haltForNoProgress(
+        best!,
+        history,
+        `the last ${MAX_STAGNANT_ITERATIONS} revision passes moved the score by less than ${MIN_MEANINGFUL_GAIN}`,
+      );
+    }
+
     // Stop while we still have time to render and return something. A function killed
     // mid-iteration produces nothing at all; stopping one iteration early produces the
     // best resume we managed, plus an honest note about why it stopped there.
@@ -201,14 +281,29 @@ export async function runQualityGate(args: {
       };
     }
 
+    let revision: ReviseOutcome;
     try {
-      current = await revise(current, breakdown.result.critiques, budget);
+      revision = await revise(current, breakdown.result.critiques, budget);
     } catch (err) {
       if (err instanceof BudgetExceededError) {
         return haltForBudget(best, current, history, err.message);
       }
       throw err;
     }
+
+    for (const text of revision.unimprovable) unimprovable.add(text);
+
+    // A revision that changed nothing cannot produce a different score, so scoring it
+    // again buys a model call and a wait in exchange for the number we already have.
+    if (!revision.changed) {
+      return haltForNoProgress(
+        best!,
+        history,
+        'the revision pass produced a document identical to the one it was given',
+      );
+    }
+
+    current = revision.document;
   }
 
   // Exhausted the cap. Report honestly rather than shipping a forced pass.
@@ -229,6 +324,41 @@ export async function runQualityGate(args: {
   return {
     document: chosen.doc,
     result: chosen.breakdown.result,
+    genuineGaps: gaps,
+    history,
+  };
+}
+
+/**
+ * Stopping because another iteration cannot change anything.
+ *
+ * The `unfixable-gap` / `iteration-cap` distinction below is preserved rather than
+ * replaced: when the profile genuinely lacks what the posting asks for, that is still the
+ * useful thing to tell someone, and it is true whether the loop discovered it on
+ * iteration 2 or iteration 4. `no-progress` is for the other case — the score stalled for
+ * reasons the user cannot act on — and it exists so the explanation can say the loop
+ * stopped early on purpose rather than implying it ran out of attempts it never took.
+ */
+function haltForNoProgress(
+  best: { doc: ResumeDocument; breakdown: ScoreBreakdown },
+  history: GateOutcome['history'],
+  because: string,
+): GateOutcome {
+  const gaps = best.breakdown.genuineGaps;
+  const attempts = history.length;
+  const score = best.breakdown.result.overall.toFixed(1);
+
+  best.breakdown.result.haltReason = gaps.length > 0 ? 'unfixable-gap' : 'no-progress';
+  best.breakdown.result.haltExplanation =
+    gaps.length > 0
+      ? `Stopped at ${score}/10 after ${attempts} attempt(s), early: ${because}. The job asks for ${gaps.join(
+          ', ',
+        )}, which isn't in your profile. No rewrite can close that honestly — this is the ceiling for this role unless you add real experience covering it.`
+      : `Stopped at ${score}/10 after ${attempts} attempt(s) because ${because}. Further attempts would have re-run the same work for the same result, so this is the best version produced; remaining issues are listed below.`;
+
+  return {
+    document: best.doc,
+    result: best.breakdown.result,
     genuineGaps: gaps,
     history,
   };

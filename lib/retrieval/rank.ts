@@ -21,6 +21,7 @@
 
 import type { JobRequirement, ProfileRecord } from '../types';
 import { profileFor } from './categories';
+import { containsPhrase } from '../quality/vocabulary';
 
 export interface RankedRecord {
   record: ProfileRecord;
@@ -34,6 +35,22 @@ export const RELEVANCE_FLOOR = 0.12;
 
 function norm(s: string): string {
   return s.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Does this record's text contain this term? — the shared definition, on word boundaries.
+ *
+ * Both matchers here tested raw `text.includes(term)`, so "React" matched "reacts to
+ * webhook events" and "Go" matched "google". `quality/vocabulary.ts` removed exactly that
+ * class of false positive from the scorer and exports `containsPhrase` for the purpose,
+ * and until now retrieval did not use it: the stage that decides which records reach the
+ * resume was optimising for a looser definition of a match than the gate rewards, so it
+ * promoted records on overlap the scorer would never count and left the loop trying to
+ * revise its way to a keyword that was never really there.
+ */
+function hasTerm(text: string, term: string): boolean {
+  const t = norm(term);
+  return t.length > 0 && containsPhrase(text, t);
 }
 
 /** Every searchable string a record contributes. */
@@ -111,11 +128,11 @@ export function domainFit(record: ProfileRecord, job: JobRequirement): number {
   if (cat.domainVocabulary.length === 0) return 1; // 'general' has no floor
 
   const text = recordText(record);
-  const hits = cat.domainVocabulary.filter((term) => text.includes(term)).length;
+  const hits = cat.domainVocabulary.filter((term) => hasTerm(text, term)).length;
 
   // The job's own keywords count as on-domain too, so a posting asking for something
   // outside the category's stock vocabulary still surfaces the right records.
-  const jobHits = job.atsKeywords.filter((k) => text.includes(norm(k))).length;
+  const jobHits = job.atsKeywords.filter((k) => hasTerm(text, k)).length;
 
   const denom = Math.max(4, Math.min(cat.domainVocabulary.length, 12));
   return Math.min(1, (hits + jobHits * 1.5) / denom);
@@ -138,7 +155,7 @@ function keywordOverlap(
   for (const term of pool) {
     const t = norm(term);
     if (!t) continue;
-    if (text.includes(t)) {
+    if (hasTerm(text, t)) {
       matched.push(term);
       // Required skills count more than "nice to have".
       weighted += job.requiredSkills.some((r) => norm(r) === t) ? 1.5 : 1;

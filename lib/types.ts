@@ -284,8 +284,14 @@ export interface QualityGateResult {
   passed: boolean; // overall >= 8.5 && keywordGatePassed
   iterations: number;
   critiques: Critique[];
-  /** Set when the loop stopped for a reason other than passing (REQ-5.5, REQ-5.6). */
-  haltReason?: 'iteration-cap' | 'budget-cap' | 'unfixable-gap';
+  /**
+   * Set when the loop stopped for a reason other than passing (REQ-5.5, REQ-5.6).
+   *
+   * `no-progress` means it stopped BEFORE the cap because another pass could not have
+   * changed anything — the revision returned the same document, or the score stopped
+   * moving. Distinct from `iteration-cap`, which means the attempts were used.
+   */
+  haltReason?: 'iteration-cap' | 'budget-cap' | 'unfixable-gap' | 'no-progress';
   haltExplanation?: string;
 }
 
