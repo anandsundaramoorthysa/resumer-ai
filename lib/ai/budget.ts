@@ -12,6 +12,9 @@
  * is persisted, since it has to survive across requests.
  */
 
+// Type-only, so this stays a leaf module at runtime and chain.ts can keep importing it.
+import type { CallOptions } from './chain';
+
 export class BudgetExceededError extends Error {
   constructor(
     public readonly scope: 'draft' | 'daily' | 'time',
@@ -49,6 +52,26 @@ function defaultTimeBudgetMs(): number {
 }
 
 export const DRAFT_TIME_BUDGET_MS = defaultTimeBudgetMs();
+
+/**
+ * Held back from the time budget for the work that still has to happen after the last
+ * model call returns: rendering the PDF and the DOCX, and the ATS self-test that reads
+ * both back out. Measured on this profile, that tail is 1.5-3s; 8s is a deliberately
+ * generous reserve, because overshooting it means the function is killed and the user
+ * gets nothing, while undershooting it costs one revision pass nobody would have noticed.
+ */
+export const RENDER_RESERVE_MS = Number(process.env.DRAFT_RENDER_RESERVE_MS ?? 8_000);
+
+/**
+ * The smallest deadline worth handing a call.
+ *
+ * Two reasons it is floored rather than allowed to reach zero. `chain.ts` reads a falsy
+ * `deadlineMs` as "no deadline at all", so a computed 0 would restore exactly the
+ * unbounded behaviour this accessor exists to remove; and a window under the chain's
+ * MIN_ATTEMPT_MS is refused before any provider is tried, which turns "nearly out of
+ * time" into "every provider failed" — a misleading error for a clock problem.
+ */
+const MIN_CALL_DEADLINE_MS = 1_500;
 
 export interface BudgetLimits {
   maxCalls: number;
@@ -107,6 +130,23 @@ export class DraftBudget {
     this.usage.tokens += Math.max(0, tokens || 0);
   }
 
+  /**
+   * A provider attempt that did not produce an answer — a timeout, a 429, a response that
+   * would not parse.
+   *
+   * It still counts. The prompt was sent and the input tokens were billed before anything
+   * went wrong, so recording only successes made `maxCalls` describe the cheap half of the
+   * spend: a chain that tried all five providers down both paths issued up to twenty
+   * provider requests and recorded one. The counter was least accurate exactly when spend
+   * was running away, which is the one moment it exists for.
+   *
+   * Tokens default to 0 because a failed attempt usually reports no usage at all;
+   * undercounting tokens is the honest option, inventing an estimate is not.
+   */
+  recordFailedAttempt(tokens = 0): void {
+    this.record(tokens);
+  }
+
   snapshot(): BudgetUsage {
     return { ...this.usage };
   }
@@ -124,6 +164,21 @@ export class DraftBudget {
   }
 
   /**
+   * Wall clock one model call may have, keeping `reserveMs` back for the rendering that
+   * follows the last one.
+   *
+   * Draft-path callers used to pass no deadline, so `chain.ts` gave every call `Infinity`
+   * and each attempt the full 25s default: five providers times two paths is ~250s for a
+   * SINGLE `generateStructured`, against a 50s budget on Netlify. `assertCanSpend()` could
+   * not interrupt that, because it only runs between calls — so the function was killed
+   * mid-flight and the user got a dead connection, which is the exact outcome the time
+   * budget exists to prevent.
+   */
+  callDeadlineMs(reserveMs: number = RENDER_RESERVE_MS): number {
+    return Math.max(MIN_CALL_DEADLINE_MS, this.remainingMs - reserveMs);
+  }
+
+  /**
    * Whether there is plausibly time for another scoring iteration.
    * An iteration is a judge call plus a revise call; 12s is a deliberately
    * conservative estimate so we stop early rather than get killed mid-write.
@@ -131,4 +186,33 @@ export class DraftBudget {
   hasTimeForAnotherIteration(estimateMs = 12_000): boolean {
     return this.remainingMs > estimateMs;
   }
+}
+
+/**
+ * The call options every draft-path model call shares.
+ *
+ * Two settings, both of which were missing everywhere on the draft path and present in
+ * `lib/sync/parse.ts`, which had already worked out why:
+ *
+ *  - `deadlineMs` — what is left of the draft's clock, minus the render reserve. Without
+ *    it the chain has no deadline and one call can outlive the whole request (see
+ *    `callDeadlineMs`).
+ *  - `maxRetriesPerProvider: 0` — the fallback chain already IS the retry. Retrying inside
+ *    a provider doubles the worst case without buying a second opinion, and the provider
+ *    that just timed out is the least likely of the five to answer next.
+ *
+ * It lives here rather than at six call sites so the arithmetic has one home; callers pass
+ * only what actually differs between them, which is the temperature and the tier.
+ */
+export function draftCallOptions(
+  budget: DraftBudget | undefined,
+  extra: Omit<CallOptions, 'budget' | 'deadlineMs' | 'maxRetriesPerProvider'> = {},
+): CallOptions {
+  return {
+    ...extra,
+    budget,
+    maxRetriesPerProvider: 0,
+    // No budget means no clock to read — the baseline resume (REQ-6.7) runs this way.
+    deadlineMs: budget?.callDeadlineMs(),
+  };
 }

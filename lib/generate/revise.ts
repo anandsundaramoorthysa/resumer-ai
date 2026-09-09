@@ -18,10 +18,11 @@ import type {
   SkillRecord,
 } from '../types';
 import { generateStructured } from '../ai/chain';
-import type { DraftBudget } from '../ai/budget';
+import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
 import { formatDate } from '../render/dates';
 import { holdsKeyword } from '../quality/vocabulary';
+import type { ReviseOutcome } from '../quality/loop';
 
 const ReviseSchema = z.object({
   revisions: z.array(
@@ -32,13 +33,25 @@ const ReviseSchema = z.object({
   ),
 });
 
+/**
+ * The instruction that has to come first is the one about doing nothing.
+ *
+ * This prompt used to open by defining a weak bullet as one that "shows no scale and no
+ * outcome", and in the next sentence ask the model to make "its existing result" specific
+ * — of a bullet that, by the definition just given, has no result to work with. The only
+ * way to satisfy both readings is to supply the missing result, and the rule that says not
+ * to was three lines further down, after the rewrite had already been framed as the job.
+ * Leading with the licence to return a bullet untouched costs nothing when a bullet can be
+ * improved and is the whole answer when it cannot.
+ */
 const REVISE_SYSTEM = `You strengthen weak resume bullets using ONLY the facts already present in each bullet.
 
-A weak bullet names a tool or a duty but shows no scale and no outcome. Strengthen it by making the existing action and its existing result specific and active.
+Returning a bullet exactly as you received it is a correct answer, and often the right one. Many bullets carry no metric and no stated outcome; for those there is nothing to strengthen, and inventing one is the single worst thing you can do here.
+
+Where a bullet does state an action, a scale or a result, make those specific and active — sharper verb, less hedging, the facts already there brought forward.
 
 Absolute rules:
-- Never add a number, percentage, tool, company, or claim that is not already in the original bullet. If there is no metric in the original, there is no metric in your revision — restructure for clarity instead.
-- If a bullet genuinely cannot be improved without inventing something, return it unchanged. That is the correct answer, not a failure.
+- Never add a number, percentage, tool, company, or claim that is not already in the original bullet. If there is no metric in the original, there is no metric in your revision — restructure for clarity instead, or return it unchanged.
 - One sentence, under 30 words.`;
 
 export async function reviseDocument(
@@ -46,8 +59,9 @@ export async function reviseDocument(
   critiques: Critique[],
   allRecords: ProfileRecord[],
   budget?: DraftBudget,
-): Promise<ResumeDocument> {
+): Promise<ReviseOutcome> {
   let next: ResumeDocument = structuredClone(doc);
+  const unimprovable: string[] = [];
 
   // ---- 1. Deterministic fixes, no model call --------------------------------
   next = applySkillsFix(next, critiques, allRecords);
@@ -68,22 +82,46 @@ export async function reviseDocument(
         prompt: `Strengthen these bullets. Return each original alongside its revision.\n\n${evidenceTargets
           .map((t, i) => `${i + 1}. ${t}`)
           .join('\n')}`,
-        options: { budget, temperature: 0.25 },
+        options: draftCallOptions(budget, { temperature: 0.25 }),
       });
 
       const map = new Map<string, string>();
       for (const r of data.revisions) {
         // Verified against the original, same as first-pass generation.
         const verdict = acceptRewriteOrFallback(r.revised, r.original);
-        if (verdict.accepted) map.set(r.original.trim(), verdict.text);
+        if (verdict.accepted && verdict.text.trim() !== r.original.trim()) {
+          map.set(r.original.trim(), verdict.text);
+        }
       }
       next = replaceBulletText(next, map);
+
+      // A target the model returned unchanged, left out, or dressed up with a number it
+      // invented is a bullet the source facts cannot support. Saying so is the point: the
+      // scorer would otherwise raise it again next iteration, and the pass after that.
+      for (const target of evidenceTargets) {
+        if (!map.has(target.trim())) unimprovable.push(target.trim());
+      }
     } catch {
       // Leave the bullets as they were — a failed revision must not corrupt the draft.
+      // These targets are NOT recorded as unimprovable: a provider that timed out says
+      // nothing about whether the bullet could have been strengthened.
     }
   }
 
-  return next;
+  return { document: next, changed: differs(doc, next), unimprovable };
+}
+
+/**
+ * Whether a pass actually altered the document.
+ *
+ * Compared by serialising the sections rather than by trusting each fix path to report
+ * itself: three of them mutate in place through shared helpers, and a signal assembled
+ * from four separate "I think I changed something" booleans is exactly the kind that
+ * drifts out of agreement with the document the moment a fifth is added. The sections of
+ * a resume are a few KB, and this runs at most four times per draft.
+ */
+function differs(before: ResumeDocument, after: ResumeDocument): boolean {
+  return JSON.stringify(before.sections) !== JSON.stringify(after.sections);
 }
 
 /** Pull skills the user demonstrably has into the Skills section (REQ-5.2 fix path). */

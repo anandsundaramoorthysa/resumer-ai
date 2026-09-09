@@ -11,7 +11,7 @@
 import { z } from 'zod';
 import type { JobRequirement, ResumeDocument } from '../types';
 import { generateStructured } from '../ai/chain';
-import type { DraftBudget } from '../ai/budget';
+import { draftCallOptions, type DraftBudget } from '../ai/budget';
 
 const PrepSchema = z.object({
   questions: z.array(
@@ -72,7 +72,7 @@ export async function generateInterviewPrep(
       'CANDIDATE RESUME:',
       resumeText,
     ].join('\n'),
-    options: { budget, temperature: 0.3 },
+    options: draftCallOptions(budget, { temperature: 0.3 }),
   });
 
   const questions = data.questions.map((q) => ({

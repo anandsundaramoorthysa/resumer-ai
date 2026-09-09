@@ -13,7 +13,7 @@
 import { z } from 'zod';
 import type { ResumeDocument, SectionKey } from '../types';
 import { generateStructured } from '../ai/chain';
-import type { DraftBudget } from '../ai/budget';
+import { draftCallOptions, type DraftBudget } from '../ai/budget';
 
 const EvidenceSchema = z.object({
   overallScore: z
@@ -52,19 +52,36 @@ A strong bullet shows: a concrete action, the scale it happened at, and a measur
   Strong: "Optimized PostgreSQL queries serving 200K daily requests, cutting p95 latency 40%"
   Weak:   "Responsible for database optimization using PostgreSQL"
 
-Grade what is actually written. Do not speculate about what the person might have done, and never suggest inventing numbers — a bullet with no metric available is weak, and saying so is correct.`;
+Grade what is actually written. Do not speculate about what the person might have done, and never suggest inventing numbers — a bullet with no metric available is weak, and saying so is correct.
+
+A line ending in [ALREADY REVISED] has been through a revision pass that could not strengthen it from the facts available. Grade it exactly as you find it — it is still weak if it is weak — but do NOT return it in weakBullets. Reporting it again cannot lead to anything except the same rewrite being attempted and rejected a second time.`;
+
+/** The marker the system prompt refers to. Deliberately loud and unlikely in real text. */
+const TRIED_MARKER = ' [ALREADY REVISED]';
 
 export async function scoreEvidence(
   doc: ResumeDocument,
   budget?: DraftBudget,
+  /**
+   * Bullets a previous iteration already sent for a rewrite that came back unusable.
+   *
+   * Without this the scorer had no memory: the same three bullets that cannot be
+   * strengthened without inventing a metric were flagged on every iteration, revised
+   * against every iteration, and rejected by the grounding check every time — the loop's
+   * most reliable way to spend a model call on a question it had already answered.
+   */
+  alreadyTried: readonly string[] = [],
 ): Promise<EvidenceResult> {
+  const tried = new Set(alreadyTried.map((t) => t.trim()).filter(Boolean));
+  const mark = (text: string) => (tried.has(text.trim()) ? `${text}${TRIED_MARKER}` : text);
+
   const payload = doc.sections
     .filter((s) => s.key === 'experience' || s.key === 'projects' || s.key === 'summary')
     .map((s) => {
       const flat: string[] = [];
-      s.items.forEach((it, i) => flat.push(`  [${i}] ${it.text}`));
+      s.items.forEach((it, i) => flat.push(`  [${i}] ${mark(it.text)}`));
       (s.groups ?? []).forEach((g) => {
-        g.items.forEach((it, i) => flat.push(`  [${g.title} #${i}] ${it.text}`));
+        g.items.forEach((it, i) => flat.push(`  [${g.title} #${i}] ${mark(it.text)}`));
       });
       return `SECTION ${s.key}:\n${flat.join('\n')}`;
     })
@@ -78,17 +95,21 @@ export async function scoreEvidence(
     schema: EvidenceSchema,
     system: SYSTEM,
     prompt: `Grade the evidence quality of these resume bullets.\n\n${payload}`,
-    options: { tier: 'fast', budget, temperature: 0.1 },
+    options: draftCallOptions(budget, { tier: 'fast', temperature: 0.1 }),
   });
 
   return {
     score: clamp01(data.overallScore),
-    weakBullets: data.weakBullets.map((w) => ({
-      sectionKey: w.sectionKey as SectionKey,
-      itemIndex: w.itemIndex,
-      text: w.text,
-      problem: w.problem,
-    })),
+    // The instruction above is a request; this is the guarantee. A model that reports a
+    // marked bullet anyway does not get to spend another revision pass on it.
+    weakBullets: data.weakBullets
+      .map((w) => ({
+        sectionKey: w.sectionKey as SectionKey,
+        itemIndex: w.itemIndex,
+        text: w.text.replace(TRIED_MARKER, '').trim(),
+        problem: w.problem,
+      }))
+      .filter((w) => !tried.has(w.text)),
     provider,
   };
 }

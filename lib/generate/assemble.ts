@@ -36,7 +36,7 @@ import type {
 } from '../types';
 import { profileFor } from '../retrieval/categories';
 import { generateStructured } from '../ai/chain';
-import type { DraftBudget } from '../ai/budget';
+import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
 import { coerceHeading } from '../render/headings';
 import { formatDate, formatDateRange } from '../render/dates';
@@ -350,7 +350,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
         schema: RewriteSchema,
         system: REWRITE_SYSTEM,
         prompt: buildRewritePrompt(trimmedBullets, job),
-        options: { budget, temperature: 0.25 },
+        options: draftCallOptions(budget, { temperature: 0.25 }),
       });
 
       for (const b of data.bullets) {

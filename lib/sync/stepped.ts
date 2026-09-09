@@ -14,6 +14,8 @@ import {
 } from './parse';
 import type { ExtractedProfile, WorkSlice } from './parse';
 import { applyParsedProfile } from '@/lib/server/profile';
+import { DraftBudget } from '@/lib/ai/budget';
+import { assertDailyBudget, recordDailyUsage } from '@/lib/ai/daily-budget';
 
 /**
  * Portfolio sync, executed one short step per request.
@@ -86,6 +88,22 @@ const EXTRACTION_TIER = 'fast' as const;
  * time is about the content rather than the provider.
  */
 const MAX_SLICE_ATTEMPTS = 3;
+
+/**
+ * What one slice's extraction may spend — REQ-5.6.
+ *
+ * A slice is one logical call, so one recorded success is the ceiling; the allowance is
+ * larger than that because the chain now counts failed attempts too (they were billed),
+ * and a slice that reaches its fifth provider should still be allowed to finish rather
+ * than be cut off by its own accounting. What this budget is really for is the daily
+ * counter it feeds: `assertDailyBudget` cannot enforce anything it is never told about.
+ *
+ * The size of the hole this closes: `lib/sync/github.ts` caps the corpus at 40 files of
+ * 120KB, sliced at 3,500 chars — up to ~1,370 model calls for one job, times three via
+ * MAX_SLICE_ATTEMPTS — and a job is re-runnable by disconnecting the repo and connecting
+ * it again. None of it was asserted against a ceiling or recorded against one.
+ */
+const SLICE_BUDGET = { maxCalls: 6, maxTokens: 80_000 } as const;
 
 export async function startSyncJob(userId: string): Promise<StepResult> {
   // Reuse an in-flight job rather than starting a second one.
@@ -258,10 +276,27 @@ async function runStep(
     const label = sliceLabel(slice);
     const attempt = slice.attempt ?? 0;
 
+    // The daily ceiling, checked before every step that can spend it.
+    //
+    // Deliberately here and not at the top of `runStep`: step 0 is a GitHub fetch and the
+    // final step is a database write, and refusing either would throw away work already
+    // paid for without preventing a single model call. This is the only step that spends.
+    //
+    // Thrown rather than reported softly. The catch in `advanceSyncJob` marks the job
+    // failed with this message, which is what should happen — a job that cannot make
+    // progress today should say so and stop, not sit at 'running' while a client polls it.
+    await assertDailyBudget(userId);
+
+    // Per-slice, so the circuit breaker applies to a sync the same way it applies to an
+    // import, and so there is a usage figure to record at all. This whole path used to
+    // pass no budget: nothing capped it, and nothing counted it either.
+    const budget = new DraftBudget(SLICE_BUDGET);
+
     let partial: Record<string, unknown> | null = null;
     let failure: string | null = null;
     try {
       partial = (await extractFromSlice(slice, {
+        budget,
         tier: EXTRACTION_TIER,
         deadlineMs: Math.max(0, deadlineAt - WRITE_RESERVE_MS - Date.now()),
         timeoutMs: ATTEMPT_TIMEOUT_MS,
@@ -270,6 +305,10 @@ async function runStep(
       // One unreadable slice costs only itself. Losing a single module is far better
       // than failing a sync that has already read nine others correctly.
       failure = err instanceof Error ? err.message : String(err);
+    } finally {
+      // A slice that timed out still sent its prompt, so it still counts. Recording only
+      // the slices that succeeded would undercount exactly the runs worth capping.
+      await recordDailyUsage(userId, budget.snapshot());
     }
 
     // Re-queue rather than discard, and re-queue smaller. The chain has benched
