@@ -9,9 +9,16 @@
 
 import { isIpAddress } from '../lib/auth/rate-limit';
 import { isPrivateAddress } from '../lib/net/safe-fetch';
-import { readZip } from '../lib/import/zip';
+import { readZip, inflatedSize, ZipLimitError } from '../lib/import/zip';
+import {
+  MAX_UPLOAD_BYTES,
+  UnsafeUploadError,
+  assertDocxIsSafeToExtract,
+  extractUploadText,
+} from '../lib/import/text';
+import { parseRepoRef } from '../lib/sync/github';
 import { deflateRawSync } from 'node:zlib';
-import { suite, test, assert } from './harness.mjs';
+import { suite, suiteAsync, test, testAsync, assert } from './harness.mjs';
 
 /* ------------------------------------------------- IP parsing (finding #2) ---- */
 
@@ -75,12 +82,17 @@ suite('private address detection', () => {
 
 /* --------------------------------------------- zip decompression (finding #3) ---- */
 
-function makeZip(files: Array<[string, string]>): Buffer {
+/**
+ * `declaredSize` defaults to a lie — 1024 bytes whatever the entry really holds —
+ * because that is the case the zip tests below exist to pin. A caller that wants an
+ * honest archive (the DOCX suite, further down) passes the real size.
+ */
+function makeZip(files: Array<[string, string, number?]>): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
 
-  for (const [name, content] of files) {
+  for (const [name, content, declaredSize] of files) {
     const raw = Buffer.from(content, 'utf8');
     const body = deflateRawSync(raw);
     const nameBuf = Buffer.from(name, 'utf8');
@@ -99,10 +111,10 @@ function makeZip(files: Array<[string, string]>): Buffer {
     central.writeUInt16LE(20, 6);
     central.writeUInt16LE(8, 10);
     central.writeUInt32LE(body.length, 20);
-    // The DECLARED size is a lie: small enough to pass the early check, while the
-    // stream actually expands to megabytes. This is what makes the per-entry
+    // The DECLARED size is a lie by default: small enough to pass the early check,
+    // while the stream actually expands to megabytes. This is what makes the per-entry
     // declared-size check useless as a bound.
-    central.writeUInt32LE(1024, 24);
+    central.writeUInt32LE(declaredSize ?? 1024, 24);
     central.writeUInt16LE(nameBuf.length, 28);
     central.writeUInt32LE(offset, 42);
     centrals.push(central, nameBuf);
@@ -162,5 +174,187 @@ suite('zip decompression limits', () => {
   test('an ordinary archive still reads completely', () => {
     const entries = readZip(makeZip([['a.csv', 'x'], ['b.csv', 'y']]));
     assert(entries.length === 2, 'the limits do not interfere with a normal export');
+  });
+});
+
+/* -------------------------------------- DOCX decompression (finding #1) ---- */
+
+/**
+ * A DOCX is a ZIP, which is the whole problem: `MAX_UPLOAD_BYTES` bounded the
+ * COMPRESSED bytes, and mammoth then handed them to jszip, which inflates with no
+ * output ceiling at all. Measured on this machine before the fix, a 0.39MB file built
+ * exactly this way came back from `mammoth.extractRawText` as 419,430,402 characters
+ * with a peak RSS of 848MB, and a 3.31MB one drove RSS to 3,567MB before dying — from
+ * uploads a twentieth and a half of the size cap respectively.
+ *
+ * These fixtures are the real thing, not a mock: `[Content_Types].xml`, the package
+ * relationships, and a `word/document.xml` that is a run of one byte. Mammoth reads the
+ * small one, which is what makes the large one a valid upload rather than a broken file.
+ */
+const CONTENT_TYPES =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+  '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+  '<Default Extension="xml" ContentType="application/xml"/>' +
+  '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+  '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+  '</Types>';
+
+const PACKAGE_RELS =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+  '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+  '</Relationships>';
+
+function documentXml(body: string): string {
+  return (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    `<w:body><w:p><w:r><w:t>${body}</w:t></w:r></w:p></w:body></w:document>`
+  );
+}
+
+/**
+ * `declaredSize` left out means "state the truth", which is what Word does — in BYTES,
+ * not characters: an em dash is one of the first and three of the second, and jszip
+ * checks the inflated byte count against what the archive declared.
+ */
+function makeDocx(body: string, declaredSize?: number): Buffer {
+  const xml = documentXml(body);
+  return makeZip([
+    ['[Content_Types].xml', CONTENT_TYPES, Buffer.byteLength(CONTENT_TYPES)],
+    ['_rels/.rels', PACKAGE_RELS, Buffer.byteLength(PACKAGE_RELS)],
+    ['word/document.xml', xml, declaredSize ?? Buffer.byteLength(xml)],
+  ]);
+}
+
+/** 64MB of one byte, which deflate flattens to a few dozen kilobytes. */
+const BOMB_BODY = 'A'.repeat(64 * 1024 * 1024);
+
+suite('DOCX decompression limits', () => {
+  test('the bomb is a valid upload by every check that existed before', () => {
+    const bomb = makeDocx(BOMB_BODY);
+    assert(
+      bomb.length < MAX_UPLOAD_BYTES,
+      `an 8MB compressed cap does not stop it: this one is ${(bomb.length / 1024).toFixed(0)}KB`,
+    );
+    assert(
+      documentXml(BOMB_BODY).length / bomb.length > 500,
+      'and the ratio is what makes the compressed cap meaningless',
+    );
+  });
+
+  test('a bomb that declares its true size is refused without inflating a byte', () => {
+    assert.throws(
+      () => assertDocxIsSafeToExtract(makeDocx(BOMB_BODY)),
+      (err: unknown) => err instanceof UnsafeUploadError,
+      'the central directory said 64MB and the ceiling is 32MB',
+    );
+  });
+
+  test('a bomb that lies about its size is refused too — the inflate cap is the real bound', () => {
+    // 1024 declared, 64MB real. Anything that trusted the central directory would wave
+    // this through, which is the mistake `readZip` was already written not to make.
+    assert.throws(
+      () => assertDocxIsSafeToExtract(makeDocx(BOMB_BODY, 1024)),
+      (err: unknown) => err instanceof UnsafeUploadError,
+      'a declared size is whatever the attacker typed',
+    );
+  });
+
+  test('a file that is not a zip at all is refused rather than passed on hopefully', () => {
+    // Fail closed: "our reader disagrees with jszip" is exactly the shape a bypass takes.
+    assert.throws(
+      () => assertDocxIsSafeToExtract(Buffer.from('%PDF-1.7 not a docx')),
+      (err: unknown) => err instanceof UnsafeUploadError,
+    );
+  });
+
+  test('an ordinary resume passes the check', () => {
+    assertDocxIsSafeToExtract(makeDocx('Anand Sundaramoorthy — Senior Engineer, Example Corp.'));
+  });
+
+  test('the measurement reports the truth about a normal document', () => {
+    const size = inflatedSize(makeDocx('a short resume'), {
+      maxEntryBytes: 16 * 1024 * 1024,
+      maxTotalBytes: 32 * 1024 * 1024,
+    });
+    assert(size > 500 && size < 5000, `a three-part docx, got ${size} bytes`);
+  });
+
+  test('the entry count is bounded, so nothing can hide past the limit', () => {
+    // `centralDirectory` stops at maxEntries; if the measurement stopped there quietly,
+    // an archive padded past it would carry members jszip inflates and we never saw.
+    assert.throws(
+      () =>
+        inflatedSize(makeDocx('short'), {
+          maxEntryBytes: 1024,
+          maxTotalBytes: 4096,
+          maxEntries: 2,
+        }),
+      (err: unknown) => err instanceof ZipLimitError,
+      'three parts, a ceiling of two',
+    );
+  });
+});
+
+await suiteAsync('DOCX extraction end to end', async () => {
+  await testAsync('a real DOCX still extracts its text', async () => {
+    const docx = makeDocx('Anand Sundaramoorthy — Senior Engineer, Example Corp.');
+    const { text } = await extractUploadText(docx, 'docx');
+    assert(
+      text.includes('Senior Engineer'),
+      `the guard must not break the working path, got ${JSON.stringify(text.slice(0, 60))}`,
+    );
+  });
+
+  await testAsync('the bomb never reaches mammoth', async () => {
+    let message = '';
+    try {
+      await extractUploadText(makeDocx(BOMB_BODY), 'docx');
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    assert(
+      message.includes('expands to far more'),
+      `refused by name, got ${JSON.stringify(message)}`,
+    );
+  });
+});
+
+/* ---------------------------------------- repo path segments (finding #3) ---- */
+
+suite('repository reference parsing', () => {
+  test('ordinary references still parse', () => {
+    for (const input of [
+      'anand/portfolio',
+      'https://github.com/anand/portfolio',
+      'https://github.com/anand/portfolio.git',
+      'anand/portfolio/tree/main',
+      'Some-Org/my.site_v2',
+    ]) {
+      const ref = parseRepoRef(input);
+      assert(ref !== null, `should parse ${input}`);
+    }
+  });
+
+  test('a segment that is not a GitHub name is refused', () => {
+    // Each of these shapes the request rather than naming a repository: `..` normalises
+    // a path segment away under URL parsing and reaches a different endpoint, `?` and
+    // `#` turn the rest of the path into a query or a fragment, and a space or a colon
+    // is simply not a name GitHub can issue.
+    for (const input of [
+      'owner/..',
+      '../owner',
+      'owner/.',
+      'owner/repo?per_page=100',
+      'owner/repo#fragment',
+      'owner/re po',
+      'owner/repo:8080',
+      'owner/',
+      '/repo',
+      `owner/${'r'.repeat(200)}`,
+    ]) {
+      assert.equal(parseRepoRef(input), null, `should refuse ${JSON.stringify(input)}`);
+    }
   });
 });

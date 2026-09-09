@@ -15,6 +15,30 @@ export interface RepoRef {
   repo: string;
 }
 
+/**
+ * The characters GitHub allows in an account or repository name. Everything else is
+ * refused here rather than encoded and sent, because a name that cannot exist is not a
+ * name — it is somebody shaping our request.
+ *
+ * What that shaping buys, before the encoding below closes it: `owner/..` normalises
+ * away a path segment under URL parsing, so `/repos/owner/../commits/main` reaches a
+ * different endpoint than the one this code believes it is calling, and a `?` or `#`
+ * turns the rest of the path into query or fragment. No privilege comes with it — the
+ * request carries the user's own token, or an installation token limited to
+ * `contents: read` on repositories they chose to grant — which is why this was rated
+ * low. It is still a primitive that should not exist.
+ */
+const SEGMENT_CHARSET = /^[A-Za-z0-9._-]+$/;
+
+function validSegment(segment: string): boolean {
+  if (segment.length === 0 || segment.length > 100) return false;
+  if (!SEGMENT_CHARSET.test(segment)) return false;
+  // `.` and `..` pass the charset test and are the whole traversal trick, so they are
+  // named explicitly. So is any other all-dots segment.
+  if (/^\.+$/.test(segment)) return false;
+  return true;
+}
+
 export function parseRepoRef(input: string): RepoRef | null {
   const cleaned = input
     .trim()
@@ -24,10 +48,16 @@ export function parseRepoRef(input: string): RepoRef | null {
   const parts = cleaned.split('/');
   if (parts.length < 2) return null;
   const [owner, repo] = parts;
-  if (!owner || !repo) return null;
+  if (!validSegment(owner) || !validSegment(repo)) return null;
   return { owner, repo };
 }
 
+/**
+ * Every path segment that came from stored user input is encoded by the caller before
+ * it reaches here — `parseRepoRef` has already refused anything that is not a name, and
+ * the encoding is the second half of that: validation says what may be sent, encoding
+ * says it cannot be read as anything but one segment.
+ */
 async function gh<T>(path: string, token: string): Promise<T> {
   const res = await fetch(`${GH}${path}`, {
     headers: {
@@ -51,7 +81,9 @@ export async function latestCommitSha(
 ): Promise<string> {
   const b = branch ?? (await defaultBranch(ref, token));
   const data = await gh<{ sha: string }>(
-    `/repos/${ref.owner}/${ref.repo}/commits/${encodeURIComponent(b)}`,
+    `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(
+      ref.repo,
+    )}/commits/${encodeURIComponent(b)}`,
     token,
   );
   return data.sha;
@@ -59,7 +91,7 @@ export async function latestCommitSha(
 
 export async function defaultBranch(ref: RepoRef, token: string): Promise<string> {
   const data = await gh<{ default_branch: string }>(
-    `/repos/${ref.owner}/${ref.repo}`,
+    `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`,
     token,
   );
   return data.default_branch;
@@ -106,7 +138,12 @@ export async function fetchPortfolioFiles(
 ): Promise<RepoFile[]> {
   const tree = await gh<{
     tree: Array<{ path: string; type: string; size?: number; sha: string }>;
-  }>(`/repos/${ref.owner}/${ref.repo}/git/trees/${sha}?recursive=1`, token);
+  }>(
+    `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(
+      ref.repo,
+    )}/git/trees/${encodeURIComponent(sha)}?recursive=1`,
+    token,
+  );
 
   const candidates = tree.tree
     .filter((n) => n.type === 'blob')
@@ -127,7 +164,9 @@ export async function fetchPortfolioFiles(
       const node = candidates[cursor++];
       try {
         const blob = await gh<{ content: string; encoding: string }>(
-          `/repos/${ref.owner}/${ref.repo}/git/blobs/${node.sha}`,
+          `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(
+            ref.repo,
+          )}/git/blobs/${encodeURIComponent(node.sha)}`,
           token,
         );
         const content =

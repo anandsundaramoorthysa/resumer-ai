@@ -35,6 +35,17 @@ export const users = pgTable('user', {
    * have OAuth accounts.
    */
   passwordHash: text('password_hash'),
+  /**
+   * The cut-off for sessions. A JWT minted before this instant is refused by the
+   * `session` callback in auth.ts, which is what makes a password reset actually end
+   * the sessions that existed before it — stateless tokens otherwise keep working for
+   * their full lifetime, so someone who resets *because* they think they are
+   * compromised stays compromised.
+   *
+   * Null is not "invalidate everything", it is "no reset has ever happened here", so
+   * shipping the column does not sign every existing user out.
+   */
+  sessionsValidFrom: timestamp('sessions_valid_from'),
   image: text('image'),
   githubLogin: text('github_login'),
   /** REQ-2.2 — last portfolio commit SHA we parsed, the sync gate's cache key. */

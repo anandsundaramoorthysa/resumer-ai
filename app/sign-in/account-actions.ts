@@ -249,6 +249,11 @@ export async function resetPasswordAction(
       // Completing a reset proves the address receives mail, which is the same thing
       // verification proves. An account that reset its password is verified.
       emailVerified: new Date(),
+      // And every session that existed before this moment stops working — see the
+      // `session` callback in auth.ts. Changing the password alone would not have done
+      // it: sessions here are stateless JWTs with nothing to delete, so anyone already
+      // signed in stayed signed in, including the person the reset was meant to evict.
+      sessionsValidFrom: new Date(),
     })
     .where(eq(users.email, spent.identifier!))
     .returning({ id: users.id });

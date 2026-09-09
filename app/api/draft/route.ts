@@ -165,13 +165,23 @@ export async function POST(req: NextRequest) {
           document: result.document,
         });
       } catch (err) {
+        // `PipelineError` messages are written to be read by the person who uploaded
+        // the job — they name the stage and what to do next, and nothing else. Every
+        // other exception reaching here was written for a developer: a Drizzle or
+        // postgres.js failure carries the statement, a provider error carries its own
+        // response, and lib/sync/github.ts puts the whole GitHub response body into the
+        // message it throws. Nothing secret travels those paths today, which is the only
+        // reason this was ever survivable — one refactor away from a connection string
+        // or a token fragment arriving in the browser over an SSE frame. So the generic
+        // branch is logged where logs are read and answered with one sentence.
+        if (!(err instanceof PipelineError)) {
+          console.error('[draft] pipeline failed for user', userId, err);
+        }
         send('error', {
           message:
             err instanceof PipelineError
               ? err.message
-              : err instanceof Error
-                ? err.message
-                : 'Draft failed unexpectedly.',
+              : 'The draft failed unexpectedly. Nothing was saved — try again, and if it keeps happening the server log has the detail.',
           kind: err instanceof PipelineError ? err.kind : 'generic',
         });
       } finally {

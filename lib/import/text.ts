@@ -10,11 +10,68 @@
  */
 
 import { extractTextFromDocx, extractTextFromPdf } from '../render/selftest';
+import { NotAZipError, ZipLimitError, inflatedSize } from './zip';
 
 export type UploadFormat = 'pdf' | 'docx';
 
 /** Nothing legitimate is bigger; anything that is, is not a resume. */
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+/**
+ * What a DOCX is allowed to expand to once it is unzipped.
+ *
+ * `MAX_UPLOAD_BYTES` is a cap on the COMPRESSED bytes, and that was never a bound on
+ * what reading them costs. A DOCX is a ZIP; mammoth hands it to jszip, which inflates
+ * `word/document.xml` with no output ceiling at all. Deflate reaches roughly 1032:1, so
+ * a structurally valid 8MB DOCX whose document.xml is one byte repeated expands toward
+ * eight gigabytes — and the function does not return a 422, it dies, either out of
+ * memory or on V8's maximum string length. On a serverless host that is a killed
+ * instance, and any signed-in user could post one to /api/draft or /api/import/extract
+ * as often as they liked.
+ *
+ * So the archive is measured before mammoth sees it, using the same `inflateRawSync`
+ * ceiling the LinkedIn `.zip` path has always used (lib/import/zip.ts). The numbers are
+ * far above any real document — a hundred-page resume's document.xml is a few hundred
+ * kilobytes, and the images in an 8MB DOCX are already-compressed bytes that barely
+ * expand at all — and far below what a serverless instance can survive.
+ */
+const MAX_DOCX_INFLATED_BYTES = 32 * 1024 * 1024;
+const MAX_DOCX_PART_BYTES = 16 * 1024 * 1024;
+/** Word writes a couple of dozen parts. A thousand is generous; a million is an attack. */
+const MAX_DOCX_PARTS = 1_024;
+
+/** A file that was refused before it was read, rather than after it took the host down. */
+export class UnsafeUploadError extends Error {}
+
+/**
+ * Refuses a DOCX that would cost too much to open.
+ *
+ * Deliberately fail-closed: an archive this reader cannot make sense of is rejected
+ * rather than passed through on the hope that jszip will cope, because "our parser
+ * disagrees with theirs" is exactly the shape a bypass would take. The cost is that a
+ * ZIP64 DOCX — which an 8MB file has no reason to be — is refused too.
+ */
+export function assertDocxIsSafeToExtract(buffer: Buffer): void {
+  try {
+    inflatedSize(buffer, {
+      maxEntryBytes: MAX_DOCX_PART_BYTES,
+      maxTotalBytes: MAX_DOCX_INFLATED_BYTES,
+      maxEntries: MAX_DOCX_PARTS,
+    });
+  } catch (err) {
+    if (err instanceof ZipLimitError) {
+      throw new UnsafeUploadError(
+        `that DOCX expands to far more than a document should when it is opened (${err.message}), so it was not read`,
+      );
+    }
+    if (err instanceof NotAZipError) {
+      throw new UnsafeUploadError(
+        'that file is named .docx but is not a readable Word document',
+      );
+    }
+    throw err;
+  }
+}
 
 /**
  * A long resume runs to ~8k characters. The cap is generous enough to never truncate a
@@ -53,6 +110,9 @@ export async function extractUploadText(
   buffer: Buffer,
   format: UploadFormat,
 ): Promise<ExtractedUpload> {
+  // Before the bytes reach a decompressor without an output ceiling of its own.
+  if (format === 'docx') assertDocxIsSafeToExtract(buffer);
+
   const raw =
     format === 'docx'
       ? await extractTextFromDocx(buffer)
