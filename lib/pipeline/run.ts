@@ -22,6 +22,7 @@ import { assertDailyBudget, recordDailyUsage } from '../ai/daily-budget';
 import { AllProvidersFailedError } from '../ai/chain';
 import { BudgetExceededError } from '../ai/budget';
 import { extractJobRequirement } from '../intake/extract';
+import { combineJobText } from '../intake/job-input';
 import { looksLikeUrl, scrapeJobUrl } from '../intake/scrape';
 import { rankRecords, selectTop } from '../retrieval/rank';
 import { assembleResume } from '../generate/assemble';
@@ -40,6 +41,10 @@ export interface PipelineInput {
   records: ProfileRecord[];
   roles: RoleRecord[];
   jobInput: string;
+  /** Text already extracted, server-side, from an attached PDF/DOCX job description. */
+  jobFileText?: string;
+  /** Shown to the user and named in the combined text so the model knows what it is. */
+  jobFileName?: string;
   /** Runs before anything else; returns a human-readable summary line. */
   syncStep?: () => Promise<{ summary: string; records?: ProfileRecord[] }>;
 }
@@ -114,8 +119,11 @@ async function runDraft(
   // ----------------------------------------------------------- 2. understand --
   emit({ stage: 'understand', status: 'running', message: 'Reading the job…' });
 
+  // The scrape decision is made on the typed text alone, before the attachment is
+  // folded in. A bare URL only looks like a URL while it is the whole input, so
+  // combining first would silently turn "link + file" into "never scraped".
   let jobText = input.jobInput.trim();
-  if (looksLikeUrl(jobText)) {
+  if (jobText && looksLikeUrl(jobText)) {
     const scraped = await scrapeJobUrl(jobText);
     if (scraped.ok) {
       jobText = scraped.text;
@@ -124,6 +132,27 @@ async function runDraft(
       emit({ stage: 'understand', status: 'error', message: scraped.message });
       throw new PipelineError(scraped.message, 'needs-paste');
     }
+  }
+
+  const fileText = input.jobFileText?.trim() ?? '';
+  if (fileText) {
+    emit({
+      stage: 'understand',
+      status: 'running',
+      message: input.jobFileName
+        ? `Read ${input.jobFileName} (${fileText.length.toLocaleString()} characters).`
+        : 'Read the attached document.',
+    });
+  }
+
+  const combined = combineJobText(jobText, fileText, input.jobFileName);
+  jobText = combined.text;
+  if (combined.truncated) {
+    emit({
+      stage: 'understand',
+      status: 'running',
+      message: 'The attached document was longer than the input limit and was read up to the cap.',
+    });
   }
 
   let job: JobRequirement;

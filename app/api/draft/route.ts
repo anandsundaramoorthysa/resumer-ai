@@ -8,6 +8,18 @@
 
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
+import {
+  MAX_UPLOAD_BYTES,
+  extractUploadText,
+  formatFromFile,
+} from '@/lib/import/text';
+import {
+  fileRejection,
+  hasReadableText,
+  unreadableFileMessage,
+  validateJobSubmission,
+  type JobInputRejection,
+} from '@/lib/intake/job-input';
 import { runDraftPipeline, PipelineError } from '@/lib/pipeline/run';
 import { loadProfileForUser, persistDraft, buildSyncStep } from '@/lib/server/profile';
 import type { PipelineEvent } from '@/lib/types';
@@ -26,15 +38,78 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const body = (await req.json().catch(() => ({}))) as { jobInput?: string };
-  const jobInput = (body.jobInput ?? '').trim();
+  // Two transports, one endpoint. A file can only arrive as multipart, but everything
+  // that already posts JSON here keeps working untouched — the branch is on what the
+  // request actually says it is, not on a new route.
+  const isMultipart = (req.headers.get('content-type') ?? '')
+    .toLowerCase()
+    .includes('multipart/form-data');
 
-  if (jobInput.length < 3) {
-    return new Response(
-      JSON.stringify({ error: 'Paste a job link or description to draft against.' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    );
+  let jobInput = '';
+  let fileText = '';
+  let fileName = '';
+
+  if (isMultipart) {
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      return reject({
+        problem: 'empty',
+        message: 'That upload could not be read. Try attaching the file again.',
+        status: 400,
+      });
+    }
+
+    const typed = form.get('jobInput');
+    jobInput = typeof typed === 'string' ? typed.trim() : '';
+
+    const file = form.get('jobFile');
+    if (file instanceof File && file.size > 0) {
+      // The browser's declared type is a hint, never the decision: the extension and
+      // the MIME type are both checked here, and the size cap is re-enforced on this
+      // side because the input's `accept` attribute stops nothing that is not a browser.
+      if (file.size > MAX_UPLOAD_BYTES) {
+        return reject(
+          fileRejection('file-too-big', {
+            sizeBytes: file.size,
+            maxBytes: MAX_UPLOAD_BYTES,
+          }),
+        );
+      }
+
+      const format = formatFromFile(file.name, file.type);
+      if (!format) return reject(fileRejection('file-type'));
+
+      try {
+        // Read into memory, use the text, let the bytes go. Nothing is written to disk
+        // or to any store, exactly as the importer promises for the same file types.
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const extracted = await extractUploadText(buffer, format);
+        if (!hasReadableText(extracted.text)) {
+          return reject(unreadableFileMessage(format));
+        }
+        fileText = extracted.text;
+        fileName = file.name;
+      } catch (err) {
+        return reject({
+          problem: 'file-unreadable',
+          message: `Could not read that file: ${
+            err instanceof Error ? err.message.slice(0, 200) : 'unknown error'
+          }`,
+          status: 422,
+        });
+      }
+    } else if (file instanceof File) {
+      return reject(fileRejection('file-empty'));
+    }
+  } else {
+    const body = (await req.json().catch(() => ({}))) as { jobInput?: string };
+    jobInput = (body.jobInput ?? '').trim();
   }
+
+  const rejection = validateJobSubmission(jobInput, fileText.length);
+  if (rejection) return reject(rejection);
 
   const encoder = new TextEncoder();
 
@@ -68,6 +143,8 @@ export async function POST(req: NextRequest) {
             records: profile.records,
             roles: profile.roles,
             jobInput,
+            jobFileText: fileText || undefined,
+            jobFileName: fileName || undefined,
             syncStep: buildSyncStep(userId),
           },
           emit,
@@ -110,5 +187,12 @@ export async function POST(req: NextRequest) {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     },
+  });
+}
+
+function reject(rejection: JobInputRejection): Response {
+  return new Response(JSON.stringify({ error: rejection.message }), {
+    status: rejection.status,
+    headers: { 'Content-Type': 'application/json' },
   });
 }
