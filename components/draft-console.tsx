@@ -10,6 +10,13 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
+import {
+  JOB_FILE_ACCEPT,
+  MAX_JOB_FILE_BYTES,
+  fileRejection,
+  isAcceptedJobFile,
+  validateJobSubmission,
+} from '@/lib/intake/job-input';
 import type { PipelineEvent, PipelineStage, QualityGateResult } from '@/lib/types';
 
 const STAGE_LABELS: Record<PipelineStage, string> = {
@@ -39,14 +46,50 @@ interface CompletePayload {
 
 export function DraftConsole() {
   const [jobInput, setJobInput] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [events, setEvents] = useState<PipelineEvent[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CompletePayload | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  /**
+   * Type and size are checked here purely so the answer is instant; the server checks
+   * both again, on the bytes it actually received, and is the one that decides.
+   */
+  const chooseFile = useCallback((picked: File) => {
+    if (!isAcceptedJobFile(picked.name, picked.type)) {
+      setError(fileRejection('file-type').message);
+      return;
+    }
+    if (picked.size === 0) {
+      setError(fileRejection('file-empty').message);
+      return;
+    }
+    if (picked.size > MAX_JOB_FILE_BYTES) {
+      setError(
+        fileRejection('file-too-big', {
+          sizeBytes: picked.size,
+          maxBytes: MAX_JOB_FILE_BYTES,
+        }).message,
+      );
+      return;
+    }
+    setError(null);
+    setFile(picked);
+  }, []);
+
   const start = useCallback(async () => {
-    if (!jobInput.trim() || running) return;
+    if (running) return;
+
+    // The floor cannot be judged on the file's text from here — the browser has not
+    // read it — so an attachment counts as "enough" and the server, which has the
+    // extracted text, applies the real three-character rule.
+    const rejection = validateJobSubmission(jobInput, file ? 3 : 0);
+    if (rejection) {
+      setError(rejection.message);
+      return;
+    }
 
     setRunning(true);
     setEvents([]);
@@ -57,12 +100,23 @@ export function DraftConsole() {
     abortRef.current = controller;
 
     try {
-      const res = await fetch('/api/draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobInput }),
-        signal: controller.signal,
-      });
+      // Multipart only when there is a file to carry. Without one the request is the
+      // JSON it has always been, so nothing about the text-only path changes.
+      let init: RequestInit;
+      if (file) {
+        const form = new FormData();
+        form.append('jobInput', jobInput);
+        form.append('jobFile', file);
+        init = { method: 'POST', body: form };
+      } else {
+        init = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobInput }),
+        };
+      }
+
+      const res = await fetch('/api/draft', { ...init, signal: controller.signal });
 
       if (!res.ok || !res.body) {
         const j = await res.json().catch(() => ({ error: 'Draft failed.' }));
@@ -107,7 +161,7 @@ export function DraftConsole() {
     } finally {
       setRunning(false);
     }
-  }, [jobInput, running]);
+  }, [file, jobInput, running]);
 
   const latestByStage = new Map<PipelineStage, PipelineEvent>();
   const scoreRows: PipelineEvent[] = [];
@@ -124,7 +178,9 @@ export function DraftConsole() {
       <div className="rounded-2xl border border-line bg-surface p-5">
         <h2 className="font-display text-xl">Start a new resume</h2>
         <p className="mt-1 text-sm text-muted">
-          Paste a job link, a full description, or a LinkedIn post — whatever you have.
+          Paste a job link, a full description, or a LinkedIn post — or attach the job
+          description as a PDF or DOCX. Either one on its own is enough, and you can do
+          both.
         </p>
 
         <label htmlFor="jobInput" className="sr-only">
@@ -140,6 +196,63 @@ export function DraftConsole() {
           className="mt-4 w-full resize-y rounded-xl border border-muted bg-paper px-3.5 py-3 text-sm outline-none placeholder:text-muted focus:border-brand disabled:opacity-60"
         />
 
+        <div className="mt-3 rounded-xl border border-dashed border-line p-3">
+          {file ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="min-w-0 break-all font-mono text-xs text-ink">
+                {file.name}
+                <span className="text-muted"> · {(file.size / 1024).toFixed(0)} KB</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setFile(null)}
+                disabled={running}
+                className="ml-auto min-h-11 rounded-lg border border-line px-3 py-2 text-xs font-semibold hover:bg-paper disabled:opacity-50"
+              >
+                Remove file
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              {/* The input is hidden from sight but not from the keyboard: the label is
+                  the 44px target, and focus lands on it through the association. */}
+              <label
+                htmlFor="jobFile"
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-brand"
+              >
+                Attach a PDF or DOCX
+                <input
+                  id="jobFile"
+                  type="file"
+                  accept={JOB_FILE_ACCEPT}
+                  disabled={running}
+                  className="sr-only"
+                  onChange={(e) => {
+                    const picked = e.target.files?.[0];
+                    if (picked) chooseFile(picked);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <span className="text-xs text-muted">
+                Optional. Read in memory and never stored — a scan or a photo has no text
+                layer and cannot be read.
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Anything raised before the first stage appears belongs beside the controls
+            that caused it; once stages are on screen the failure is shown against them. */}
+        {error && events.length === 0 && (
+          <p
+            role="alert"
+            className="mt-3 rounded-lg bg-danger-tint px-3 py-2.5 text-sm text-danger"
+          >
+            {error}
+          </p>
+        )}
+
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <span className="text-xs text-muted">
             Your portfolio is re-checked for changes before drafting.
@@ -147,7 +260,7 @@ export function DraftConsole() {
           <button
             type="button"
             onClick={start}
-            disabled={running || jobInput.trim().length < 3}
+            disabled={running || (!file && jobInput.trim().length < 3)}
             className="min-h-11 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
             {running ? 'Drafting…' : 'Draft resume →'}
@@ -155,7 +268,7 @@ export function DraftConsole() {
         </div>
       </div>
 
-      {(startedStages.length > 0 || error) && (
+      {startedStages.length > 0 && (
         <div className="rounded-2xl border border-line bg-surface p-5">
           <h3 className="font-mono text-xs font-semibold uppercase tracking-wider text-muted">
             Live progress
@@ -205,7 +318,7 @@ export function DraftConsole() {
             })}
           </ol>
 
-          {error && (
+          {error && events.length > 0 && (
             <p role="alert" className="mt-4 rounded-lg bg-danger-tint px-3 py-2.5 text-sm text-danger">
               {error}
             </p>
