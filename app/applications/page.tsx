@@ -124,7 +124,11 @@ export default async function ApplicationsPage() {
                     </span>
                     <Link
                       href={`/resume/${r.resumeSnapshotId}`}
-                      className="inline-flex min-h-11 items-center text-xs font-semibold text-brand-dark hover:underline"
+                      /* min-w-11 as well as min-h-11: the word "Review" at text-xs is
+                         40.7px wide, so height alone left the tap target short in one
+                         dimension. Centred, so the 3px it gains does not shift the text
+                         off the right edge of the cell. */
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center text-xs font-semibold text-brand-dark hover:underline"
                     >
                       Review
                     </Link>
@@ -179,7 +183,11 @@ export default async function ApplicationsPage() {
                       <td className="px-4 py-3 text-right">
                         <Link
                           href={`/resume/${r.resumeSnapshotId}`}
-                          className="inline-flex min-h-11 items-center text-xs font-semibold text-brand-dark hover:underline"
+                          /* min-w-11 as well as min-h-11: the word "Review" at text-xs is
+                         40.7px wide, so height alone left the tap target short in one
+                         dimension. Centred, so the 3px it gains does not shift the text
+                         off the right edge of the cell. */
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center text-xs font-semibold text-brand-dark hover:underline"
                         >
                           Review
                         </Link>
