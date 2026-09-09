@@ -246,7 +246,6 @@ export const profileRecords = pgTable(
      * the rule and why updates are exempt from it.
      */
     reviewState: text('review_state').notNull().default('approved'),
-    embedding: jsonb('embedding').$type<number[] | null>(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

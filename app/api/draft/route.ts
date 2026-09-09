@@ -10,6 +10,7 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import {
   MAX_UPLOAD_BYTES,
+  UnsafeUploadError,
   extractUploadText,
   formatFromFile,
 } from '@/lib/import/text';
@@ -92,11 +93,21 @@ export async function POST(req: NextRequest) {
         fileText = extracted.text;
         fileName = file.name;
       } catch (err) {
+        // Same rule as the SSE error below, for the same reason. `UnsafeUploadError`
+        // messages are written for the person who chose the file — "that DOCX expands
+        // to far more than a document should" tells them what to do next. Anything else
+        // here is a library's internals: mammoth and pdf-parse describe their own
+        // structures, and a decompression guard is exactly the surface where an
+        // attacker probes with malformed input to see what the parser says back.
+        if (!(err instanceof UnsafeUploadError)) {
+          console.error('[draft] job file could not be read for user', userId, err);
+        }
         return reject({
           problem: 'file-unreadable',
-          message: `Could not read that file: ${
-            err instanceof Error ? err.message.slice(0, 200) : 'unknown error'
-          }`,
+          message:
+            err instanceof UnsafeUploadError
+              ? `Could not read that file: ${err.message}`
+              : 'That file could not be read. If it is a PDF, make sure it is not a scan; otherwise try a DOCX, or paste the text instead.',
           status: 422,
         });
       }

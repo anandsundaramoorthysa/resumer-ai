@@ -15,6 +15,7 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import {
   MAX_UPLOAD_BYTES,
+  UnsafeUploadError,
   extractUploadText,
   formatFromFile,
 } from '@/lib/import/text';
@@ -89,11 +90,18 @@ export async function POST(req: NextRequest) {
       truncated,
     });
   } catch (err) {
+    // Kept identical to the draft route's rule on purpose: these two are the only
+    // places a user hands this app a file, and if they disagree about what an error
+    // may say, the safer one is one refactor from being "corrected" to match the other.
+    if (!(err instanceof UnsafeUploadError)) {
+      console.error('[import] upload could not be read for user', session.user.id, err);
+    }
     return Response.json(
       {
-        error: `Could not read that file: ${
-          err instanceof Error ? err.message.slice(0, 200) : 'unknown error'
-        }`,
+        error:
+          err instanceof UnsafeUploadError
+            ? `Could not read that file: ${err.message}`
+            : 'That file could not be read. If it is a PDF, make sure it is not a scan; otherwise try a DOCX.',
       },
       { status: 422 },
     );
