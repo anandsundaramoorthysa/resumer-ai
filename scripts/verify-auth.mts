@@ -11,10 +11,14 @@
  */
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
+import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
+import { db } from '../lib/db';
+import { users } from '../lib/db/schema';
 import { issueToken, consumeToken, hashToken } from '../lib/auth/tokens';
 import { rateLimit, clearAttempts } from '../lib/auth/rate-limit';
 import { hashPassword, verifyPassword } from '../lib/auth/password';
+import { sessionSurvivesReset } from '../lib/auth/session-validity';
 
 const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
 
@@ -119,6 +123,110 @@ check(
   'and the old one no longer does',
 );
 
+/* ----------------------------------- sessions after a password reset ---- */
+
+/**
+ * Changing the password used not to end anybody's session.
+ *
+ * Sessions are stateless JWTs, so there is no row to delete: the token in whoever's
+ * cookie jar kept working for its full lifetime, and the user who reset *because* they
+ * believed they were compromised was not actually safe afterwards. Nothing about that
+ * was visible — the reset succeeded, the new password worked, the old session also kept
+ * working.
+ *
+ * What is reproduced here is the sequence against the real column: a session that
+ * existed before the reset, the reset itself as `resetPasswordAction` performs it, and
+ * the decision `auth.ts` makes on the next request.
+ *
+ * The write and the reads go through Drizzle rather than the raw `sql` used elsewhere
+ * in this file, because that is the round trip auth.ts actually performs and the column
+ * is `timestamp` WITHOUT time zone. Drizzle writes and re-reads it as UTC; a raw
+ * postgres.js read of the same column returns it as local time, which on this machine
+ * is five and a half hours in the past — and a cut-off in the past invalidates nothing
+ * while looking exactly like a working check. That is the silent failure this whole
+ * section exists to catch, so it is asserted directly below.
+ */
+const SESSION_EMAIL = EMAIL.replace('zzauthcheck-', 'zzauthcheck-sessions-');
+const [sessionUser] = await sql<{ id: string; sessions_valid_from: Date | null }[]>`
+  insert into "user" (id, email, name, password_hash, "emailVerified")
+  values (${randomUUID()}, ${SESSION_EMAIL}, 'ZZ Sessions',
+          ${await hashPassword('a phrase before the reset')}, now())
+  returning id, sessions_valid_from`;
+
+check(
+  sessionUser.sessions_valid_from === null,
+  'a fresh account has no reset recorded, so no session is invalidated by the column existing',
+);
+
+/** What the `session` callback reads on every request. */
+async function currentCutoff(): Promise<Date | null> {
+  const [row] = await db
+    .select({ sessionsValidFrom: users.sessionsValidFrom })
+    .from(users)
+    .where(eq(users.id, sessionUser.id))
+    .limit(1);
+  return row?.sessionsValidFrom ?? null;
+}
+
+// The token this user is already carrying, stamped when they signed in.
+const existingSessionMintedAt = Date.now();
+
+const beforeReset = await currentCutoff();
+check(
+  sessionSurvivesReset(existingSessionMintedAt, beforeReset),
+  'and that session is accepted while no reset has happened',
+);
+check(
+  sessionSurvivesReset(undefined, beforeReset),
+  'as is one minted before this stamp existed at all — nobody is signed out on deploy',
+);
+
+// The reset, exactly as resetPasswordAction writes it.
+await new Promise((r) => setTimeout(r, 5));
+const resetAt = new Date();
+await db
+  .update(users)
+  .set({
+    passwordHash: await hashPassword('a phrase set by the reset'),
+    emailVerified: resetAt,
+    sessionsValidFrom: resetAt,
+  })
+  .where(eq(users.id, sessionUser.id));
+
+const resetCutoff = await currentCutoff();
+
+check(resetCutoff !== null, 'the reset records when it happened');
+check(
+  resetCutoff !== null && Math.abs(resetCutoff.getTime() - resetAt.getTime()) < 1000,
+  `the stored cut-off reads back as the instant it was written (off by ${
+    resetCutoff ? resetCutoff.getTime() - resetAt.getTime() : 'n/a'
+  }ms)`,
+);
+check(
+  !sessionSurvivesReset(existingSessionMintedAt, resetCutoff),
+  'the session that existed before the reset is refused — this is the whole fix',
+);
+check(
+  !sessionSurvivesReset(undefined, resetCutoff),
+  'and so is an unstamped one, which cannot prove it is newer than the reset',
+);
+check(
+  sessionSurvivesReset(Date.now(), resetCutoff),
+  'while signing in again with the new password works immediately',
+);
+
+// A reset on one account must not sign anybody else out.
+const [bystander] = await db
+  .select({ sessionsValidFrom: users.sessionsValidFrom })
+  .from(users)
+  .where(eq(users.id, created.id))
+  .limit(1);
+check(
+  bystander.sessionsValidFrom === null &&
+    sessionSurvivesReset(existingSessionMintedAt, bystander.sessionsValidFrom),
+  'another account, untouched, keeps its sessions',
+);
+
 /* ------------------------------------------- pre-hijack account takeover ---- */
 
 /**
@@ -190,7 +298,8 @@ check(
 
 /* -------------------------------------------------------------- cleanup ---- */
 
-await sql`delete from "user" where id in (${created.id}, ${dormant.id}, ${ownedByUser.id})`;
+await sql`delete from "user"
+          where id in (${created.id}, ${dormant.id}, ${ownedByUser.id}, ${sessionUser.id})`;
 await sql`delete from auth_token where identifier in (${EMAIL}, ${'other-' + EMAIL})`;
 await sql`delete from auth_attempt where subject in (${'email:' + EMAIL}, ${'ip:' + IP}, ${'email:other-' + EMAIL})`;
 

@@ -18,6 +18,7 @@ import {
 } from '../lib/auth/email-policy';
 import { hashToken } from '../lib/auth/tokens';
 import { linkedAccountPatch } from '../lib/auth/account-linking';
+import { sessionSurvivesReset } from '../lib/auth/session-validity';
 import { suite, test, assert } from './harness.mjs';
 
 suite('password hashing', () => {
@@ -200,6 +201,44 @@ suite('account linking and the password it may not bless', () => {
     for (const prior of [null, undefined, new Date()]) {
       const patch = linkedAccountPatch(prior);
       if ('passwordHash' in patch) assert.equal(patch.passwordHash, null);
+    }
+  });
+});
+
+/* ------------------------------- sessions after a password reset ---- */
+
+suite('session validity after a reset', () => {
+  const RESET_AT = new Date('2026-03-01T12:00:00.000Z');
+
+  test('an account that has never reset keeps every session', () => {
+    // Null must mean "no reset has happened", not "invalidate everything" — otherwise
+    // adding the column signs every existing user out on deploy.
+    assert(sessionSurvivesReset(Date.now(), null), 'a stamped token');
+    assert(sessionSurvivesReset(undefined, null), 'and one from before the stamp existed');
+    assert(sessionSurvivesReset(0, undefined), 'and one with no time on it at all');
+  });
+
+  test('a session minted before the reset is refused', () => {
+    assert(
+      !sessionSurvivesReset(RESET_AT.getTime() - 1, RESET_AT),
+      'one millisecond before is before',
+    );
+    assert(
+      !sessionSurvivesReset(RESET_AT.getTime() - 14 * 24 * 3600 * 1000, RESET_AT),
+      'a fortnight-old token is exactly what a reset is meant to kill',
+    );
+  });
+
+  test('a session minted after the reset is kept', () => {
+    assert(sessionSurvivesReset(RESET_AT.getTime(), RESET_AT), 'the same instant survives');
+    assert(sessionSurvivesReset(RESET_AT.getTime() + 1, RESET_AT), 'and anything after it');
+  });
+
+  test('a token carrying no issue time cannot outlive a reset', () => {
+    // Tokens minted before this shipped have no `authAt`. They predate the reset,
+    // because everything does, so they must not be given the benefit of the doubt.
+    for (const junk of [undefined, null, '1772000000000', NaN, {}, Infinity]) {
+      assert(!sessionSurvivesReset(junk, RESET_AT), `should refuse ${String(junk)}`);
     }
   });
 });

@@ -22,6 +22,13 @@
  * email/password sign-in is a requirement. Nothing else depends on the session table:
  * the GitHub access token is read from the `account` row by user id, not from the
  * session, so the sync is unaffected.
+ *
+ * What a stateless session DOES cost is revocation: there is no row to delete, so a
+ * password reset could not end the sessions that existed before it, and a token issued
+ * to an attacker kept working for its full lifetime after the victim did the one thing
+ * they were told to do. `users.sessionsValidFrom` is the answer — a reset records the
+ * instant, every token records when it was minted, and the `session` callback below
+ * refuses the ones that predate it.
  */
 
 import NextAuth from 'next-auth';
@@ -36,6 +43,7 @@ import { accounts, sessions, users, verificationTokens } from '@/lib/db/schema';
 import { verifyPassword } from '@/lib/auth/password';
 import { normalizeEmail } from '@/lib/auth/email-policy';
 import { linkedAccountPatch } from '@/lib/auth/account-linking';
+import { sessionSurvivesReset } from '@/lib/auth/session-validity';
 import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
 import { encryptIfPossible } from '@/lib/auth/secret-box';
 import { isGitHubAppConfigured } from '@/lib/github/app';
@@ -227,11 +235,53 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true;
     },
     async jwt({ token, user }) {
-      if (user?.id) token.sub = user.id;
+      if (user?.id) {
+        token.sub = user.id;
+        // Stamped once, when the token is minted, and never touched again — that is the
+        // whole point. Auth.js refreshes `iat` whenever it re-issues the cookie, so a
+        // token that had been alive for a fortnight would keep looking newly issued and
+        // would outlive every reset. `authAt` records when this SESSION began.
+        //
+        // Milliseconds rather than JWT's usual seconds: a reset writes
+        // `sessionsValidFrom` at full precision, and a second's rounding would bounce
+        // the user who signs in immediately after resetting.
+        token.authAt = Date.now();
+      }
       return token;
     },
     async session({ session, token }) {
-      if (token?.sub) session.user.id = token.sub;
+      if (!token?.sub) return session;
+
+      /**
+       * The cost of stateless sessions, paid here.
+       *
+       * `resetPasswordAction` changes `passwordHash`, but a JWT already in someone's
+       * cookie jar is not stored anywhere we can delete — it stays valid until it
+       * expires on its own. So the one thing a reset CAN do is record when it happened,
+       * and every session read compares against it.
+       *
+       * That is one primary-key lookup per authenticated request, which the JWT
+       * strategy was chosen to avoid. It is worth it: without it "reset your password"
+       * does not end the attacker's session, which is the single thing a user resetting
+       * a password is trying to do.
+       */
+      if (isDatabaseConfigured) {
+        const [row] = await db
+          .select({ sessionsValidFrom: users.sessionsValidFrom })
+          .from(users)
+          .where(eq(users.id, token.sub))
+          .limit(1);
+
+        if (!sessionSurvivesReset(token.authAt, row?.sessionsValidFrom)) {
+          // Auth.js gives this callback no way to say "the token is dead" — the
+          // signature returns a session, not null. A session with no user and an expiry
+          // already past is the same thing to everything downstream: every guard in this
+          // app reads `session?.user?.id`, and there is none to read.
+          return { expires: new Date(0).toISOString() };
+        }
+      }
+
+      session.user.id = token.sub;
       return session;
     },
   },
