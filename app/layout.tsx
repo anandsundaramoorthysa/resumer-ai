@@ -86,6 +86,12 @@ export default function RootLayout({
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/*
+          The rule warns that a font linked from a page loads for that page only. This is
+          the App Router root layout, which IS the document head for every page — the
+          pages/_document.js it asks for does not exist in this project and cannot.
+        */}
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link
           href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Spline+Sans+Mono:wght@400;500;600&display=swap"
           rel="stylesheet"

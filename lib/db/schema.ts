@@ -444,7 +444,7 @@ export const aiUsageDaily = pgTable(
  *                 fell back to the user's own words looks identical, in the document and
  *                 in the snapshot, to one where the model did the work.
  *
- * Bounded per user — see RUNS_KEPT_PER_USER in lib/server/draft-run-record.ts for the
+ * Bounded per user — see RUNS_KEPT_PER_USER in lib/server/draft-run.ts for the
  * number and the reasoning. This is a free Postgres tier and a diagnostic log is exactly
  * the kind of table that quietly eats it.
  */

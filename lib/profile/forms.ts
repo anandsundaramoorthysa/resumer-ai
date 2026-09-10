@@ -58,9 +58,6 @@ export interface RecordForm {
 const str = (data: Record<string, unknown>, k: string): string =>
   typeof data[k] === 'string' ? (data[k] as string) : '';
 
-const list = (data: Record<string, unknown>, k: string): string[] =>
-  Array.isArray(data[k]) ? (data[k] as string[]) : [];
-
 const joined = (parts: Array<string | undefined>, sep = ' · '): string =>
   parts.filter((p) => p && p.trim()).join(sep);
 

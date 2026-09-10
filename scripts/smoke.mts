@@ -9,7 +9,7 @@
  */
 
 import assert from 'node:assert/strict';
-import type { JobRequirement, ProfileRecord, ResumeDocument, RoleRecord } from '../lib/types';
+import type { JobRequirement, ProfileRecord, ResumeDocument } from '../lib/types';
 import { scoreKeywordCoverage } from '../lib/quality/keywords';
 import { scoreFormatting } from '../lib/quality/formatting';
 import { scoreSkillsCompleteness } from '../lib/quality/skills';
@@ -52,10 +52,6 @@ const records: ProfileRecord[] = [
     action: 'Ran technical SEO audits', scale: '4 client sites', outcome: 'organic traffic +32%',
     tags: ['seo', 'organic traffic', 'audit'], contentHash: 'h5',
   },
-];
-
-const roles: RoleRecord[] = [
-  { id: 'r1', userId: 'u1', title: 'Engineer', company: 'Acme', startDate: '2022-01', endDate: 'present', source: 'manual', contentHash: 'rh1', reviewState: 'approved' },
 ];
 
 const job: JobRequirement = {

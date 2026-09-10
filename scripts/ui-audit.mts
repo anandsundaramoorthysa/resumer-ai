@@ -1030,10 +1030,6 @@ function collapseByHost(messages: string[], label: string): string[] {
   });
 }
 
-/** The Next.js dev-mode error overlay is tooling, not the product. */
-const isDevOverlay = (cls: string, tag: string) =>
-  tag === 'nextjs-portal' || /nextjs-portal|__next-dev|nextjs__container/.test(cls);
-
 /** One measured element, as the in-page script serialised it. */
 type Measured = Record<string, string | number | boolean | null | undefined>;
 

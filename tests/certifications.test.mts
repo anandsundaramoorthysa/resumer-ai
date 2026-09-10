@@ -13,7 +13,6 @@ import {
   certificationIdentity,
   dedupeCertifications,
   mergeCertifications,
-  normalizeCertName,
   normalizeIssuer,
 } from '../lib/sync/certifications';
 import { suite, test, assert } from './harness.mjs';

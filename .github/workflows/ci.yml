@@ -1,0 +1,60 @@
+# The checks that were only ever run by hand.
+#
+# Everything below already existed as an npm script; nothing ran it unless someone
+# remembered to. This week's production faults were all caught by hand, some of them long
+# after they shipped, and the two things that would have caught the last one — the test
+# suite and the PDF harness — take under two minutes between them.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # No real credentials are available here, and none are needed: the suite is offline
+      # and the build reads these only to decide what to configure. They are deliberately
+      # unreachable values rather than secrets — a build that quietly talked to the real
+      # database from CI would be a worse problem than no CI at all.
+      DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
+      AUTH_SECRET: ci-only-placeholder-value-not-a-secret
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` and not `npm install`: the lockfile is the point of running this at all,
+      # and the project pins an esbuild override that a loose install would resolve away.
+      - run: npm ci
+
+      - name: Types
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # The regression that passed every local test while being completely broken in
+      # production: a developer machine has the native canvas binary and Netlify's Lambda
+      # does not. This harness removes it deliberately. It needs no database and no
+      # network — see scripts/verify-pdf-without-canvas.mts.
+      - name: PDF reading without the native canvas
+        run: npx tsx --tsconfig scripts/tsconfig.json scripts/verify-pdf-without-canvas.mts
+
+      # Deliberately not run here: scripts/verify-provider-cooldown.mts, verify-auth.mts
+      # and the other verify-* harnesses all need a real database. They are the checks to
+      # reach for when changing those areas, and wiring them into CI needs a throwaway
+      # Postgres, which is a bigger decision than this file should make on its own.

@@ -8,7 +8,6 @@ import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { parseRepoRef, latestCommitSha } from '@/lib/sync/github';
-import { and } from 'drizzle-orm';
 
 export interface ActionResult {
   ok: boolean;

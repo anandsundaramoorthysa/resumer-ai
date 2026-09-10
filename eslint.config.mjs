@@ -23,6 +23,14 @@ const eslintConfig = defineConfig([
     // write — the same way .netlify did before it was ignored.
     ".*/**",
   ]),
+  {
+    // CommonJS by extension and by necessity. scripts/no-canvas-preload.cjs is loaded
+    // through `node --require`, which runs before any ESM loader exists, and it patches
+    // `Module._resolveFilename` — both of which only exist in CommonJS. `require()` here
+    // is the point of the file, not a lapse.
+    files: ["**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
 ]);
 
 export default eslintConfig;
