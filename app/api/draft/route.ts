@@ -276,12 +276,6 @@ export async function POST(req: NextRequest) {
         // Cleared before anything else: an interval left running keeps the function
         // alive after the response, which on a 30-second platform is a kill.
         clearInterval(heartbeat);
-        // At most once — a second close throws.
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
 
         /*
          * Record the attempt. Here, in the `finally`, for three reasons.
@@ -291,14 +285,25 @@ export async function POST(req: NextRequest) {
          * a row — and "the runs that vanished are exactly the interesting ones" is how the
          * gap this closes came about in the first place.
          *
-         * After `controller.close()`. The user has their resume, or their error, before
-         * this write is even attempted; the bookkeeping is never in the critical path.
+         * BEFORE `controller.close()`, which is the whole reason this comment is long.
+         * The obvious order is the other way round — close the stream, let the user have
+         * their resume, then do the bookkeeping off the critical path — and that is how
+         * this was first written. It recorded nothing. Netlify freezes the execution
+         * environment the moment the response ends, so an `await` that outlives the
+         * stream is not slow, it simply never resumes: no row, and not even the catch
+         * below, because the process is suspended mid-await. The first production draft
+         * after the deploy failed at retrieval and left exactly the silence this table
+         * was added to end. Background functions are not on the Free plan, so there is
+         * nowhere else to put it. It costs the user one INSERT — tens of milliseconds
+         * against a draft measured in tens of seconds.
          *
          * Inside its own try. The same rule the enrichment write above follows, and stated
          * there: a failure to write a note about a draft must never turn a finished draft
          * into an error frame. It matters more here, because this write runs on the
          * failure path too — a broken observability table that swallowed the failure it
-         * was describing would be worse than the silence it replaced.
+         * was describing would be worse than the silence it replaced. Now that it also
+         * runs before the close, the guard has a second job: whatever happens here, the
+         * user still gets their stream ended cleanly.
          *
          * `errorDetail` is stored, never sent. Whatever the catch above logged for a
          * developer is kept for the owner and stays out of every SSE frame, for the
@@ -317,6 +322,13 @@ export async function POST(req: NextRequest) {
           });
         } catch (err) {
           console.error('[draft] could not record the draft run for user', userId, err);
+        }
+
+        // At most once — a second close throws.
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
         }
       }
     },
