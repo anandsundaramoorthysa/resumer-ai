@@ -129,6 +129,23 @@ export function DraftConsole() {
       const decoder = new TextDecoder();
       let buffer = '';
 
+      /**
+       * Whether the server ever said how the draft ended.
+       *
+       * A draft ends in exactly one of two events: `complete` or `error`. A stream that
+       * closes without either is not a finished draft — it is a server that stopped
+       * talking, which on a serverless host almost always means the platform killed the
+       * function at its time limit mid-draft. The loop below used to treat that close
+       * exactly like success: it broke out, the button re-enabled, and the progress list
+       * froze on whatever step was running, with no result and no error. In production
+       * that looked like a draft that simply never finished — nothing said it had failed,
+       * or that trying again was the thing to do.
+       *
+       * Tracked in a local rather than read back from state, because the state setters
+       * below are asynchronous and would not yet reflect this read loop's own events.
+       */
+      let ended = false;
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -148,11 +165,21 @@ export function DraftConsole() {
           if (name === 'stage') {
             setEvents((prev) => [...prev, payload as PipelineEvent]);
           } else if (name === 'complete') {
+            ended = true;
             setResult(payload as CompletePayload);
           } else if (name === 'error') {
+            ended = true;
             setError(payload.message ?? 'Draft failed.');
           }
         }
+      }
+
+      if (!ended) {
+        setError(
+          'The connection closed before the draft finished, so nothing was saved. This ' +
+            'usually means the draft ran past the server’s time limit — trying again ' +
+            'normally works, and a shorter job description finishes faster.',
+        );
       }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {

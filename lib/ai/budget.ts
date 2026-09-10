@@ -39,15 +39,30 @@ export class BudgetExceededError extends Error {
  * a second early with the best version we have is strictly better than being terminated
  * a second late with nothing, so the loop watches the clock as well as the spend.
  *
- * Defaults are platform-aware because the ceilings genuinely differ:
- *   Netlify streaming functions cap at 60s; Vercel functions here allow 300s.
+ * Defaults are platform-aware because the ceilings genuinely differ — and on Netlify
+ * they differ by PLAN, which is the part this comment used to get wrong. It said
+ * "Netlify streaming functions cap at 60s", which is true of credit-based accounts. This
+ * site is on a Free plan, and its production function log shows a draft killed at
+ * `Duration: 30000 ms`. With a 50s budget against a 30s ceiling, the graceful stop above
+ * never once got to run: every draft in production was killed mid-call, and the account
+ * that exists to use this app had no resume snapshots at all.
+ *
+ * Measure the ceiling from your own function logs; do not take it from the docs.
+ * Vercel functions here allow 300s.
  */
 function defaultTimeBudgetMs(): number {
   const override = Number(process.env.MAX_DRAFT_SECONDS);
   if (Number.isFinite(override) && override > 0) return override * 1000;
 
-  // Netlify sets NETLIFY=true in its build and function runtimes.
-  if (process.env.NETLIFY) return 50_000; // 10s of headroom under their 60s cap
+  // Netlify sets NETLIFY=true in its BUILD, but not in the function runtime — so in
+  // practice MAX_DRAFT_SECONDS is what decides this there, and it must be set.
+  //
+  // When this branch does run, the plan is unknown, and the two ways to be wrong are not
+  // equally expensive: budgeting low on a 60s plan costs a quality iteration or two,
+  // while budgeting high on a 30s plan costs the entire resume. So it assumes the lower
+  // ceiling — 20s, which leaves about 4s for the work done before the budget starts and a
+  // margin under 30.
+  if (process.env.NETLIFY) return 20_000;
   return 280_000; // 20s of headroom under Vercel's 300s maxDuration
 }
 
