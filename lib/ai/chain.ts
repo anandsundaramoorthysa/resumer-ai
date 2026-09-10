@@ -137,20 +137,66 @@ function isTimeoutError(message: string): boolean {
 }
 
 /**
+ * A provider saying it is overloaded — a 503, in its own words.
+ *
+ * This was the gap. In production the first provider answered every structured call
+ * with "This model is currently experiencing high demand. Spikes in demand are usually
+ * temporary. Please try again later." — and that is neither a quota error nor a timeout,
+ * so nothing benched it. The chain concluded the provider had merely been unlucky and
+ * asked it again through the text path, that second attempt spent the rest of the
+ * deadline, and the provider that would have answered in three seconds was never reached.
+ * Every draft on a 30-second function failed that way.
+ *
+ * The signatures are deliberately specific. A bare "503" or "unavailable" would also
+ * match a token count or an unrelated message, and a false match benches a healthy
+ * provider — the same failure, pointed the other way.
+ */
+const OVERLOAD_SIGNATURES = [
+  'high demand',
+  'overloaded',
+  'try again later',
+  'service unavailable',
+  'temporarily unavailable',
+];
+
+function isOverloadError(message: string): boolean {
+  const m = message.toLowerCase();
+  return OVERLOAD_SIGNATURES.some((s) => m.includes(s));
+}
+
+/**
  * @param cutShort true when the caller's overall deadline, not the provider, ended the
  * attempt. That says nothing about the provider's health, so it must not earn a
  * cooldown — otherwise a tight budget would slowly bench every provider we have.
  */
+export type BenchReason = 'quota' | 'overload' | 'slow';
+
+/**
+ * Why a failure should bench its provider — or null when it says nothing about the
+ * provider's health at all.
+ *
+ * Pure and exported so the decision can be pinned by a test; noteFailure below only
+ * applies it. That this was not testable is how a 503 went unrecognised: nothing
+ * exercised the classification, so nothing noticed a whole class was missing.
+ *
+ * An overload benches even when our deadline cut the attempt short. `cutShort` exists so
+ * a tight budget cannot slowly bench every provider on timeouts it caused itself — but
+ * an overload is the provider telling us, not our clock.
+ */
+export function benchReason(message: string, cutShort = false): BenchReason | null {
+  if (isQuotaError(message)) return 'quota';
+  if (isOverloadError(message)) return 'overload';
+  if (!cutShort && isTimeoutError(message)) return 'slow';
+  return null;
+}
+
 function noteFailure(id: ProviderId, message: string, cutShort = false): boolean {
-  if (isQuotaError(message)) {
-    cooldownUntil.set(id, Date.now() + COOLDOWN_MS);
-    return true;
-  }
-  if (!cutShort && isTimeoutError(message)) {
-    cooldownUntil.set(id, Date.now() + SLOW_COOLDOWN_MS);
-    return true;
-  }
-  return false;
+  const reason = benchReason(message, cutShort);
+  if (!reason) return false;
+  // Overload is "usually temporary" in the provider's own words, so it gets the shorter
+  // cooldown; quota stays out for the longer one.
+  cooldownUntil.set(id, Date.now() + (reason === 'quota' ? COOLDOWN_MS : SLOW_COOLDOWN_MS));
+  return true;
 }
 
 /**

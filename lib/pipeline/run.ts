@@ -360,7 +360,15 @@ function countByType(records: ProfileRecord[]): Record<string, number> {
 }
 
 function describeAiError(err: unknown): string {
-  if (err instanceof AllProvidersFailedError) return err.message;
+  // Not err.message. That names every provider and quotes its raw error — written for a
+  // developer — and this string goes straight into a progress row the user reads, where
+  // it showed "Every configured AI provider failed: Gemini (This model is currently
+  // experiencing high demand…". Nothing diagnostic is lost: the caller rethrows the
+  // original error and the route logs it in full, attempts and all, which is the log
+  // line that found the overload gap in the first place.
+  if (err instanceof AllProvidersFailedError) {
+    return 'The AI providers are busy or unavailable right now. Nothing was saved — try again in a minute.';
+  }
   if (err instanceof BudgetExceededError) return err.message;
   return `Something went wrong: ${short(err)}`;
 }
