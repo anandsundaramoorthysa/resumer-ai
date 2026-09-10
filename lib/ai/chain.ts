@@ -16,6 +16,12 @@ import { z } from 'zod';
 
 import { availableProviders, type ProviderConfig, type ProviderId } from './models';
 import { BudgetExceededError, DraftBudget } from './budget';
+import {
+  isCoolingDown,
+  loadCooldowns,
+  noteBench,
+  type BenchReason,
+} from './cooldowns';
 
 export class AllProvidersFailedError extends Error {
   constructor(public readonly attempts: Array<{ provider: string; error: string }>) {
@@ -83,26 +89,22 @@ interface Attempt {
 }
 
 /**
- * Short-lived cooldown for providers that report quota or rate-limit errors.
+ * Short-lived cooldown for providers that report quota, overload or a timeout.
  *
  * Without this, an exhausted provider sitting at the front of the chain is retried on
  * every single call — measured as the dominant cost once a free tier ran out, because
  * each doomed attempt burned its full timeout before falling through. A provider that
  * just told us it's out of quota will still be out of quota a second later, so we skip
  * it for a while instead of asking again.
- */
-const cooldownUntil = new Map<ProviderId, number>();
-const COOLDOWN_MS = Number(process.env.AI_PROVIDER_COOLDOWN_MS ?? 120_000);
-
-/**
- * A shorter cooldown for providers that simply ran out of time.
  *
- * Measured: Together AI answers correctly but takes 8-11s for an extraction, so under
- * a per-step budget it times out every single time — and, being neither a quota error
- * nor a hard failure, it would otherwise be re-tried at full cost on every call. One
- * timeout is enough evidence to stop asking for a while.
+ * The map that held this used to live here, in module memory, and that is why the fix
+ * kept not working on Netlify: the memory dies with the instance, so every cold
+ * invocation started with an empty map and paid the full lesson again. Measured this
+ * week, every single draft spent 4-13 of its 20-second budget on an overloaded Gemini
+ * before falling through. It lives in lib/ai/cooldowns.ts now, backed by a table, so one
+ * instance learning a provider is down spares the rest. What is kept here is only the
+ * decision of WHICH failures bench — `benchReason` below, which is pure and tested.
  */
-const SLOW_COOLDOWN_MS = Number(process.env.AI_SLOW_COOLDOWN_MS ?? 60_000);
 
 /** The smallest attempt worth starting; below this a call cannot realistically land. */
 const MIN_ATTEMPT_MS = 800;
@@ -165,11 +167,10 @@ function isOverloadError(message: string): boolean {
 }
 
 /**
- * @param cutShort true when the caller's overall deadline, not the provider, ended the
- * attempt. That says nothing about the provider's health, so it must not earn a
- * cooldown — otherwise a tight budget would slowly bench every provider we have.
+ * Re-exported from ./cooldowns, where the store that acts on it now lives. Importers of
+ * this type from lib/ai/chain — and the suite that pins `benchReason` — keep working.
  */
-export type BenchReason = 'quota' | 'overload' | 'slow';
+export type { BenchReason };
 
 /**
  * Why a failure should bench its provider — or null when it says nothing about the
@@ -182,6 +183,10 @@ export type BenchReason = 'quota' | 'overload' | 'slow';
  * An overload benches even when our deadline cut the attempt short. `cutShort` exists so
  * a tight budget cannot slowly bench every provider on timeouts it caused itself — but
  * an overload is the provider telling us, not our clock.
+ *
+ * @param cutShort true when the caller's overall deadline, not the provider, ended the
+ * attempt. That says nothing about the provider's health, so it must not earn a
+ * cooldown — otherwise a tight budget would slowly bench every provider we have.
  */
 export function benchReason(message: string, cutShort = false): BenchReason | null {
   if (isQuotaError(message)) return 'quota';
@@ -193,9 +198,10 @@ export function benchReason(message: string, cutShort = false): BenchReason | nu
 function noteFailure(id: ProviderId, message: string, cutShort = false): boolean {
   const reason = benchReason(message, cutShort);
   if (!reason) return false;
-  // Overload is "usually temporary" in the provider's own words, so it gets the shorter
-  // cooldown; quota stays out for the longer one.
-  cooldownUntil.set(id, Date.now() + (reason === 'quota' ? COOLDOWN_MS : SLOW_COOLDOWN_MS));
+  // Quota gets the longer cooldown; overload — "usually temporary" in the provider's own
+  // words — and slow get the shorter one. noteBench applies that and, unlike the Map this
+  // replaced, tells the other instances.
+  noteBench(id, reason);
   return true;
 }
 
@@ -212,11 +218,18 @@ function attemptWindow(
   return { ms, viable: ms >= MIN_ATTEMPT_MS, cutShort: left < perAttemptMs };
 }
 
-/** Providers that are configured and not currently cooling down. */
-function usableProviders(): ProviderConfig[] {
-  const all = availableProviders();
+/**
+ * Providers that are configured and not currently cooling down.
+ *
+ * Synchronous, and reads only this process's memory. `loadCooldowns()` is what brings
+ * that memory up to date with the other instances, and it is awaited once per call —
+ * see the note where it is called. Exported so a verification script can show the chain
+ * skipping a provider benched by a different process.
+ */
+export function usableProviders(): ProviderConfig[] {
   const now = Date.now();
-  const ready = all.filter((p) => (cooldownUntil.get(p.id) ?? 0) <= now);
+  const all = availableProviders();
+  const ready = all.filter((p) => !isCoolingDown(p.id, now));
   // If everything is cooling down, try anyway rather than failing outright — a stale
   // cooldown must never be the reason a request gets no answer at all.
   return ready.length > 0 ? ready : all;
@@ -241,6 +254,13 @@ export async function generateStructured<T>(args: {
     deadlineMs,
   } = options;
   const deadlineAt = deadlineFrom(deadlineMs);
+
+  // Once per call, before the order is chosen — never once per attempt. A round trip in
+  // front of each of five providers would cost more than the benching saves, and this one
+  // is usually served from a few-second in-process cache anyway. It cannot throw: with no
+  // database, or a failing one, it resolves having changed nothing.
+  await loadCooldowns();
+
   const providers = usableProviders();
   const attempts: Attempt[] = [];
 
@@ -412,10 +432,13 @@ export async function generatePlainText(args: {
     deadlineMs,
   } = options;
   const deadlineAt = deadlineFrom(deadlineMs);
+
+  // Once for the call, not once per provider — same reasoning as generateStructured.
+  await loadCooldowns();
+
   const providers = usableProviders();
   const attempts: Attempt[] = [];
 
-  // Once for the call, not once per provider — same reasoning as generateStructured.
   budget?.assertCanSpend();
 
   for (const cfg of providers) {

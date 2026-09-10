@@ -447,3 +447,32 @@ export const syncJobs = pgTable(
   },
   (t) => [index('syncjob_user_idx').on(t.userId, t.createdAt)],
 );
+
+/**
+ * Providers benched by a failure — lib/ai/chain.ts.
+ *
+ * The cooldown used to live only in a module-level Map, and on a serverless host that
+ * memory dies with the instance: every cold invocation started with an empty map and
+ * paid the full cost of the lesson again. Measured this week: `gemini-flash-latest` was
+ * overloaded for hours, it is first in the routing order, and every single draft spent
+ * 4-13 seconds being told "This model is currently experiencing high demand" before
+ * falling through to a provider that answered in about three — out of a 20-second draft
+ * budget, under a 30-second function limit. Here, one instance learning a provider is
+ * down spares all the others.
+ *
+ * The one table with no userId, deliberately. NFR-6 is about user data being separable;
+ * a provider's health is a property of the provider, and scoping it per user would mean
+ * every user re-learning the same outage at their own expense.
+ *
+ * `until` is timestamptz, not a bare timestamp: a `timestamp without time zone` is
+ * written as a UTC wall clock and read back as a local one, so on a machine at +05:30
+ * every cooldown would come back either five hours long or already expired. The whole
+ * value of this row is an instant two minutes from now being right.
+ */
+export const aiProviderCooldown = pgTable('ai_provider_cooldown', {
+  /** A ProviderId from lib/ai/models.ts — 'google', 'groq', … */
+  providerId: text('provider_id').primaryKey(),
+  until: timestamp('until', { withTimezone: true }).notNull(),
+  reason: text('reason').notNull(), // quota | overload | slow
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
