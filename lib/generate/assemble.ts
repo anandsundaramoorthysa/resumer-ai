@@ -308,6 +308,18 @@ export interface AssembleInput {
 export interface AssembleResult {
   document: ResumeDocument;
   rewriteStats: { attempted: number; accepted: number; rejected: number };
+  /**
+   * WHICH bullets the grounding check refused a rewrite for, not just how many.
+   *
+   * The count alone was already reported to the user ("kept your original wording on 3
+   * bullet(s)"), and it is the least useful half of what happened here. A refusal names
+   * a specific record where the model, reading the posting, believed it could say
+   * something stronger and was stopped because the profile does not state it — which is
+   * as close as this system gets to knowing which single fact would most improve the
+   * resume. lib/profile/enrichment.ts turns each one into a question; before that, the
+   * identity was computed inside the loop below and dropped on the floor.
+   */
+  rejectedRewrites: Array<{ recordId: string; text: string }>;
   /** Sections that were built and then cut for space, in the order they were cut. */
   droppedForSpace: SectionKey[];
 }
@@ -342,6 +354,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
   // --- Grounded rewrite (REQ-4.4) --------------------------------------------
   const rewrites = new Map<string, string>();
   const stats = { attempted: 0, accepted: 0, rejected: 0 };
+  const rejectedRewrites: AssembleResult['rejectedRewrites'] = [];
 
   if (shouldRewrite && trimmedBullets.length > 0 && job) {
     stats.attempted = trimmedBullets.length;
@@ -359,11 +372,18 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
         // Verify, don't trust (grounding.ts).
         const verdict = acceptRewriteOrFallback(b.rewritten, source.text);
         rewrites.set(source.id, verdict.text);
-        if (verdict.accepted) stats.accepted += 1;
-        else stats.rejected += 1;
+        if (verdict.accepted) {
+          stats.accepted += 1;
+        } else {
+          stats.rejected += 1;
+          rejectedRewrites.push({ recordId: source.id, text: source.text });
+        }
       }
     } catch {
       // A failed rewrite is not a failed resume — fall back to the user's own words.
+      // Nothing is recorded as rejected here: a provider that timed out says nothing
+      // about whether the bullet could have been strengthened, and asking the user to
+      // supply a figure because a request failed would be asking for the wrong reason.
       stats.rejected = stats.attempted;
     }
   }
@@ -574,7 +594,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     createdAt: new Date(),
   };
 
-  return { document, rewriteStats: stats, droppedForSpace };
+  return { document, rewriteStats: stats, rejectedRewrites, droppedForSpace };
 }
 
 /* -------------------------------------------------------------- page budget -- */

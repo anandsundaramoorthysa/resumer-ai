@@ -255,6 +255,70 @@ export const profileRecords = pgTable(
   ],
 );
 
+/**
+ * Questions a draft could not answer for itself — the enrichment queue.
+ *
+ * Every row is a deficiency the pipeline measured against one specific record and could
+ * not close without inventing something: a refused grounded rewrite, a bullet the
+ * evidence grader called thin, or a keyword the posting demands that the profile cannot
+ * back. The reasoning is in lib/profile/enrichment.ts; this is only where it is kept.
+ *
+ * Three columns carry the whole policy:
+ *
+ *   `subject_key`  one open question per subject, not per complaint. Unique with
+ *                  user_id, which is what stops the next draft queuing the same gap
+ *                  again — the same job `content_hash` does for a profile record.
+ *   `state`        open | answered | dismissed. A settled question is a tombstone, not
+ *                  a deletion, for the reason lib/server/sync-review.ts gives about
+ *                  rejected proposals: a queue that refills with things you already
+ *                  decided is one you stop reading.
+ *   `record_id`    the record the answer is written into, with the delete cascading.
+ *                  A question about a fact that no longer exists is noise.
+ *
+ * Nothing here is a claim: a question is the absence of one. That is why the table sits
+ * outside `profile_record` and why `loadProfileForUser` neither knows nor cares about it.
+ */
+export const enrichmentQuestions = pgTable(
+  'enrichment_question',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Null for a skill gap, which is about the profile as a whole, not one row. */
+    recordId: text('record_id').references(() => profileRecords.id, {
+      onDelete: 'cascade',
+    }),
+    /** bullet:<recordId> | project:<recordId> | skill:<keyword> */
+    subjectKey: text('subject_key').notNull(),
+    kind: text('kind').notNull(), // bullet | project | skill
+    /** The keyword, for a skill question. Empty otherwise. */
+    topic: text('topic').notNull().default(''),
+    /** The user's own words the question is about — never generated text. */
+    quote: text('quote').notNull().default(''),
+    /** Where those words live: "Engineer — Acme", a project's stack, the posting. */
+    context: text('context').notNull().default(''),
+    /** The signal's own account of what is absent, verbatim. */
+    reason: text('reason').notNull().default(''),
+    /** Impact, highest first — see IMPACT in lib/profile/enrichment.ts. */
+    priority: integer('priority').notNull().default(0),
+    state: text('state').notNull().default('open'), // open | answered | dismissed
+    /** What the answer became, so a fact can be traced back to the question. */
+    answerRecordId: text('answer_record_id'),
+    /** The answer in the user's own words, kept whether or not a record stored it. */
+    answer: text('answer').notNull().default(''),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    settledAt: timestamp('settled_at'),
+  },
+  (t) => [
+    index('enrichment_user_state_idx').on(t.userId, t.state),
+    uniqueIndex('enrichment_user_subject_idx').on(t.userId, t.subjectKey),
+  ],
+);
+
 /** REQ-1.3 — reserved for Phase 10 autofill. Nothing reads these yet. */
 export const applicationFormFields = pgTable('application_form_fields', {
   userId: text('user_id')

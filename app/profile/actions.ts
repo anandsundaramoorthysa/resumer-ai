@@ -13,6 +13,11 @@ import {
   rejectProposedRecords,
   rejectProposedRoles,
 } from '@/lib/server/sync-review';
+import {
+  answerEnrichmentQuestion,
+  dismissEnrichmentQuestion,
+} from '@/lib/server/enrichment';
+import type { Result } from './record-actions';
 
 async function requireUserId(): Promise<string> {
   const session = await auth();
@@ -101,5 +106,43 @@ export async function approveAllSynced(): Promise<void> {
 export async function rejectAllSynced(): Promise<void> {
   const userId = await requireUserId();
   await decideAllProposed(userId, 'rejected');
+  refresh();
+}
+
+/* ------------------------------- answering what the last draft could not ---- */
+
+/**
+ * The third queue on this page, and its actions live here with the other two on purpose.
+ *
+ * All three are the same transaction between the system and the person: something is
+ * outstanding, and only they can settle it. The review queue asks "is this yours?", the
+ * flagged list asks "is this still yours?", and this one asks for the fact that no
+ * amount of rewriting could invent. Splitting them across files would be the first step
+ * toward splitting them across screens, and a user who has learned to check one would
+ * have two they never see.
+ *
+ * The rules — when a question appears, when it disappears, what an answer becomes — are
+ * in lib/server/enrichment.ts, beside the writes that apply them.
+ */
+export async function answerQuestion(
+  questionId: string,
+  answer: { scale?: string; outcome?: string; text?: string },
+): Promise<Result> {
+  const userId = await requireUserId();
+  try {
+    await answerEnrichmentQuestion(userId, questionId, answer);
+    refresh();
+    return { ok: true, message: 'Saved to your profile.' };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : 'Something went wrong.',
+    };
+  }
+}
+
+export async function skipQuestion(questionId: string): Promise<void> {
+  const userId = await requireUserId();
+  await dismissEnrichmentQuestion(userId, questionId);
   refresh();
 }

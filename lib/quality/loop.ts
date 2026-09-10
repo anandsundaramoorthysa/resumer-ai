@@ -22,7 +22,7 @@ import { scoreKeywordCoverage, KEYWORD_GATE_THRESHOLD } from './keywords';
 import { scoreFormatting } from './formatting';
 import { combinedFormattingScore, scoreLength } from './length';
 import { scoreSkillsCompleteness } from './skills';
-import { scoreEvidence } from './evidence';
+import { scoreEvidence, type EvidenceResult } from './evidence';
 import { BudgetExceededError, type DraftBudget } from '../ai/budget';
 
 export const PASS_THRESHOLD = 8.5;
@@ -38,6 +38,17 @@ export interface ScoreBreakdown {
   result: QualityGateResult;
   /** Gaps that no amount of rewriting can close — surfaced verbatim to the user. */
   genuineGaps: string[];
+  /**
+   * The evidence grader's own findings, kept structured.
+   *
+   * They are already flattened into `result.critiques` as `"<text>" — <problem>`, which
+   * is the right shape for the revision pass and the wrong one for anything else: the
+   * only way back to the section, the index and the problem is to parse the sentence.
+   * lib/profile/enrichment.ts needs the problem verbatim to say what is missing and the
+   * text to find the record it belongs to, so the structure is carried rather than
+   * reconstructed.
+   */
+  weakBullets: EvidenceResult['weakBullets'];
 }
 
 /**
@@ -144,7 +155,7 @@ export async function scoreDocument(
     critiques,
   };
 
-  return { result, genuineGaps: skills.genuineGaps };
+  return { result, genuineGaps: skills.genuineGaps, weakBullets: evidence.weakBullets };
 }
 
 /**
@@ -181,6 +192,16 @@ export interface GateOutcome {
   document: ResumeDocument;
   result: QualityGateResult;
   genuineGaps: string[];
+  /**
+   * Every weak bullet any iteration reported, deduplicated by text.
+   *
+   * Accumulated across the whole loop rather than taken from the winning iteration, and
+   * the reason is `unimprovable`: once a revision pass fails on a bullet, the scorer is
+   * told to stop reporting it, so the LAST iteration's list is systematically missing
+   * exactly the bullets that could not be strengthened from the facts available — which
+   * are the ones worth asking the user about. The union restores them.
+   */
+  weakBullets: ScoreBreakdown['weakBullets'];
   /** Every iteration's score, for the live pipeline readout (REQ-8.1). */
   history: Array<{ iteration: number; overall: number; keywordGatePassed: boolean }>;
 }
@@ -207,6 +228,10 @@ export async function runQualityGate(args: {
   // the evidence scorer stops charging for the same verdict every iteration.
   const unimprovable = new Set<string>();
 
+  // Every weak bullet seen, in the order first seen — see GateOutcome.weakBullets.
+  const weakSeen: ScoreBreakdown['weakBullets'] = [];
+  const weakTexts = new Set<string>();
+
   // Consecutive iterations whose score did not move meaningfully.
   let stagnant = 0;
   let previousOverall: number | null = null;
@@ -217,9 +242,15 @@ export async function runQualityGate(args: {
       breakdown = await scoreDocument(current, records, budget, [...unimprovable]);
     } catch (err) {
       if (err instanceof BudgetExceededError) {
-        return haltForBudget(best, current, history, err.message);
+        return haltForBudget(best, current, history, weakSeen, err.message);
       }
       throw err;
+    }
+
+    for (const w of breakdown.weakBullets) {
+      if (weakTexts.has(w.text.trim())) continue;
+      weakTexts.add(w.text.trim());
+      weakSeen.push(w);
     }
 
     breakdown.result.iterations = iteration;
@@ -240,6 +271,7 @@ export async function runQualityGate(args: {
         document: current,
         result: breakdown.result,
         genuineGaps: breakdown.genuineGaps,
+        weakBullets: weakSeen,
         history,
       };
     }
@@ -260,6 +292,7 @@ export async function runQualityGate(args: {
       return haltForNoProgress(
         best!,
         history,
+        weakSeen,
         `the last ${MAX_STAGNANT_ITERATIONS} revision passes moved the score by less than ${MIN_MEANINGFUL_GAIN}`,
       );
     }
@@ -277,6 +310,7 @@ export async function runQualityGate(args: {
         document: chosen.doc,
         result: chosen.breakdown.result,
         genuineGaps: chosen.breakdown.genuineGaps,
+        weakBullets: weakSeen,
         history,
       };
     }
@@ -286,7 +320,7 @@ export async function runQualityGate(args: {
       revision = await revise(current, breakdown.result.critiques, budget);
     } catch (err) {
       if (err instanceof BudgetExceededError) {
-        return haltForBudget(best, current, history, err.message);
+        return haltForBudget(best, current, history, weakSeen, err.message);
       }
       throw err;
     }
@@ -299,6 +333,7 @@ export async function runQualityGate(args: {
       return haltForNoProgress(
         best!,
         history,
+        weakSeen,
         'the revision pass produced a document identical to the one it was given',
       );
     }
@@ -325,6 +360,7 @@ export async function runQualityGate(args: {
     document: chosen.doc,
     result: chosen.breakdown.result,
     genuineGaps: gaps,
+    weakBullets: weakSeen,
     history,
   };
 }
@@ -342,6 +378,7 @@ export async function runQualityGate(args: {
 function haltForNoProgress(
   best: { doc: ResumeDocument; breakdown: ScoreBreakdown },
   history: GateOutcome['history'],
+  weakBullets: ScoreBreakdown['weakBullets'],
   because: string,
 ): GateOutcome {
   const gaps = best.breakdown.genuineGaps;
@@ -360,6 +397,7 @@ function haltForNoProgress(
     document: best.doc,
     result: best.breakdown.result,
     genuineGaps: gaps,
+    weakBullets,
     history,
   };
 }
@@ -368,6 +406,7 @@ function haltForBudget(
   best: { doc: ResumeDocument; breakdown: ScoreBreakdown } | null,
   current: ResumeDocument,
   history: GateOutcome['history'],
+  weakBullets: ScoreBreakdown['weakBullets'],
   message: string,
 ): GateOutcome {
   if (!best) {
@@ -388,6 +427,7 @@ function haltForBudget(
         haltExplanation: message,
       },
       genuineGaps: [],
+      weakBullets,
       history,
     };
   }
@@ -397,6 +437,7 @@ function haltForBudget(
     document: best.doc,
     result: best.breakdown.result,
     genuineGaps: best.breakdown.genuineGaps,
+    weakBullets,
     history,
   };
 }

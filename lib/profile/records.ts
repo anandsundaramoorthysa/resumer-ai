@@ -49,6 +49,19 @@ export const BulletInput = z.object({
 export const SkillInput = z.object({
   name: nonEmpty.max(80),
   category: z.enum(['language', 'framework', 'tool', 'platform', 'soft-skill']),
+  /**
+   * Where the user says they used this — set only by the enrichment queue, which will
+   * not add a skill without it (lib/server/enrichment.ts).
+   *
+   * Stored on the record and deliberately kept OUT of the hash and out of `tagSource`.
+   * Out of the hash so this skill still collides with the identical one a sync finds, as
+   * `identityFields` promises. Out of the tags because tags are the profile's vocabulary
+   * — `profileVocabulary` reads them, and `holdsKeyword` decides from them what a resume
+   * may claim. Feeding a free-text sentence into that would let "I used it alongside
+   * Kubernetes and Terraform" quietly evidence two skills nobody attested to, which is
+   * exactly the widening NFR-8 exists to prevent.
+   */
+  evidence: z.string().trim().max(400).optional(),
 });
 
 export const ProjectInput = z.object({
@@ -206,7 +219,11 @@ export async function createSkill(
   return insertRecord({
     userId,
     type: 'skill',
-    data: { name: parsed.name, category: parsed.category },
+    data: {
+      name: parsed.name,
+      category: parsed.category,
+      ...(parsed.evidence ? { evidence: parsed.evidence } : {}),
+    },
     hashParts: ['skill', parsed.name, parsed.category],
     tagSource: parsed.name,
   });

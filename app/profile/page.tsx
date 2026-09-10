@@ -7,6 +7,8 @@ import { profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
 import { FlaggedRecord } from './flagged-record';
 import { ProposedBulkControls, ProposedRecord } from './proposed-record';
+import { EnrichmentQuestion } from './enrichment-question';
+import { loadEnrichmentQueue } from '@/lib/server/enrichment';
 import { BulletEditor, type ExistingBullet } from './bullet-editor';
 import { RecordEditor, type EditableRecord } from './record-editor';
 import { RECORD_FORMS, describeRecord, formFor } from '@/lib/profile/forms';
@@ -105,10 +107,25 @@ export default async function ProfilePage() {
   // The gap summary is the point of this page for a profile like this one: sync cannot
   // write accomplishments that the portfolio never stated, so the hole has to be visible
   // and typeable rather than merely absent from the resume (AUDIT.md #2, #5).
+  /*
+   * `tags` is not decoration here, and leaving it out was a real fault rather than a
+   * shortcut. This object is cast to `ProfileRecord`, so the compiler stops asking what
+   * is missing from it — and `profileVocabulary` (lib/quality/skills.ts), which decides
+   * what the profile can legitimately claim, iterates exactly this field. The cast said
+   * the field was there, the row said otherwise, and the first caller to read it crashed
+   * the whole page with "r.tags is not iterable". `findProfileGaps` never touched it,
+   * which is the only reason it survived this long.
+   */
   const asRecords = active.map((r) => ({
     id: r.id,
     type: r.type,
+    source: r.source,
+    contentHash: r.contentHash,
+    tags: r.tags ?? [],
     flaggedForRemoval: r.flaggedForRemoval,
+    reviewState: r.reviewState,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
     ...(r.data as Record<string, unknown>),
   })) as unknown as ProfileRecord[];
 
@@ -121,6 +138,15 @@ export default async function ProfilePage() {
   })) as unknown as RoleRecord[];
 
   const gaps = findProfileGaps(asRoles, asRecords);
+
+  /*
+   * The questions the last draft could not answer for itself.
+   *
+   * Read after `asRecords` is built because the queue is filtered against the live
+   * profile, not against what it stored: a gap closed in the bullet editor two sections
+   * below takes its question with it, without anything having to tell the queue.
+   */
+  const queue = await loadEnrichmentQueue(userId, asRecords);
 
   const bulletsByRole = new Map<string, ExistingBullet[]>();
   for (const r of active) {
@@ -289,13 +315,66 @@ export default async function ProfilePage() {
           </section>
         ) : null}
 
+        {/*
+          * The third queue, and the last of the three that asks something of you.
+          *
+          * Placed under the two reviews rather than beside the gap summary below,
+          * because it belongs to the same family: all three are outstanding business
+          * between you and the system, and all three empty by being answered. The
+          * difference is what it costs — the reviews are a click each, this is a
+          * sentence each — which is why only three show at a time.
+          *
+          * What separates it from the gap summary underneath is that the summary knows
+          * only that a hole exists. These know which hole, on which line, and why the
+          * last draft could not fill it: each one comes from a refused grounded rewrite,
+          * the evidence grader's own words, or a keyword the posting demanded that
+          * nothing in the profile evidences.
+          */}
+        {queue.shown.length > 0 ? (
+          <section className="mt-7 rounded-xl border border-brand bg-brand-tint/40 p-5">
+            <h2 className="font-display text-lg text-brand-dark">
+              {queue.total} question{queue.total === 1 ? '' : 's'} from your last draft
+            </h2>
+            <p className="mt-1.5 max-w-prose text-sm text-muted">
+              Each of these is a fact your resume needed and only you have. Nothing here
+              will guess one for you — that is the whole point — so the draft stopped and
+              wrote down what it was missing instead. Answering one takes a sentence, and
+              what you type is stored word for word as your own record: a sync will never
+              overwrite it, and every later draft can use it.
+              {queue.total > queue.shown.length
+                ? ` Showing the ${queue.shown.length} with the most effect on your score; the other ${
+                    queue.total - queue.shown.length
+                  } appear as you clear these.`
+                : ''}
+            </p>
+            <ul className="mt-4 space-y-3">
+              {queue.shown.map((q) => (
+                <EnrichmentQuestion
+                  key={q.id}
+                  question={{
+                    id: q.id,
+                    kind: q.kind,
+                    topic: q.topic,
+                    quote: q.quote,
+                    context: q.context,
+                    reason: q.reason,
+                    missing: q.missing,
+                  }}
+                />
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         {gaps.headline ? (
           <section className="mt-7 rounded-xl border border-warning bg-warning-tint/40 p-5">
             <h2 className="font-display text-lg text-warning">{gaps.headline}</h2>
             <p className="mt-1.5 max-w-prose text-sm text-muted">
               These are facts only you have. Your portfolio states what you worked on but
               not what changed as a result, and nothing here will invent that — so a role
-              with nothing recorded simply cannot appear on a resume.
+              with nothing recorded simply cannot appear on a resume. Generate a draft and
+              the pipeline will turn the ones that actually cost you marks into specific
+              questions, above.
             </p>
           </section>
         ) : null}
