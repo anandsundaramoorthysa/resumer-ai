@@ -320,6 +320,35 @@ export interface AssembleResult {
    * identity was computed inside the loop below and dropped on the floor.
    */
   rejectedRewrites: Array<{ recordId: string; text: string }>;
+  /**
+   * Whether the grounded rewrite actually ran, and if not, why not.
+   *
+   * `rewriteStats.rejected` cannot answer that, and it has been silently conflating two
+   * opposite findings. When the rewrite call throws, the catch below sets
+   * `rejected = attempted` — so a run where the provider never answered is, in every
+   * artefact this system keeps, indistinguishable from a run where the model tried
+   * twelve bullets and the grounding check refused all twelve. The first is an outage,
+   * the second is a thin profile, and until now the only place either was reported was a
+   * progress line reading "kept your original wording on 12 bullet(s) where a rewrite
+   * would have added something not in your profile" — which is a false statement about
+   * the user's profile whenever the truth was that a provider timed out.
+   *
+   * A failed rewrite is still not a failed resume; the fallback stays exactly as it was.
+   * This only names what happened, so lib/db/schema.ts's `draft_run` can store it and a
+   * draft that used the model can be told apart from one that quietly did not.
+   */
+  rewriteFallback: {
+    /** Bullets printed in the user's own words instead of a rewrite. */
+    count: number;
+    /** Of how many were sent. Zero when no rewrite was attempted at all. */
+    attempted: number;
+    /**
+     *   none         nothing fell back, or nothing was attempted
+     *   grounding    the model answered and the grounding check refused some of it
+     *   call-failed  the request itself threw; no bullet was ever judged
+     */
+    reason: 'none' | 'grounding' | 'call-failed';
+  };
   /** Sections that were built and then cut for space, in the order they were cut. */
   droppedForSpace: SectionKey[];
 }
@@ -355,9 +384,15 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
   const rewrites = new Map<string, string>();
   const stats = { attempted: 0, accepted: 0, rejected: 0 };
   const rejectedRewrites: AssembleResult['rejectedRewrites'] = [];
+  const rewriteFallback: AssembleResult['rewriteFallback'] = {
+    count: 0,
+    attempted: 0,
+    reason: 'none',
+  };
 
   if (shouldRewrite && trimmedBullets.length > 0 && job) {
     stats.attempted = trimmedBullets.length;
+    rewriteFallback.attempted = trimmedBullets.length;
     try {
       const { data } = await generateStructured({
         schema: RewriteSchema,
@@ -379,12 +414,23 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
           rejectedRewrites.push({ recordId: source.id, text: source.text });
         }
       }
+      if (stats.rejected > 0) {
+        rewriteFallback.count = stats.rejected;
+        rewriteFallback.reason = 'grounding';
+      }
     } catch {
       // A failed rewrite is not a failed resume — fall back to the user's own words.
       // Nothing is recorded as rejected here: a provider that timed out says nothing
       // about whether the bullet could have been strengthened, and asking the user to
       // supply a figure because a request failed would be asking for the wrong reason.
       stats.rejected = stats.attempted;
+      // What `stats.rejected` alone could not say, and what it cost to be unable to say
+      // it, is on `rewriteFallback` in AssembleResult above. The error itself is not
+      // captured: it is a provider's own text, the caller does not fail because of it,
+      // and the run either succeeds — in which case the reason slug is the whole finding
+      // — or fails later for a cause that reaches the log on its own path.
+      rewriteFallback.count = stats.attempted;
+      rewriteFallback.reason = 'call-failed';
     }
   }
 
@@ -594,7 +640,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     createdAt: new Date(),
   };
 
-  return { document, rewriteStats: stats, rejectedRewrites, droppedForSpace };
+  return { document, rewriteStats: stats, rejectedRewrites, rewriteFallback, droppedForSpace };
 }
 
 /* -------------------------------------------------------------- page budget -- */

@@ -36,6 +36,39 @@ import type { EnrichmentSignal } from '../profile/enrichment';
 
 export type Emit = (event: Omit<PipelineEvent, 'at'>) => void;
 
+/**
+ * What this run did, filled in as it happens — the only thing a failed draft leaves.
+ *
+ * `PipelineOutput` is returned, so a run that throws returns nothing, and until now that
+ * meant a failure left behind a `console.error` line and a counter increment. Yet by the
+ * time most failures happen the run already knows things worth keeping: which job it was
+ * drafting for, what it scored before the gate gave up, and — always — what it spent.
+ * Those facts are written here as they are learned, into an object the caller owns, so
+ * they survive the throw.
+ *
+ * Two of them are deliberately NOT on the `emit` stream even though they are known at the
+ * same moment. Everything emitted is relayed straight to the browser by
+ * app/api/draft/route.ts; spend figures and the rewrite outcome are for the owner's own
+ * records, and the rule that route states about developer-facing detail is easiest to
+ * keep by never putting such detail on the channel that reaches the user in the first
+ * place. See lib/db/schema.ts on `draft_run` for what the caller does with this.
+ */
+export interface DraftRunTrace {
+  budget: { calls: number; tokens: number };
+  job: { roleTitle: string; company: string } | null;
+  score: { overall: number; keywordCoveragePct: number; haltReason: string | null } | null;
+  rewrite: { attempted: number; fallbacks: number; reason: 'none' | 'grounding' | 'call-failed' };
+}
+
+export function newDraftRunTrace(): DraftRunTrace {
+  return {
+    budget: { calls: 0, tokens: 0 },
+    job: null,
+    score: null,
+    rewrite: { attempted: 0, fallbacks: 0, reason: 'none' },
+  };
+}
+
 export interface PipelineInput {
   userId: string;
   contact: ContactInfo;
@@ -48,6 +81,12 @@ export interface PipelineInput {
   jobFileName?: string;
   /** Runs before anything else; returns a human-readable summary line. */
   syncStep?: () => Promise<{ summary: string; records?: ProfileRecord[] }>;
+  /**
+   * Optional. Filled in as the run proceeds so a caller that persists a record of the
+   * attempt has something to persist when the attempt throws — see `DraftRunTrace`.
+   * Callers that only want a resume (scripts/e2e-draft.mts, the dev route) omit it.
+   */
+  trace?: DraftRunTrace;
 }
 
 export interface PipelineOutput {
@@ -96,7 +135,12 @@ export async function runDraftPipeline(
   try {
     return await runDraft(input, emit, budget);
   } finally {
-    await recordDailyUsage(input.userId, budget.snapshot());
+    const spend = budget.snapshot();
+    // Same `finally`, same reason as the daily counter above: a run that failed halfway
+    // still spent what it spent, and "how much did the failures cost" was previously a
+    // question only the daily aggregate could answer, and only for the whole day at once.
+    if (input.trace) input.trace.budget = spend;
+    await recordDailyUsage(input.userId, spend);
   }
 }
 
@@ -173,6 +217,11 @@ async function runDraft(
     throw err;
   }
 
+  // Recorded before the event, so a run that dies in retrieval still names the job it
+  // died drafting for. "The draft failed" and "the draft for the Semrush SEO lead role
+  // failed" are different amounts of information.
+  if (input.trace) input.trace.job = { roleTitle: job.roleTitle, company: job.company ?? '' };
+
   emit({
     stage: 'understand',
     status: 'done',
@@ -220,12 +269,32 @@ async function runDraft(
     throw err;
   }
 
+  if (input.trace) {
+    input.trace.rewrite = {
+      attempted: assembled.rewriteFallback.attempted,
+      fallbacks: assembled.rewriteFallback.count,
+      reason: assembled.rewriteFallback.reason,
+    };
+  }
+
   // A section cut for space is reported, not silently omitted — otherwise the only way
   // to discover that Languages is missing is to notice it isn't there.
+  //
+  // The fallback note now splits on WHY the wording was kept. It used to say one thing
+  // for both causes, and that one thing was a claim about the user's profile — "a rewrite
+  // would have added something not in your profile" — printed verbatim on runs where no
+  // rewrite was ever judged because the provider threw. Telling someone their experience
+  // is too thin to rephrase, because a request timed out, is the worst version of this
+  // message; see `rewriteFallback` in lib/generate/assemble.ts.
+  const fallbackNote =
+    assembled.rewriteFallback.count === 0
+      ? ''
+      : assembled.rewriteFallback.reason === 'call-failed'
+        ? `used your own wording throughout — the rephrasing step didn't answer this time`
+        : `kept your original wording on ${assembled.rewriteFallback.count} bullet(s) where a rewrite would have added something not in your profile`;
+
   const draftNotes = [
-    assembled.rewriteStats.rejected > 0
-      ? `kept your original wording on ${assembled.rewriteStats.rejected} bullet(s) where a rewrite would have added something not in your profile`
-      : '',
+    fallbackNote,
     assembled.droppedForSpace.length > 0
       ? `left off ${assembled.droppedForSpace.join(', ')} to keep it to the page`
       : '',
@@ -238,7 +307,13 @@ async function runDraft(
       draftNotes.length > 0
         ? `First draft ready · ${draftNotes.join(' · ')}`
         : 'First draft ready',
-    detail: { ...assembled.rewriteStats, droppedForSpace: assembled.droppedForSpace },
+    detail: {
+      ...assembled.rewriteStats,
+      // The slug, not the provider's error text. This detail object is relayed verbatim
+      // to the browser by app/api/draft/route.ts, so only the classification travels.
+      fallbackReason: assembled.rewriteFallback.reason,
+      droppedForSpace: assembled.droppedForSpace,
+    },
   });
 
   // ---------------------------------------------------------------- 5. score --
@@ -270,6 +345,16 @@ async function runDraft(
       });
     },
   });
+
+  // Before the finalize stage, which is where two of the six production faults lived: a
+  // run that dies rendering still records what it scored.
+  if (input.trace) {
+    input.trace.score = {
+      overall: outcome.result.overall,
+      keywordCoveragePct: outcome.result.keywordCoveragePct,
+      haltReason: outcome.result.haltReason ?? null,
+    };
+  }
 
   emit({
     stage: 'score',

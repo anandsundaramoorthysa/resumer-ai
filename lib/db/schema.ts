@@ -416,6 +416,91 @@ export const aiUsageDaily = pgTable(
 );
 
 /**
+ * One row per draft attempt — successful or not.
+ *
+ * WHAT THE ABSENCE OF THIS TABLE COST. Resume drafting was broken in production for the
+ * entire life of the deployment and nothing noticed: the owner's account had zero
+ * snapshots, ever. Six separate faults were behind it — a 30-second function limit
+ * against a 50-second budget, a schema cap that discarded the only provider that
+ * answered, a stream that died silently, an overloaded provider retried instead of
+ * skipped, a PDF reader missing its native binary and its worker. Every one was found by
+ * hand, with a throwaway account and a live log stream, because a failed draft left
+ * behind exactly two things: a counter increment in `ai_usage_daily` and one
+ * `console.error` line in a function log that rolls over. A successful draft persisted a
+ * `resume_snapshot`; a failed one persisted nothing, so "how often does drafting work"
+ * was a question the system could not answer about itself.
+ *
+ * So: written on every run, from app/api/draft/route.ts, which is the one place that sees
+ * both the event stream and the outcome. Three things are kept that existed only in
+ * flight before:
+ *
+ *   `stages`      the per-stage timeline the SSE stream sends to the browser and then
+ *                 forgets. Status, message and elapsed ms per event — which is what turns
+ *                 "the draft failed" into "understand took 41s and then finalize threw".
+ *   `error_*`     the developer-facing failure, which previously reached only the log.
+ *                 NEVER relayed to the browser: app/api/draft/route.ts explains why at
+ *                 length, and storing it for the owner does not change that rule.
+ *   `rewrite_*`   whether the grounded rewrite actually ran. A draft where every bullet
+ *                 fell back to the user's own words looks identical, in the document and
+ *                 in the snapshot, to one where the model did the work.
+ *
+ * Bounded per user — see RUNS_KEPT_PER_USER in lib/server/draft-run-record.ts for the
+ * number and the reasoning. This is a free Postgres tier and a diagnostic log is exactly
+ * the kind of table that quietly eats it.
+ */
+export const draftRuns = pgTable(
+  'draft_run',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    startedAt: timestamp('started_at').notNull(),
+    finishedAt: timestamp('finished_at').defaultNow().notNull(),
+    durationMs: integer('duration_ms').notNull().default(0),
+    /** success | failed */
+    status: text('status').notNull(),
+    /** The job as the pipeline understood it. Empty when it failed before understanding. */
+    roleTitle: text('role_title').notNull().default(''),
+    company: text('company').notNull().default(''),
+    /**
+     * The snapshot this run produced, when it produced one.
+     *
+     * `set null` rather than `cascade`: deleting a resume must not delete the evidence
+     * that drafting it worked. The run outlives its output.
+     */
+    snapshotId: text('snapshot_id').references(() => resumeSnapshots.id, {
+      onDelete: 'set null',
+    }),
+    score: real('score'),
+    keywordCoveragePct: real('keyword_coverage_pct'),
+    /** iteration-cap | budget-cap | unfixable-gap | no-progress — see QualityGateResult. */
+    haltReason: text('halt_reason'),
+    /** [{ stage, status, message, elapsedMs }] in emission order. */
+    stages: jsonb('stages')
+      .$type<Array<{ stage: string; status: string; message: string; elapsedMs: number }>>()
+      .notNull()
+      .default([]),
+    /** What this run actually spent, counted on the failure path too. */
+    budgetCalls: integer('budget_calls').notNull().default(0),
+    budgetTokens: integer('budget_tokens').notNull().default(0),
+    /** Bullets the grounded rewrite was asked to improve. */
+    rewriteAttempted: integer('rewrite_attempted').notNull().default(0),
+    /** Of those, how many were printed in the user's own words instead. */
+    rewriteFallbacks: integer('rewrite_fallbacks').notNull().default(0),
+    /** none | grounding | call-failed — the two are not the same finding. */
+    rewriteFallbackReason: text('rewrite_fallback_reason').notNull().default('none'),
+    /** A stable slug, so failures can be counted by cause: `all-providers-failed`. */
+    errorKind: text('error_kind'),
+    /** Developer-facing, redacted and truncated. Owner-visible only, never streamed. */
+    errorDetail: text('error_detail'),
+  },
+  (t) => [index('draft_run_user_idx').on(t.userId, t.startedAt)],
+);
+
+/**
  * Sync jobs — REQ-2.2/2.3 executed across multiple short requests.
  *
  * Portfolio extraction measured 1-3 minutes, which no serverless function tolerates

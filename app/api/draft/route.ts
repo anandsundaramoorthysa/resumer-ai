@@ -21,9 +21,10 @@ import {
   validateJobSubmission,
   type JobInputRejection,
 } from '@/lib/intake/job-input';
-import { runDraftPipeline, PipelineError } from '@/lib/pipeline/run';
+import { runDraftPipeline, newDraftRunTrace, PipelineError } from '@/lib/pipeline/run';
 import { loadProfileForUser, persistDraft, buildSyncStep } from '@/lib/server/profile';
 import { recordEnrichmentQuestions } from '@/lib/server/enrichment';
+import { recordDraftRun } from '@/lib/server/draft-run';
 import type { PipelineEvent } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -133,8 +134,33 @@ export async function POST(req: NextRequest) {
         );
       };
 
-      const emit = (e: Omit<PipelineEvent, 'at'>) =>
-        send('stage', { ...e, at: Date.now() });
+      /*
+       * The run record, assembled alongside the stream rather than after it.
+       *
+       * This endpoint is the only place that sees both halves of a draft: the stage
+       * events on their way to the browser, and how the attempt ended. Both used to be
+       * discarded. The events were written to a socket and forgotten, so there was no
+       * per-run history of any kind; a failure left a row in `ai_usage_daily` and one
+       * `console.error` line in a function log. Six production faults were diagnosed by
+       * hand off that log because it was the only record that existed. See `draftRuns` in
+       * lib/db/schema.ts.
+       *
+       * `startedAt` is taken here, not at the top of the handler: the parse and upload
+       * work above belongs to reading the request, and the timeline is measured from the
+       * first thing the pipeline does so that stage offsets mean what they look like.
+       */
+      const startedAt = new Date();
+      const events: PipelineEvent[] = [];
+      const trace = newDraftRunTrace();
+      let snapshotId: string | null = null;
+      /** Set on every path that does not finish with a resume; null means it did. */
+      let failure: { error?: unknown; kind?: string } | null = null;
+
+      const emit = (e: Omit<PipelineEvent, 'at'>) => {
+        const event = { ...e, at: Date.now() };
+        events.push(event);
+        send('stage', event);
+      };
 
       /*
        * A heartbeat, because a silent stream does not survive the trip to the browser.
@@ -165,11 +191,14 @@ export async function POST(req: NextRequest) {
         const profile = await loadProfileForUser(userId);
 
         if (profile.records.length === 0) {
+          // A refusal, not a crash — but still an attempt that produced no resume, and it
+          // is recorded as one. A user whose drafts all fail this way has a profile
+          // problem, and that is not visible anywhere else.
+          failure = { kind: 'empty-profile' };
           send('error', {
             message:
               'Your profile is empty. Connect your GitHub portfolio or add a few skills and roles first — there is nothing to build a resume from yet.',
           });
-          controller.close();
           return;
         }
 
@@ -183,11 +212,12 @@ export async function POST(req: NextRequest) {
             jobFileText: fileText || undefined,
             jobFileName: fileName || undefined,
             syncStep: buildSyncStep(userId),
+            trace,
           },
           emit,
         );
 
-        const snapshotId = await persistDraft(userId, result);
+        snapshotId = await persistDraft(userId, result);
 
         /*
          * File what this draft could not evidence against the records it concerns.
@@ -231,6 +261,7 @@ export async function POST(req: NextRequest) {
         // reason this was ever survivable — one refactor away from a connection string
         // or a token fragment arriving in the browser over an SSE frame. So the generic
         // branch is logged where logs are read and answered with one sentence.
+        failure = { error: err };
         if (!(err instanceof PipelineError)) {
           console.error('[draft] pipeline failed for user', userId, err);
         }
@@ -245,12 +276,47 @@ export async function POST(req: NextRequest) {
         // Cleared before anything else: an interval left running keeps the function
         // alive after the response, which on a 30-second platform is a kill.
         clearInterval(heartbeat);
-        // At most once — the empty-profile branch above has already closed it, and a
-        // second close throws.
+        // At most once — a second close throws.
         try {
           controller.close();
         } catch {
           /* already closed */
+        }
+
+        /*
+         * Record the attempt. Here, in the `finally`, for three reasons.
+         *
+         * One call site. Success, pipeline failure and the empty-profile refusal all pass
+         * through this block, so there is no path that returns a response without leaving
+         * a row — and "the runs that vanished are exactly the interesting ones" is how the
+         * gap this closes came about in the first place.
+         *
+         * After `controller.close()`. The user has their resume, or their error, before
+         * this write is even attempted; the bookkeeping is never in the critical path.
+         *
+         * Inside its own try. The same rule the enrichment write above follows, and stated
+         * there: a failure to write a note about a draft must never turn a finished draft
+         * into an error frame. It matters more here, because this write runs on the
+         * failure path too — a broken observability table that swallowed the failure it
+         * was describing would be worse than the silence it replaced.
+         *
+         * `errorDetail` is stored, never sent. Whatever the catch above logged for a
+         * developer is kept for the owner and stays out of every SSE frame, for the
+         * reasons that catch spells out.
+         */
+        try {
+          await recordDraftRun({
+            userId,
+            startedAt,
+            finishedAt: new Date(),
+            events,
+            trace,
+            snapshotId: failure ? null : snapshotId,
+            error: failure?.error,
+            errorKind: failure?.kind,
+          });
+        } catch (err) {
+          console.error('[draft] could not record the draft run for user', userId, err);
         }
       }
     },
