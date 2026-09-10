@@ -116,6 +116,13 @@ export class DraftBudget {
   constructor(
     private readonly limits: BudgetLimits = DRAFT_BUDGET,
     private readonly timeBudgetMs: number = DRAFT_TIME_BUDGET_MS,
+    /**
+     * What each call keeps back from the clock for the work that follows the last one.
+     * A draft renders a PDF and a DOCX after its final model call, so it keeps the render
+     * reserve. A request that renders nothing must say so, or it hands that time to no one
+     * — see ASSESS_RESERVE_MS in lib/pipeline/run.ts for what that cost the fit check.
+     */
+    private readonly reserveMs: number = RENDER_RESERVE_MS,
   ) {}
 
   /** Throws before a call is made if the next call would exceed any cap. */
@@ -189,7 +196,7 @@ export class DraftBudget {
    * mid-flight and the user got a dead connection, which is the exact outcome the time
    * budget exists to prevent.
    */
-  callDeadlineMs(reserveMs: number = RENDER_RESERVE_MS): number {
+  callDeadlineMs(reserveMs: number = this.reserveMs): number {
     return Math.max(MIN_CALL_DEADLINE_MS, this.remainingMs - reserveMs);
   }
 

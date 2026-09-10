@@ -456,6 +456,21 @@ export async function runQualityGate(args: {
   }
 }
 
+/**
+ * How many gaps a halt sentence names before it counts the rest.
+ *
+ * The EA job description produced 27, and the halt text listed every one — a sentence
+ * nobody reads to the end is not an explanation. The full list is still on the fit card,
+ * split into what the profile holds and what it does not.
+ */
+const MAX_GAPS_NAMED = 8;
+
+function listGaps(gaps: string[]): string {
+  const named = gaps.slice(0, MAX_GAPS_NAMED);
+  const rest = gaps.length - named.length;
+  return rest > 0 ? `${named.join(', ')} and ${rest} more` : named.join(', ');
+}
+
 function outcomeOf(
   best: Best,
   history: GateOutcome['history'],
@@ -497,9 +512,7 @@ function haltForCap(
   result.haltReason = gaps.length > 0 ? 'unfixable-gap' : 'iteration-cap';
   result.haltExplanation =
     gaps.length > 0
-      ? `Stopped at ${result.overall.toFixed(1)}/10 after ${attempts} attempts. The job asks for ${gaps.join(
-          ', ',
-        )}, which isn't in your profile. No rewrite can close that honestly — this is the ceiling for this role unless you add real experience covering it.`
+      ? `Stopped at ${result.overall.toFixed(1)}/10 after ${attempts} attempts. The job asks for ${listGaps(gaps)}, which isn't in your profile. No rewrite can close that honestly — this is the ceiling for this role unless you add real experience covering it.`
       : `Stopped at ${result.overall.toFixed(1)}/10 after ${attempts} attempts. Showing the best version produced; remaining issues are listed below.`;
   return outcomeOf(best, history, weakBullets);
 }
@@ -527,9 +540,7 @@ function haltForNoProgress(
   best.breakdown.result.haltReason = gaps.length > 0 ? 'unfixable-gap' : 'no-progress';
   best.breakdown.result.haltExplanation =
     gaps.length > 0
-      ? `Stopped at ${score}/10 after ${attempts} attempt(s), early: ${because}. The job asks for ${gaps.join(
-          ', ',
-        )}, which isn't in your profile. No rewrite can close that honestly — this is the ceiling for this role unless you add real experience covering it.`
+      ? `Stopped at ${score}/10 after ${attempts} attempt(s), early: ${because}. The job asks for ${listGaps(gaps)}, which isn't in your profile. No rewrite can close that honestly — this is the ceiling for this role unless you add real experience covering it.`
       : `Stopped at ${score}/10 after ${attempts} attempt(s) because ${because}. Further attempts would have re-run the same work for the same result, so this is the best version produced; remaining issues are listed below.`;
 
   return outcomeOf(best, history, weakBullets);

@@ -59,8 +59,28 @@ export interface FitFacts {
   refs: Record<string, { label: string; kind: string }>;
 }
 
-/** Longer than any profile needs; short enough that the job text still fits the prompt. */
-const MAX_DIGEST_CHARS = 10_000;
+/*
+ * How much of the profile the agent reads in detail — sized by measurement, not taste.
+ *
+ * The first digest printed every record in full: 10,031 characters for a 170-record
+ * profile. Timed against the real EA job description with no deadline, the fit call took
+ * 18.5–20.6s at that size, 12.0–13.1s at 6,000 and 10.6–10.8s at 4,000 — and the
+ * verdict was the same 42/100 at every size. In production the call has well under 20
+ * seconds, and at full size it timed out and fell back to the rules-only report.
+ *
+ * So everything is still NAMED — every record keeps a ref the agent can cite, because the
+ * point of the fit check is to compare the whole profile — but the detail goes where the
+ * posting points: the projects, bullets and honours that share the most terms with the
+ * job are described, and the rest are listed by name.
+ */
+const MAX_DIGEST_CHARS = 7_000;
+const DETAILED_PROJECTS = 8;
+const PROJECT_DESC_CHARS = 90;
+const MAX_BULLETS = 12;
+const BULLET_CHARS = 110;
+const MAX_HONOURS = 8;
+const HONOUR_DESC_CHARS = 60;
+const SUMMARY_CHARS = 250;
 
 /** Where a term is looked for first — a named skill is stronger evidence than a mention. */
 const EVIDENCE_ORDER: Record<string, number> = {
@@ -87,7 +107,7 @@ export function gatherFitFacts(input: {
   const { job, records, roles, contact } = input;
   const now = input.now ?? new Date();
 
-  const { digest, refs, refOf } = buildDigest(records, roles, contact, now);
+  const { digest, refs, refOf } = buildDigest(records, roles, contact, job, now);
 
   // Every searchable thing in the profile, normalised once, in evidence order.
   const sources = [
@@ -224,6 +244,12 @@ function clip(s: string | undefined, n: number): string {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
 
+/** Whether a description only restates the title — same words, ignoring case and punctuation. */
+function sameText(a: string | undefined, b: string): boolean {
+  const n = (s: string) => normalizeForMatch(s).replace(/[.\-#+]/g, ' ').replace(/\s+/g, ' ').trim();
+  return n(a ?? '') === n(b);
+}
+
 function range(start?: string, end?: string): string {
   if (!start && !end) return '';
   return ` (${start ?? '?'} → ${end ?? '?'})`;
@@ -233,6 +259,7 @@ function buildDigest(
   records: ProfileRecord[],
   roles: RoleRecord[],
   contact: ContactInfo,
+  job: JobRequirement,
   now: Date,
 ): {
   digest: string;
@@ -253,6 +280,18 @@ function buildDigest(
 
   const of = <T extends ProfileRecord['type']>(type: T) =>
     records.filter((r): r is Extract<ProfileRecord, { type: T }> => r.type === type);
+
+  // How many of the posting's terms a record shares — decides which records the agent
+  // reads in detail. Ties keep the profile's own order, so the result is stable.
+  const relevance = (r: ProfileRecord) => {
+    const text = normalizeForMatch(recordText(r));
+    return job.atsKeywords.filter((k) => keywordMatches(text, k)).length;
+  };
+  const byRelevance = <T extends ProfileRecord>(list: T[]): T[] =>
+    list
+      .map((r, i) => ({ r, i, score: relevance(r) }))
+      .sort((a, b) => b.score - a.score || a.i - b.i)
+      .map((x) => x.r);
 
   const lines: string[] = ['CANDIDATE PROFILE — every item has a ref in brackets'];
   if (contact.location) lines.push(`Location: ${contact.location}`);
@@ -284,55 +323,63 @@ function buildDigest(
     );
   }
 
-  const projects = of('project');
+  const projects = byRelevance(of('project'));
   if (projects.length > 0) {
-    lines.push('', 'Projects:');
-    for (const p of projects) {
-      const stack = p.stack.length ? ` — stack: ${p.stack.slice(0, 8).join(', ')}` : '';
-      const desc = p.description ? ` — ${clip(p.description, 140)}` : '';
-      const metric = p.impactMetrics.length ? ` — result: ${clip(p.impactMetrics[0], 80)}` : '';
-      lines.push(`[${tag('P', p.id, p.name, 'project')}] ${p.name}${stack}${desc}${metric}`);
+    lines.push('', 'Projects most relevant to this job:');
+    for (const p of projects.slice(0, DETAILED_PROJECTS)) {
+      const stack = p.stack.length ? ` — ${p.stack.slice(0, 5).join(', ')}` : '';
+      const desc = p.description ? ` — ${clip(p.description, PROJECT_DESC_CHARS)}` : '';
+      lines.push(`[${tag('P', p.id, p.name, 'project')}] ${p.name}${stack}${desc}`);
+    }
+    const rest = projects.slice(DETAILED_PROJECTS);
+    if (rest.length > 0) {
+      lines.push(
+        `Other projects: ${rest.map((p) => `[${tag('P', p.id, p.name, 'project')}] ${p.name}`).join('; ')}`,
+      );
     }
   }
 
-  const bullets = of('experience-bullet');
+  const bullets = byRelevance(of('experience-bullet'));
   if (bullets.length > 0) {
     lines.push('', 'Experience bullets:');
-    for (const b of bullets.slice(0, 24)) {
-      lines.push(`[${tag('B', b.id, clip(b.text, 60), 'experience-bullet')}] ${clip(b.text, 160)}`);
+    for (const b of bullets.slice(0, MAX_BULLETS)) {
+      lines.push(`[${tag('B', b.id, clip(b.text, 60), 'experience-bullet')}] ${clip(b.text, BULLET_CHARS)}`);
     }
   }
 
-  const certs = of('certification');
+  const certs = byRelevance(of('certification'));
   if (certs.length > 0) {
-    lines.push('', 'Certifications:');
-    for (const c of certs.slice(0, 30)) {
-      const label = [c.name, c.issuer].filter(Boolean).join(' · ');
-      lines.push(`[${tag('C', c.id, c.name, 'certification')}] ${label}`);
-    }
+    lines.push(
+      '',
+      `Certifications: ${certs.map((c) => `[${tag('C', c.id, c.name, 'certification')}] ${c.name}`).join('; ')}`,
+    );
   }
 
-  const honours = [...of('achievement'), ...of('award')];
+  const honours = byRelevance([...of('achievement'), ...of('award')]);
   if (honours.length > 0) {
     lines.push('', 'Achievements and awards:');
-    for (const a of honours.slice(0, 12)) {
+    for (const a of honours.slice(0, MAX_HONOURS)) {
+      // Imported achievements often repeat their title as their description — "First
+      // Prize in Debugging — First Prize in Debugging" — which spent the characters that
+      // pushed the last two achievements past the cap on a real profile.
+      const adds = a.description && !sameText(a.description, a.title);
       lines.push(
-        `[${tag('A', a.id, a.title, a.type)}] ${a.title}${a.description ? ` — ${clip(a.description, 120)}` : ''}`,
+        `[${tag('A', a.id, a.title, a.type)}] ${a.title}${adds ? ` — ${clip(a.description, HONOUR_DESC_CHARS)}` : ''}`,
       );
     }
   }
 
   const published = [...of('publication'), ...of('writing')];
   if (published.length > 0) {
-    lines.push('', 'Publications and writing:');
-    for (const p of published.slice(0, 10)) {
-      lines.push(`[${tag('R', p.id, p.title, p.type)}] ${p.title} — ${p.venue}`);
-    }
+    lines.push(
+      '',
+      `Publications and writing: ${published.map((p) => `[${tag('R', p.id, p.title, p.type)}] ${p.title}`).join('; ')}`,
+    );
   }
 
   const summary = of('summary')[0];
   if (summary?.text.trim()) {
-    lines.push('', `Summary: [${tag('S', summary.id, 'Profile summary', 'summary')}] ${clip(summary.text, 400)}`);
+    lines.push('', `Summary: [${tag('S', summary.id, 'Profile summary', 'summary')}] ${clip(summary.text, SUMMARY_CHARS)}`);
   }
 
   const other = [

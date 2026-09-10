@@ -207,6 +207,25 @@ await suiteAsync('quality gate — what it calls a gap', async () => {
     assert.ok(!genuineGaps.includes('Product Analyst Intern'), `got: ${genuineGaps.join(', ')}`);
     assert.ok(genuineGaps.includes('Erlang'), 'a real gap must still be reported');
   });
+
+  await testAsync('a long gap list is named in part and counted in full', async () => {
+    // The EA job description produced 27 gaps, and the halt text listed all of them.
+    const terms = Array.from({ length: 12 }, (_, i) => `Obscureterm${i}`);
+    const doc = thinDocument();
+    doc.jobRequirement = { ...job, atsKeywords: terms };
+
+    const outcome = await runQualityGate({
+      document: doc,
+      records,
+      revise: async (d): Promise<ReviseOutcome> => ({ document: d, changed: false, unimprovable: [] }),
+    });
+
+    const why = outcome.result.haltExplanation ?? '';
+    assert.equal(outcome.result.haltReason, 'unfixable-gap');
+    assert.match(why, /Obscureterm0/);
+    assert.match(why, /and 4 more/);
+    assert.doesNotMatch(why, /Obscureterm11/, 'past the first eight, terms are counted, not named');
+  });
 });
 
 report('gate-resume');

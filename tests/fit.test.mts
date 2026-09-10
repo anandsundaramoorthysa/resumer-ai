@@ -168,6 +168,67 @@ suite('what the profile holds — the deterministic facts', () => {
   });
 });
 
+suite('the digest stays small enough to answer in time, without hiding anything', () => {
+  // At full size the digest was 10k characters and the fit call took 18–20s; production
+  // has well under that. A large profile is the case that matters.
+  const many: ProfileRecord[] = Array.from({ length: 40 }, (_, i) => ({
+    ...base,
+    id: `proj${i}`,
+    type: 'project' as const,
+    name: `Project number ${i}`,
+    tags: [],
+    contentHash: `ph${i}`,
+    // Long on purpose, and only the LAST one mentions a term the posting asks for.
+    description:
+      i === 39
+        ? 'Wrote the SQL behind a weekly revenue report used by the finance team every Monday'
+        : `A long description of an unrelated side project, number ${i}, that says a great deal about nothing the posting asks for at all`,
+    stack: ['Flutter', 'Firebase', 'Dart', 'Figma', 'Git', 'Docker'],
+    links: [],
+    impactMetrics: ['Used by a handful of friends'],
+  }));
+  const big = gatherFitFacts({ job, records: [...records, ...many], roles, contact, now: NOW });
+
+  test('a forty-project profile stays under the size the fit call can afford', () => {
+    assert.ok(big.digest.length <= 7_100, `digest is ${big.digest.length} chars`);
+  });
+
+  test('every project is still named, with a ref the agent can cite', () => {
+    for (const p of many) {
+      assert.ok(big.digest.includes(p.name), `${p.name} is missing from the digest`);
+    }
+  });
+
+  test('the project the posting would care about is described, though it came last', () => {
+    assert.ok(big.digest.includes('Wrote the SQL behind a weekly revenue report'));
+  });
+
+  test('an unrelated project is named but not described', () => {
+    assert.ok(!big.digest.includes('A long description of an unrelated side project, number 38'));
+  });
+
+  test('an achievement whose description repeats its title is printed once', () => {
+    // On the real profile every imported prize read "First Prize in Debugging — First
+    // Prize in Debugging", and the doubled text pushed the last two past the cap.
+    const prize: ProfileRecord = {
+      ...base, id: 'a1', type: 'achievement', title: 'First Prize in Debugging',
+      description: 'First prize in debugging.', tags: [], contentHash: 'ah1',
+    };
+    const withPrize = gatherFitFacts({ job, records: [...records, prize], roles, contact, now: NOW });
+    const line = withPrize.digest.split('\n').find((l) => l.includes('First Prize in Debugging'))!;
+    assert.equal(line.match(/first prize in debugging/gi)?.length, 1, `got: ${line}`);
+  });
+
+  test('a description that adds something is still printed', () => {
+    const prize: ProfileRecord = {
+      ...base, id: 'a2', type: 'achievement', title: 'Hackathon winner',
+      description: 'Built a crop-price forecaster in 24 hours', tags: [], contentHash: 'ah2',
+    };
+    const withPrize = gatherFitFacts({ job, records: [...records, prize], roles, contact, now: NOW });
+    assert.ok(withPrize.digest.includes('Built a crop-price forecaster'));
+  });
+});
+
 /* ------------------------------------------------------------ grounding ---- */
 
 suite('the agent’s answer is checked, not trusted', () => {

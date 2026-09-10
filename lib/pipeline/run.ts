@@ -26,7 +26,7 @@ import type {
   ResumeDocument,
   RoleRecord,
 } from '../types';
-import { DraftBudget } from '../ai/budget';
+import { DRAFT_BUDGET, DraftBudget } from '../ai/budget';
 import { assertDailyBudget, recordDailyUsage } from '../ai/daily-budget';
 import { AllProvidersFailedError } from '../ai/chain';
 import { BudgetExceededError } from '../ai/budget';
@@ -168,6 +168,33 @@ export async function runDraftPipeline(
 
 /* ------------------------------------------------------------ assessment -- */
 
+/**
+ * What a fit check keeps back from its clock — just enough to seal and send the result.
+ *
+ * Every draft-path call holds back RENDER_RESERVE_MS (5 seconds in production) so the
+ * draft can still build its PDF and DOCX after the last model call. The fit check
+ * inherited that and renders nothing. Measured against the real EA job description:
+ * reading the job took 8.2s, the fit call was then given 6.7s for work that takes 7–9,
+ * timed out, and fell back to the rules-only report — with 5 seconds of its budget still
+ * unspent. The same job, when reading it took 5.9s, got the full review.
+ */
+const ASSESS_RESERVE_MS = 1_500;
+
+/**
+ * The fit check's own clock — longer than a draft's, because it renders nothing.
+ *
+ * A draft's 20 seconds (MAX_DRAFT_SECONDS) has to leave room for building and checking a
+ * PDF and a DOCX before Netlify's 30-second kill; the fit check has no such tail, and it
+ * needs the room: reading the job takes 3–8 seconds and the fit call 10 or more. 22
+ * seconds, plus the ~3 seconds spent loading the profile before the clock starts, keeps
+ * the whole request near 25 — inside the platform limit with margin. Overridable with
+ * MAX_ASSESS_SECONDS for a host with a different limit.
+ */
+const ASSESS_TIME_BUDGET_MS = (() => {
+  const seconds = Number(process.env.MAX_ASSESS_SECONDS);
+  return (Number.isFinite(seconds) && seconds > 0 ? seconds : 22) * 1000;
+})();
+
 export interface AssessmentOutput {
   job: JobRequirement;
   fit: FitReport;
@@ -192,7 +219,7 @@ export async function runAssessment(
 ): Promise<AssessmentOutput> {
   await assertDailyBudget(input.userId);
 
-  const budget = new DraftBudget();
+  const budget = new DraftBudget(DRAFT_BUDGET, ASSESS_TIME_BUDGET_MS, ASSESS_RESERVE_MS);
   try {
     const records = await syncProfile(input, emit);
     const { job, jobText } = await readJob(input, emit, budget);
