@@ -1,9 +1,13 @@
 /**
  * Provider-agnostic AI calls with an ordered fallback chain.
  *
- * REQ: PLAN.md §8 routing (Gemini -> Groq -> DeepInfra -> Together -> Fireworks),
- * NFR-2 / REQ-5.6 budget enforcement, design.md §5 error handling
+ * REQ: NFR-2 / REQ-5.6 budget enforcement, design.md §5 error handling
  * ("all 5 providers fail" must surface an explicit error, never a silent hang).
+ *
+ * Routing order lives in ./models.ts and is now measured rather than declared — PLAN.md
+ * §8's order (Gemini -> Groq -> DeepInfra -> Together -> Fireworks) was written before
+ * any provider had been timed, and proved to be close to the inverse of what works. The
+ * table there has the measurements and the reasoning.
  */
 
 import { generateObject, generateText, type LanguageModel } from 'ai';
@@ -280,35 +284,44 @@ export async function generateStructured<T>(args: {
   const benched = new Set<ProviderId>();
 
   for (const cfg of providers) {
-    const a = attemptWindow(deadlineAt, timeoutMs);
-    if (!a.viable) break;
+    // Path A — native structured output, but only where it can actually work.
+    //
+    // `structuredOutput: false` is a measured property of the provider, not a guess (the
+    // table in ./models.ts has the numbers). Asking anyway is not a harmless retry: it
+    // spends an attempt of the budget, and on Together it spent 5.1 seconds before the
+    // SDK reported that the feature is unsupported. Two of the five providers here can
+    // never answer this call, and both answer the text path below — so the request that
+    // cannot succeed is simply not made.
+    if (cfg.structuredOutput) {
+      const a = attemptWindow(deadlineAt, timeoutMs);
+      if (!a.viable) break;
 
-    // Path A — native structured output. Clean when the provider supports it.
-    try {
-      const result = await generateObject({
-        model: resolveModel(cfg, tier),
-        schema,
-        system,
-        prompt,
-        temperature,
-        maxRetries: options.maxRetriesPerProvider ?? 1,
-        abortSignal: AbortSignal.timeout(a.ms),
-      });
-      budget?.record(result.usage?.totalTokens ?? 0);
-      return { data: result.object as T, provider: cfg.label };
-    } catch (err) {
-      if (err instanceof BudgetExceededError) throw err;
-      // The prompt went out and was billed before this failed, so it counts.
-      budget?.recordFailedAttempt();
-      const msg = errText(err);
-      if (noteFailure(cfg.id, msg, a.cutShort)) benched.add(cfg.id);
-      attempts.push({ provider: cfg.label, error: msg });
+      try {
+        const result = await generateObject({
+          model: resolveModel(cfg, tier),
+          schema,
+          system,
+          prompt,
+          temperature,
+          maxRetries: options.maxRetriesPerProvider ?? 1,
+          abortSignal: AbortSignal.timeout(a.ms),
+        });
+        budget?.record(result.usage?.totalTokens ?? 0);
+        return { data: result.object as T, provider: cfg.label };
+      } catch (err) {
+        if (err instanceof BudgetExceededError) throw err;
+        // The prompt went out and was billed before this failed, so it counts.
+        budget?.recordFailedAttempt();
+        const msg = errText(err);
+        if (noteFailure(cfg.id, msg, a.cutShort)) benched.add(cfg.id);
+        attempts.push({ provider: cfg.label, error: msg });
+      }
+
+      // Path A just benched this provider — it is out of quota, or too slow to be worth
+      // the wait. Asking the very same provider again, immediately, cannot succeed, and
+      // that doubled cost was a measured part of why extraction overran its budget.
+      if (benched.has(cfg.id)) continue;
     }
-
-    // Path A just benched this provider — it is out of quota, or too slow to be worth
-    // the wait. Asking the very same provider again, immediately, cannot succeed, and
-    // that doubled cost was a measured part of why extraction overran its budget.
-    if (benched.has(cfg.id)) continue;
 
     const b = attemptWindow(deadlineAt, timeoutMs);
     if (!b.viable) break;
