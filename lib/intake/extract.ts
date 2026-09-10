@@ -89,6 +89,7 @@ const SYSTEM = `You normalize job postings into structured data. Input may be a 
 Rules:
 - Extract only what the text supports. Do not invent requirements that are not stated.
 - atsKeywords should use the posting's own terminology, since that is what keyword filters match against.
+- atsKeywords are things a CANDIDATE can demonstrate: skills, tools, languages, methods, domain terms, and the role title. Never include what the posting says about itself — pay or stipend, CTC, location, work arrangement (hybrid/remote/on-site), duration, start date, CGPA or backlog rules, graduation year, the application process or deadline, PPO, or the employer's own name. Those cannot appear in a resume, and every one of them makes the keyword match worse for a candidate who is a perfect fit.
 - If the input is very thin (just a title), set inputQuality to "thin" and infer only widely-standard requirements for that role, keeping the keyword list short and generic rather than fabricating specifics.
 - If the input is not a job posting at all, set inputQuality to "unusable".
 - Report genuine internal contradictions; do not manufacture them.
@@ -182,13 +183,97 @@ export async function extractJobRequirement(
     requiredSkills: dedupe(data.requiredSkills),
     preferredSkills: dedupe(data.preferredSkills),
     responsibilities: data.responsibilities,
-    atsKeywords: dedupe(data.atsKeywords),
+    atsKeywords: stripAdministrativeKeywords(dedupe(data.atsKeywords), data.company),
     companyContext: data.companyContext,
     tone: data.tone,
     yearsOfExperienceRequired: data.yearsOfExperienceRequired,
     confidence,
     flags,
   };
+}
+
+/**
+ * Drops the terms a resume can never contain — REQ-5.1's gate depends on it.
+ *
+ * Keyword coverage is `matched / atsKeywords`, so anything in that list that no resume
+ * could ever match is a permanent subtraction from the score. Measured on a real
+ * posting — an EA analyst internship forwarded by a placement cell — 11 of 22 extracted
+ * "ATS keywords" were Stipend, Post-Conversion CTC, CGPA, backlogs, PPO, Hybrid, 6
+ * months and the like. The resume scored 12%, and 70% was not reachable by any resume,
+ * however good: half the denominator was the hiring process describing itself.
+ *
+ * The model is also told this in the system prompt, but a prompt is a request and this
+ * is a guarantee — the two together, because either alone has been enough to lose a
+ * gate before.
+ *
+ * Matching is on the WHOLE keyword, never a substring. "Hybrid" alone is a work
+ * arrangement; "hybrid cloud architecture" is a genuine skill, and a substring rule
+ * would quietly eat the second to catch the first. The same care is why the currency and
+ * duration rules are anchored patterns rather than word lists.
+ */
+const ADMIN_TERMS = new Set([
+  // Compensation
+  'stipend', 'ctc', 'lpa', 'salary', 'package', 'compensation', 'pay', 'all-inclusive',
+  'all inclusive', 'performance-based', 'performance based', 'post-conversion ctc',
+  'post conversion ctc', 'annual ctc', 'in hand', 'in-hand',
+  // Hiring process
+  'ppo', 'pre-placement offer', 'pre placement offer', 'application deadline',
+  'registration link', 'apply', 'application', 'deadline', 'referral', 'walk-in',
+  'notice period', 'immediate joiner', 'immediate joining',
+  // Eligibility administration
+  'eligibility', 'cgpa', 'gpa', 'percentage', 'backlog', 'backlogs', 'active backlogs',
+  'no active backlogs', 'final year', 'final year student', 'graduating', 'fresher',
+  'freshers', 'batch',
+  // Work arrangement and logistics
+  'hybrid', 'remote', 'on-site', 'onsite', 'on site', 'in-office', 'in office',
+  'work from home', 'wfh', 'relocation', 'shift', 'night shift', 'full-time',
+  'full time', 'part-time', 'part time', 'contract', 'permanent',
+  // What the posting is, rather than what it asks for
+  'internship', 'paid internship', 'unpaid internship', 'intern program',
+  'internship program', 'job description', 'roles and responsibilities',
+]);
+
+const ADMIN_PATTERNS: RegExp[] = [
+  /^\d+(\.\d+)?\s*(\+|plus)?\s*(month|months|week|weeks|day|days)$/,      // "6 months"
+  /^\d+\s*(-|–|to)\s*\d+\s*(month|months|year|years|lpa|lakhs?)$/,        // "15-18 LPA"
+  /^(minimum\s+|min\.?\s+)?\d+(\.\d+)?\s*(cgpa|gpa)$/,                    // "7 CGPA"
+  /^\d+(\.\d+)?\s*%$/,                                                    // "60%"
+  /^(rs\.?|inr|₹|\$|usd)\s*[\d,]+/,                                       // "₹50,000"
+  /^[\d,]+\s*(per|\/)\s*(month|year|annum)$/,                             // "50,000 per month"
+  /^\d+\s*days?\s*(a|per)\s*week$/,                                       // "3 days a week"
+  /^(graduating|batch|class)\s*(of)?\s*\d{4}$/,                           // "batch 2027"
+  /^\d{4}\s*(batch|graduate|passout|pass-out)$/,                          // "2027 batch"
+];
+
+/** Lowercased, punctuation-trimmed, whitespace-collapsed — the form the rules match. */
+function normKeyword(s: string): string {
+  return s.toLowerCase().replace(/[.,;:!?]+$/, '').replace(/\s+/g, ' ').trim();
+}
+
+export function stripAdministrativeKeywords(keywords: string[], company?: string): string[] {
+  // The employer's own name is already a column of its own, and no resume is expected to
+  // recite it. Word-level containment so "EA" and "Electronic Arts" both go when the
+  // company is "Electronic Arts (EA) India", without touching an unrelated keyword that
+  // merely shares a letter.
+  const companyWords = new Set(
+    normKeyword(company ?? '')
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 1),
+  );
+
+  return keywords.filter((raw) => {
+    const k = normKeyword(raw);
+    if (!k) return false;
+    if (ADMIN_TERMS.has(k)) return false;
+    if (ADMIN_PATTERNS.some((re) => re.test(k))) return false;
+
+    if (companyWords.size > 0) {
+      const words = k.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+      if (words.length > 0 && words.every((w) => companyWords.has(w))) return false;
+    }
+    return true;
+  });
 }
 
 function dedupe(items: string[]): string[] {
