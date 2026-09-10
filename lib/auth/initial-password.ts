@@ -29,9 +29,17 @@
  * has a password turns this into an unauthenticated password change for anyone who can
  * link a provider by email; one that answers "yes" for an unverified row re-opens the
  * takeover `linkedAccountPatch` closes. Neither looks like a broken app.
+ *
+ * Pure, but server-side only: `normalizeEmail` lives in email-policy.ts, which imports
+ * `node:dns/promises` at module scope for its MX check, so importing this file from a
+ * client component would drag a Node builtin into the browser bundle. A form that wants
+ * the strength rules as the user types should import password-rules.ts directly — which
+ * is what app/set-password/set-password-form.tsx does, and why it is handed an address
+ * that has already been normalised for it rather than normalising one itself.
  */
 
 import { checkPassword, type PasswordCheck } from './password-rules';
+import { normalizeEmail } from './email-policy';
 
 /** The three columns this decision reads — nothing else about the user matters. */
 export interface PasswordAccountState {
@@ -99,10 +107,33 @@ export function initialPasswordVerdict(
     };
   }
 
-  // Identical rules to sign-up and reset. A password established here is a password that
-  // signs in through `authorize()`, so anything weaker than those would be a hole in the
-  // fence rather than a convenience.
-  const strength: PasswordCheck = checkPassword(password, account.email ?? '');
+  /**
+   * Identical rules to sign-up and reset. A password established here is a password that
+   * signs in through `authorize()`, so anything weaker than those would be a hole in the
+   * fence rather than a convenience.
+   *
+   * The address is normalised on the way in, which is the only part of "identical" that
+   * was not free. `checkPassword` uses its second argument for exactly one rule — it
+   * takes the local part and refuses a password that contains it — and both other callers
+   * hand it an already-normalised value: `signUpAction` passes `verdict.normalized`, and
+   * `resetPasswordAction` passes the token's identifier, which was minted from the
+   * normalised address. This path is the one that would not have, because the rows it
+   * serves are the ones nobody here typed the address for. An OAuth row's `email` is
+   * whatever the provider's profile said, so it can still be `First.Last+jobs@gmail.com`
+   * where sign-up would have stored `firstlast@gmail.com`.
+   *
+   * The difference is small and worth stating honestly: it does not gate the write, and
+   * it cannot let a bad password through any of the length, repetition or common-list
+   * rules. All it changes is how far that one rule reaches — against the raw form the
+   * local part is `first.last+jobs`, so `firstlast2026` sails past, and against the
+   * normalised form it does not. Being stricter about the guess most obviously tied to
+   * this specific account is the right side to err on, and matching what the other two
+   * callers already do means the rule cannot be described one way and behave two.
+   */
+  const strength: PasswordCheck = checkPassword(
+    password,
+    account.email ? normalizeEmail(account.email) : '',
+  );
   if (!strength.ok) {
     return {
       ok: false,

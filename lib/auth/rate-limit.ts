@@ -17,7 +17,7 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { authAttempts } from '@/lib/db/schema';
 
-export type AuthAction = 'sign-in' | 'sign-up' | 'reset-request' | 'verify';
+export type AuthAction = 'sign-in' | 'sign-up' | 'reset-request' | 'verify' | 'set-password';
 
 interface Limit {
   max: number;
@@ -28,12 +28,40 @@ interface Limit {
  * Sign-in is the tightest: it is the only action where guessing pays off directly.
  * Sending mail is limited harder per address than per IP, because a stranger triggering
  * reset emails to someone else's inbox is harassment even when they cannot read them.
+ *
+ * `set-password` is the odd one out, and its numbers are chosen for a different reason
+ * than the rest. Nothing is being guessed there — the caller already holds a session
+ * minted for the row they are writing to, so there is no secret to grind down and no
+ * address to enumerate. What it costs is CPU: `setInitialPasswordAction` runs
+ * `hashPassword`, which is scrypt at the cost recorded in the hash, and that is
+ * deliberately about a tenth of a second of a whole core. On a serverless host with a
+ * per-request time budget, a single signed-in user looping that call is enough to hold
+ * instances busy hashing passwords nobody will ever use, and it costs them one cheap
+ * HTTP request each. So the ceiling is set by how much of that a session is allowed to
+ * buy, not by how many guesses are safe.
+ *
+ * Ten per hour per account is roughly ten times what the flow can honestly need: the
+ * form runs the identical `checkPassword` in the browser as the user types, so a submit
+ * that reaches the server has already passed the strength rules, and the step is by
+ * definition once per account for its whole life. Someone retrying after a network
+ * failure, or reloading and doing it again in another tab, will not come close. The
+ * worst a session can force out of the limit is about a second of scrypt an hour.
+ *
+ * The IP ceiling is twenty rather than the usual multiple of the per-subject one,
+ * because this action cannot be aimed at anyone else — every call is bounded by a
+ * session the caller had to obtain, so a single connection working through a list of
+ * accounts means a list of accounts they can already sign into. It exists to cap one
+ * machine holding several sessions, and nothing more.
  */
-const LIMITS: Record<AuthAction, { subject: Limit; ip: Limit }> = {
+// Exported so tests can assert the ceilings without a database. A limit that is quietly
+// raised, or an action added to `AuthAction` with no row here, is invisible in a running
+// app — everything still returns "allowed".
+export const LIMITS: Record<AuthAction, { subject: Limit; ip: Limit }> = {
   'sign-in': { subject: { max: 8, windowMs: 15 * 60_000 }, ip: { max: 30, windowMs: 15 * 60_000 } },
   'sign-up': { subject: { max: 3, windowMs: 60 * 60_000 }, ip: { max: 10, windowMs: 60 * 60_000 } },
   'reset-request': { subject: { max: 3, windowMs: 60 * 60_000 }, ip: { max: 10, windowMs: 60 * 60_000 } },
   verify: { subject: { max: 10, windowMs: 60 * 60_000 }, ip: { max: 40, windowMs: 60 * 60_000 } },
+  'set-password': { subject: { max: 10, windowMs: 60 * 60_000 }, ip: { max: 20, windowMs: 60 * 60_000 } },
 };
 
 /**
@@ -118,6 +146,11 @@ export async function rateLimit(
   // twice — the form's friendly pre-check and the authoritative check inside
   // `authorize()` — does not burn two of the user's eight attempts per sign-in.
   if (options.record !== false) {
+    // The `email:` prefix is a bucket namespace, not a claim about what `subject` holds.
+    // Every pre-sign-in action keys on an address because an address is all it knows;
+    // `set-password` runs inside a session and keys on the user id instead, which is the
+    // identity that actually bounds it. Both land in the same column, kept apart from the
+    // `ip:` rows and from each other by `action`.
     const rows = [{ subject: `email:${subject}`, action }];
     if (ip) rows.push({ subject: `ip:${ip}`, action });
     await db.insert(authAttempts).values(rows);

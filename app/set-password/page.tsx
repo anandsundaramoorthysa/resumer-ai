@@ -6,6 +6,7 @@ import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { Logo } from '@/components/logo';
 import { needsInitialPassword } from '@/lib/auth/initial-password';
+import { normalizeEmail } from '@/lib/auth/email-policy';
 import { SetPasswordForm } from './set-password-form';
 
 export const metadata = { title: 'Create a password' };
@@ -60,7 +61,20 @@ export default async function SetPasswordPage() {
           one now gives you a second way in if you ever lose access to that provider.
         </p>
 
-        <SetPasswordForm email={account.email ?? ''} />
+        {/*
+          The form is handed the NORMALISED address, while the sentence above shows the
+          one actually stored. They differ for exactly the rows this page serves: an OAuth
+          profile can carry `First.Last+jobs@gmail.com`, and that is what the user should
+          see. The browser-side `checkPassword` needs the other form, because the server
+          runs the same rule on the normalised address in `initialPasswordVerdict` — feed
+          the two different strings and the live checklist says a password is fine right
+          up until the submit that refuses it, with no way for the user to tell why.
+
+          It is also the address that would sign them in: `passwordSignInAction`
+          normalises whatever is typed, so this is the value a password manager should be
+          filing the new credential under.
+        */}
+        <SetPasswordForm email={normalizeEmail(account.email ?? '')} />
 
         <Link
           href="/"

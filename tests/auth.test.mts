@@ -331,6 +331,47 @@ suite('the first password on a provider-only account', () => {
     assert(!r.ok && r.refusal === 'weak', 'contains the local part of the address');
   });
 
+  test("the email rule sees the normalised address, not the provider's spelling", () => {
+    // What these rows are is the point: nobody typed this address into our sign-up form,
+    // so it was never normalised on the way in — it is whatever the provider profile
+    // said, and `allowDangerousEmailAccountLinking` stored it as-is. `signUpAction` hands
+    // `checkPassword` a normalised address and `resetPasswordAction` hands it the token
+    // identifier, which was minted from one; this path was handing it the raw column, so
+    // the same account got a weaker version of the same named rule depending only on
+    // which door the password came through.
+    const gmail = { ...OAUTH_ONLY, email: 'First.Last+jobs@gmail.com' };
+    const guess = 'firstlast2026';
+
+    // Proof the two spellings really do disagree, so this cannot pass by accident on a
+    // password the rule would have caught either way.
+    assert(checkPassword(guess, 'First.Last+jobs@gmail.com').ok, 'the raw address misses it');
+    assert(!checkPassword(guess, normalizeEmail(gmail.email)).ok, 'the normalised one does not');
+
+    const r = initialPasswordVerdict(gmail, guess);
+    assert(!r.ok && r.refusal === 'weak', 'the account name with a year on it is refused');
+  });
+
+  test('and a plus tag does not hide it at any provider', () => {
+    // Gmail's dots are provider-specific; a plus tag is a convention everywhere, and
+    // `normalizeEmail` strips it for every domain. An address the user gave the provider
+    // as a tagged alias must not turn its own local part into an acceptable password.
+    const tagged = { ...OAUTH_ONLY, email: 'annalovelace+jobs@example.org' };
+    assert(!initialPasswordVerdict(tagged, 'annalovelace77').ok, 'tag stripped before the check');
+  });
+
+  test('normalising tightens one rule and loosens nothing', () => {
+    // The change is narrow on purpose: it feeds one argument to `checkPassword` and can
+    // only make the "contains your address" rule reach further. Length, the common list
+    // and the repetition rules never looked at the address at all, and a passphrase with
+    // nothing to do with the account must still pass on every spelling of it.
+    for (const email of ['First.Last+jobs@gmail.com', 'firstlast@gmail.com', '', null]) {
+      const state = { ...OAUTH_ONLY, email };
+      assert(initialPasswordVerdict(state, 'mist over the harbour wall').ok, `passes for ${email}`);
+      assert(!initialPasswordVerdict(state, 'password123').ok, 'and the common list still bites');
+      assert(!initialPasswordVerdict(state, 'short').ok, 'and so does the length rule');
+    }
+  });
+
   test('a strong password is still refused when the row may not have one', () => {
     // The verdict is re-run server-side against a freshly read row, so these are the
     // states a second tab or a stale form can present. Strength must not be able to talk

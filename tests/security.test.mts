@@ -7,7 +7,7 @@
  * per-entry cap still exhausts memory. Nothing about the working path looks different.
  */
 
-import { isIpAddress } from '../lib/auth/rate-limit';
+import { LIMITS, isIpAddress, type AuthAction } from '../lib/auth/rate-limit';
 import { isPrivateAddress } from '../lib/net/safe-fetch';
 import { readZip, inflatedSize, ZipLimitError } from '../lib/import/zip';
 import {
@@ -34,6 +34,56 @@ suite('rate-limit bucket keys', () => {
     // and inflate the attempts table one long header at a time.
     for (const junk of ['', 'not-an-ip', '999.1.1.1', '1.2.3', 'x'.repeat(200), '<script>']) {
       assert(!isIpAddress(junk), `should refuse ${JSON.stringify(junk.slice(0, 20))}`);
+    }
+  });
+});
+
+/**
+ * Every credential action has a ceiling, including the one that guesses nothing.
+ *
+ * `setInitialPasswordAction` ran unlimited. It leaks nothing and cannot be aimed at
+ * another account — the caller must already hold a session for the row it writes — so it
+ * reads as harmless, and that is exactly why it stayed unlimited. What it spends is a
+ * scrypt hash per call, deliberately about a tenth of a second of a core, bought with one
+ * cheap HTTP request. A signed-in user looping it holds serverless instances busy hashing
+ * passwords nobody will ever use, and nothing in the app looks wrong while they do.
+ *
+ * The failure this pins is not "the number changed". It is an action existing in
+ * `AuthAction` with no row in `LIMITS`, or a row loosened until it stops bounding
+ * anything — both of which leave `rateLimit` returning "allowed" forever.
+ */
+suite('every action has a ceiling', () => {
+  const ACTIONS: AuthAction[] = ['sign-in', 'sign-up', 'reset-request', 'verify', 'set-password'];
+
+  test('no action can be added without a limit', () => {
+    for (const action of ACTIONS) {
+      const limit = LIMITS[action];
+      assert(limit !== undefined, `${action} has a row`);
+      assert(limit.subject.max > 0 && limit.subject.windowMs > 0, `${action} bounds the subject`);
+      assert(limit.ip.max > 0 && limit.ip.windowMs > 0, `${action} bounds the connection`);
+    }
+    assert.equal(Object.keys(LIMITS).length, ACTIONS.length, 'and this list is the whole table');
+  });
+
+  test('setting a first password costs a session at most a second of scrypt an hour', () => {
+    // The step happens once per account for its whole life, and the form runs the same
+    // `checkPassword` in the browser, so a submit that reaches the server has already
+    // passed the strength rules. Ten an hour is roughly ten times what the flow can
+    // honestly need; anything in the hundreds would stop being a bound on CPU at all.
+    const limit = LIMITS['set-password'];
+    assert.equal(limit.subject.windowMs, 60 * 60_000, 'measured over an hour');
+    assert(limit.subject.max <= 12, `a session gets few attempts, got ${limit.subject.max}`);
+    assert(limit.subject.max >= 3, 'but enough to survive a fumbled form and a reload');
+    assert(limit.ip.max >= limit.subject.max, 'one machine may hold more than one session');
+  });
+
+  test('nothing is looser than sign-in, which is the only one guessing pays off against', () => {
+    for (const action of ACTIONS) {
+      if (action === 'sign-in') continue;
+      const perHour = (LIMITS[action].subject.max * 60 * 60_000) / LIMITS[action].subject.windowMs;
+      const signInPerHour =
+        (LIMITS['sign-in'].subject.max * 60 * 60_000) / LIMITS['sign-in'].subject.windowMs;
+      assert(perHour <= signInPerHour, `${action} allows ${perHour}/h vs sign-in's ${signInPerHour}/h`);
     }
   });
 });

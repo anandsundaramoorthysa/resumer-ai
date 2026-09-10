@@ -20,7 +20,8 @@ import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { hashPassword } from '@/lib/auth/password';
 import { initialPasswordVerdict } from '@/lib/auth/initial-password';
-import { clearAttempts } from '@/lib/auth/rate-limit';
+import { normalizeEmail } from '@/lib/auth/email-policy';
+import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
 import type { AuthResult } from '../sign-in/account-actions';
 
 export async function setInitialPasswordAction(password: string): Promise<AuthResult> {
@@ -32,6 +33,28 @@ export async function setInitialPasswordAction(password: string): Promise<AuthRe
       message: 'Your session has expired. Sign in again and we will ask you once more.',
     };
   }
+
+  /**
+   * The limit is taken before the row is read, and keyed on the user id.
+   *
+   * Every other action in this app rate-limits to stop guessing. This one has nothing to
+   * guess at: the caller is already inside the account they are writing to, and both the
+   * refusals below name the real reason, so there is no oracle to work and no third party
+   * to grind down. What it protects is the machine. `hashPassword` further down is scrypt
+   * at a cost chosen to take roughly a tenth of a second of a core, and a session holder
+   * who loops this call gets that spent for them at the price of one HTTP request each —
+   * on a serverless host that is instances tied up hashing passwords nobody will use.
+   *
+   * Keying on the user id rather than the address is what makes the limit mean anything
+   * here. The address is not known until the row is read, so limiting by it would put the
+   * database read the attacker is also paying for INSIDE the limit; and an account's
+   * address can be rewritten by the provider on a later sign-in, which would hand the
+   * same session a fresh bucket. The id cannot be moved and cannot be forged — it comes
+   * from the session, not the request body. See LIMITS in lib/auth/rate-limit.ts for why
+   * the ceiling is ten an hour.
+   */
+  const limit = await rateLimit('set-password', userId, await callerIp());
+  if (!limit.allowed) return { ok: false, message: limit.message! };
 
   // Read by id, never by the email in the session. The row is the authority on what this
   // account currently holds, and the JWT is a snapshot that may be a fortnight old.
@@ -87,7 +110,15 @@ export async function setInitialPasswordAction(password: string): Promise<AuthRe
   // A stranger may have been guessing this address for the last quarter of an hour, and
   // the counter that stopped them would otherwise lock the owner out of the password they
   // just chose. Sign-up and reset clear it for the same reason.
-  if (account.email) await clearAttempts('sign-in', account.email);
+  if (account.email) await clearAttempts('sign-in', normalizeEmail(account.email));
+
+  // And this account's own set-password counter, which has now done the one job it will
+  // ever do. Leaving it would mean a user who fumbled the form a few times and then
+  // succeeded is still carrying those attempts if they ever return here — which they
+  // would only do after losing the password some other way, and being told "too many
+  // attempts" while holding a valid session for an account with no password is the exact
+  // dead end this whole step exists to remove.
+  await clearAttempts('set-password', userId);
 
   return {
     ok: true,
