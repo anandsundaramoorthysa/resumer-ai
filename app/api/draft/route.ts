@@ -136,6 +136,31 @@ export async function POST(req: NextRequest) {
       const emit = (e: Omit<PipelineEvent, 'at'>) =>
         send('stage', { ...e, at: Date.now() });
 
+      /*
+       * A heartbeat, because a silent stream does not survive the trip to the browser.
+       *
+       * Production drafts on Netlify delivered their first burst of events and then
+       * nothing — not the progress rows, not the final error, and a finished draft would
+       * have lost its result the same way. Four timed runs fit one pattern: a model call
+       * left the stream silent for 12 to 25 seconds, and the connection closed for the
+       * browser at the exact moment the server next wrote. Something between the function
+       * and the browser drops an idle stream, and the next write is what reveals it. The
+       * function itself carried on, recorded its usage, and wrote a result into a
+       * connection that was already gone.
+       *
+       * Lines that start with a colon are comments in the event-stream format and every
+       * client ignores them, including the parser in components/draft-console.tsx, which
+       * skips any frame without a `data:` line. A few bytes every three seconds keep the
+       * connection live through the slowest model call.
+       */
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(': keepalive\n\n'));
+        } catch {
+          clearInterval(heartbeat);
+        }
+      }, 3_000);
+
       try {
         const profile = await loadProfileForUser(userId);
 
@@ -217,7 +242,16 @@ export async function POST(req: NextRequest) {
           kind: err instanceof PipelineError ? err.kind : 'generic',
         });
       } finally {
-        controller.close();
+        // Cleared before anything else: an interval left running keeps the function
+        // alive after the response, which on a 30-second platform is a kill.
+        clearInterval(heartbeat);
+        // At most once — the empty-profile branch above has already closed it, and a
+        // second close throws.
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       }
     },
   });

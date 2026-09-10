@@ -24,6 +24,7 @@ import { combinedFormattingScore, scoreLength } from './length';
 import { scoreSkillsCompleteness } from './skills';
 import { scoreEvidence, type EvidenceResult } from './evidence';
 import { BudgetExceededError, type DraftBudget } from '../ai/budget';
+import { AllProvidersFailedError } from '../ai/chain';
 
 export const PASS_THRESHOLD = 8.5;
 export const MAX_ITERATIONS = 4;
@@ -80,7 +81,23 @@ export async function scoreDocument(
   const skills = scoreSkillsCompleteness(doc, records);
 
   // Only spend a model call once the cheap deterministic checks are in hand.
-  const evidence = await scoreEvidence(doc, budget, alreadyTried);
+  //
+  // And if that call cannot finish, keep them. Keywords, formatting, length and skills
+  // are all decided above without a model; evidence is the one sub-score that needs one.
+  // When the evidence call ran out of time, this function used to throw — discarding
+  // grading it had already done — and the loop's first-iteration fallback then reported
+  // the finished resume as 0/10, a number that went on to the dashboard average. So the
+  // deterministic grades stand, and evidence is counted as zero with the reason attached:
+  // a floor that never invents a grade, rather than a zero that erases real ones.
+  let evidence: Awaited<ReturnType<typeof scoreEvidence>>;
+  let evidenceUngraded: string | null = null;
+  try {
+    evidence = await scoreEvidence(doc, budget, alreadyTried);
+  } catch (err) {
+    evidenceUngraded = outOfTime(err);
+    if (!evidenceUngraded) throw err;
+    evidence = { score: 0, weakBullets: [], provider: 'n/a' };
+  }
 
   const overall =
     (formattingScore * WEIGHTS.formatting +
@@ -89,6 +106,13 @@ export async function scoreDocument(
     10;
 
   const critiques: Critique[] = [];
+
+  if (evidenceUngraded) {
+    critiques.push({
+      subScore: 'evidence',
+      message: `Evidence was not graded: ${evidenceUngraded} It is counted as zero rather than guessed, so the overall score here is a floor, not a verdict.`,
+    });
+  }
 
   if (!keywords.passed) {
     critiques.push({
@@ -241,9 +265,8 @@ export async function runQualityGate(args: {
     try {
       breakdown = await scoreDocument(current, records, budget, [...unimprovable]);
     } catch (err) {
-      if (err instanceof BudgetExceededError) {
-        return haltForBudget(best, current, history, weakSeen, err.message);
-      }
+      const halt = outOfTime(err);
+      if (halt) return haltForBudget(best, current, history, weakSeen, halt);
       throw err;
     }
 
@@ -319,9 +342,8 @@ export async function runQualityGate(args: {
     try {
       revision = await revise(current, breakdown.result.critiques, budget);
     } catch (err) {
-      if (err instanceof BudgetExceededError) {
-        return haltForBudget(best, current, history, weakSeen, err.message);
-      }
+      const halt = outOfTime(err);
+      if (halt) return haltForBudget(best, current, history, weakSeen, halt);
       throw err;
     }
 
@@ -400,6 +422,41 @@ function haltForNoProgress(
     weakBullets,
     history,
   };
+}
+
+/**
+ * A call that could not finish in time, however the chain chose to report it.
+ *
+ * This loop was built to stop early and keep its best version when time runs out, and it
+ * only ever recognised `BudgetExceededError`. But that is thrown BETWEEN calls. When the
+ * clock runs out DURING one, the chain exhausts its attempt windows and throws
+ * `AllProvidersFailedError` instead — which this loop rethrew, and which took down a
+ * resume that had already been fully assembled. In production, on a 30-second function,
+ * that was the common case rather than the edge one: a late scoring call got the last
+ * second and a half of the budget, one provider timed out inside it, and the draft
+ * failed with a finished document in hand.
+ *
+ * Either way the right outcome is the same — keep the resume, say why it stopped. The
+ * chain's own message is not passed through: it names providers and their raw errors,
+ * which were written for a developer, and haltForBudget shows its message to the user.
+ */
+function outOfTime(err: unknown): string | null {
+  // Matched by name as well as by class, because `instanceof` is only reliable when both
+  // sides share one copy of the module, and that is not guaranteed. Under tsx — which the
+  // test suite runs on — this file is transpiled to CommonJS and `require`s the error
+  // classes, while an ES-module caller imports the same files through the ESM loader: the
+  // file is loaded twice, the two classes are distinct, and `instanceof` quietly returns
+  // false. The tests for this function failed exactly that way while the code under them
+  // was correct. Both classes assign `name` as a string literal rather than inheriting it
+  // from the class, so the check also survives minification in a production bundle.
+  const name = err instanceof Error ? err.name : '';
+  if (err instanceof BudgetExceededError || name === 'BudgetExceededError') {
+    return (err as Error).message;
+  }
+  if (err instanceof AllProvidersFailedError || name === 'AllProvidersFailedError') {
+    return 'The AI providers could not finish grading this draft — they were unavailable or ran out of time.';
+  }
+  return null;
 }
 
 function haltForBudget(

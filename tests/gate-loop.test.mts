@@ -13,7 +13,9 @@
  */
 
 import { assert, report, testAsync, suiteAsync } from './harness.mjs';
-import { runQualityGate, MAX_ITERATIONS, type ReviseOutcome } from '@/lib/quality/loop';
+import { runQualityGate, scoreDocument, MAX_ITERATIONS, type ReviseOutcome } from '@/lib/quality/loop';
+import { DraftBudget } from '@/lib/ai/budget';
+import { AllProvidersFailedError } from '@/lib/ai/chain';
 import type { JobRequirement, ProfileRecord, ResumeDocument } from '@/lib/types';
 
 /* ------------------------------------------------------------- fixtures ---- */
@@ -219,6 +221,107 @@ await suiteAsync('quality gate — stopping when nothing can change', async () =
     });
 
     assert.equal(seen.length, 1);
+  });
+});
+
+/* ------------------------------------------------- running out of time ---- */
+
+/**
+ * A document with bullets the evidence scorer has to grade.
+ *
+ * thinDocument() has none, which is why every case above runs without a model: with no
+ * experience, projects or summary, scoreEvidence returns a fixed 1 before calling one.
+ * That also meant nothing here had ever reached the failure path these cases are about.
+ */
+function gradableDocument(): ResumeDocument {
+  const doc = thinDocument();
+  doc.sections.push({
+    key: 'experience',
+    heading: 'Experience',
+    items: [],
+    groups: [
+      {
+        title: 'Engineer',
+        subtitle: 'Acme',
+        items: [
+          { text: 'Built the internal reporting dashboard used by the sales team', sourceRecordId: 'b1' },
+        ],
+      },
+    ],
+  });
+  return doc;
+}
+
+/**
+ * A budget that refuses the next model call before it is made.
+ *
+ * generateStructured checks the budget before its first provider attempt, so this
+ * reaches the out-of-budget path without a single network request.
+ */
+const spent = () => new DraftBudget({ maxCalls: 0, maxTokens: 0 });
+
+await suiteAsync('quality gate — running out of time keeps the resume', async () => {
+  await testAsync('evidence that cannot be graded is counted as zero, not the whole score', async () => {
+    const breakdown = await scoreDocument(gradableDocument(), records, spent());
+
+    assert.equal(breakdown.result.evidenceScore, 0);
+    assert.ok(breakdown.result.formattingScore > 0, 'the deterministic grades must survive');
+    assert.ok(breakdown.result.overall > 0, 'a finished resume must not be reported as 0/10');
+    assert.ok(
+      breakdown.result.critiques.some(
+        (c) => c.subScore === 'evidence' && /not graded/i.test(c.message),
+      ),
+      'the reason must be stated, not implied',
+    );
+  });
+
+  await testAsync('a revision that runs out of time returns the best version instead of throwing', async () => {
+    // What production did on a 30-second function: a late call got the last second and a
+    // half of the budget, the one provider it had time for timed out, and the chain
+    // reported that as AllProvidersFailedError rather than as running out of time.
+    const outcome = await runQualityGate({
+      document: thinDocument(),
+      records,
+      revise: async () => {
+        throw new AllProvidersFailedError([
+          { provider: 'Groq', error: 'The operation was aborted due to timeout' },
+        ]);
+      },
+    });
+
+    assert.ok(outcome.document, 'the assembled resume must come back');
+    assert.equal(outcome.result.haltReason, 'budget-cap');
+    const why = outcome.result.haltExplanation ?? '';
+    assert.match(why, /could not finish grading/i);
+    assert.doesNotMatch(why, /Groq|aborted/, 'provider internals are not written for the user');
+  });
+
+  await testAsync('a draft whose budget is gone before scoring still reports real grades', async () => {
+    const outcome = await runQualityGate({
+      document: gradableDocument(),
+      records,
+      budget: spent(),
+      revise: didNothing,
+    });
+
+    assert.ok(outcome.document);
+    assert.ok(outcome.result.overall > 0, `expected a real floor, got ${outcome.result.overall}`);
+  });
+
+  await testAsync('any other failure still surfaces — only running out of time is absorbed', async () => {
+    let threw = false;
+    try {
+      await runQualityGate({
+        document: thinDocument(),
+        records,
+        revise: async () => {
+          throw new Error('a genuine bug');
+        },
+      });
+    } catch {
+      threw = true;
+    }
+    assert.equal(threw, true, 'a real error must not be silently swallowed');
   });
 });
 
