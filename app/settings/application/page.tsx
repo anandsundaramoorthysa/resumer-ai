@@ -6,6 +6,7 @@ import { applicationFormFields } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
 import { availableProviders } from '@/lib/ai/models';
 import { ApplicationFieldsForm } from './application-form';
+import { PasswordStatusCard } from '@/components/password-status-card';
 
 export const metadata = { title: 'Application answers' };
 export const dynamic = 'force-dynamic';
@@ -137,6 +138,8 @@ export default async function ApplicationFieldsPage() {
             </div>
           )}
         </section>
+
+        <PasswordStatusCard />
       </main>
     </div>
   );
