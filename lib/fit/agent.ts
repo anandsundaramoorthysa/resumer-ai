@@ -355,7 +355,11 @@ export function rulesOnlyReport(facts: FitFacts, persona: Persona): FitReport {
         held.length ? ` (${held.slice(0, 8).map((s) => s.keyword).join(', ')})` : ''
       }.`,
     );
-    if (missing.length) parts.push(`Not shown anywhere in your profile: ${missing.slice(0, 10).join(', ')}.`);
+    // "Not named", not "not in your profile": this list comes from the gate's word
+    // matcher, which knows whether a term is written down and nothing more. On the EA
+    // posting it listed SQL as missing while the review, rightly, credited PostgreSQL and
+    // MySQL work as SQL — and the old wording made the two contradict each other.
+    if (missing.length) parts.push(`Not named anywhere in your profile: ${missing.slice(0, 10).join(', ')}.`);
   }
   if (facts.yearsRequired !== null) {
     parts.push(

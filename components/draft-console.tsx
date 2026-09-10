@@ -682,8 +682,11 @@ function FitCard({
             </ul>
           </div>
           <div>
+            {/* "Not named", because this list is the keyword matcher's: it knows whether
+                a term is written in the profile, not whether related work implies it.
+                The requirement-by-requirement review below is where that is judged. */}
             <p className="text-xs font-semibold text-muted">
-              Asked for, not in your profile ({fit.skills.missing.length})
+              Asked for, not named in your profile ({fit.skills.missing.length})
             </p>
             <ul className="mt-1.5 flex flex-wrap gap-1.5">
               {fit.skills.missing.map((s) => (
