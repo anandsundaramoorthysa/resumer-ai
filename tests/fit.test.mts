@@ -225,6 +225,7 @@ suite('the agent’s answer is checked, not trusted', () => {
         score: 90,
         knockouts: [
           {
+            kind: 'degree',
             requirement: 'Currently pursuing an M.Sc. in Statistics or Mathematics',
             reason: 'Your completed degree is a B.Sc.',
           },
@@ -241,13 +242,52 @@ suite('the agent’s answer is checked, not trusted', () => {
   test('a knockout the posting never mentions is dropped', () => {
     const report = groundReport(
       agentSays({
-        knockouts: [{ requirement: 'Must hold a PhD from Stanford University', reason: 'invented' }],
+        knockouts: [{ kind: 'degree', requirement: 'Must hold a PhD from Stanford University', reason: 'invented' }],
       }),
       facts,
       JOB_TEXT,
       persona,
     );
     assert.equal(report.knockouts.length, 0);
+  });
+
+  test('living in another city is a question, never a knockout', () => {
+    // The first live fit check did exactly this: "in-person at Hyderabad" as a knockout
+    // for a candidate in Chennai. The rule stays visible — as unclear, not failed.
+    const posting = `${JOB_TEXT}\nThe internship is in-person at the Hyderabad office, three days a week.`;
+    const report = groundReport(
+      agentSays({
+        score: 60,
+        knockouts: [
+          {
+            kind: 'location',
+            requirement: 'The internship is in-person at the Hyderabad office',
+            reason: 'You live in Chennai.',
+          },
+        ],
+      }),
+      facts,
+      posting,
+      persona,
+    );
+    assert.equal(report.knockouts.length, 0);
+    const location = report.facets.find((f) => f.area === 'location');
+    assert.equal(location?.status, 'unclear');
+    assert.equal(report.decision, decide(report.score, 0));
+  });
+
+  test('a grade rule is never a knockout — the profile has nowhere to record a grade', () => {
+    const posting = `${JOB_TEXT}\nMinimum 7 CGPA with no active backlogs.`;
+    const report = groundReport(
+      agentSays({
+        knockouts: [{ kind: 'grade', requirement: 'Minimum 7 CGPA', reason: 'No CGPA is listed.' }],
+      }),
+      facts,
+      posting,
+      persona,
+    );
+    assert.equal(report.knockouts.length, 0);
+    assert.ok(report.facets.some((f) => f.area === 'eligibility' && f.status === 'unclear'));
   });
 
   test('the score cannot exceed what the profile’s coverage allows', () => {

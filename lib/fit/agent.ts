@@ -3,9 +3,11 @@
  *
  * Until now the app drafted for any job it was given and only discovered a mismatch at
  * the end, as a score it could not raise: an EA analytics internship scored 4.7/10 and
- * stopped, and the only explanation was a list of missing keywords. Nothing ever said the
- * thing the candidate actually needed to hear first — that the posting asks for a
- * Master's student graduating in 2027, and this profile is not one.
+ * stopped, and the only explanation was a list of missing keywords. Nothing ever said
+ * what the candidate needed to hear first — which requirements they meet and which they
+ * do not. On that posting the answer turned out to be more useful than the score: the
+ * in-progress M.Sc. meets the eligibility rule outright, and the real gaps are SQL, R and
+ * visualisation — something a keyword percentage could never have said.
  *
  * So a persona suited to the role (./persona.ts) reads the whole profile against the
  * whole posting and gives a verdict with reasons. The decision that follows is the
@@ -51,6 +53,7 @@ export const AUTO_PROCEED_SCORE = 55;
 const MAX_JOB_TEXT_CHARS = 8_000;
 
 export type FitVerdict = 'strong' | 'good' | 'partial' | 'weak';
+export type KnockoutKind = 'degree' | 'graduation' | 'grade' | 'authorisation' | 'location' | 'other';
 export type FacetStatus = 'meets' | 'partial' | 'missing' | 'unclear';
 export type FacetArea =
   | 'skills'
@@ -81,7 +84,7 @@ export interface FitReport {
   summary: string;
   facets: FitFacet[];
   /** Hard eligibility rules the profile conflicts with. Any one of these means "ask". */
-  knockouts: Array<{ requirement: string; reason: string }>;
+  knockouts: Array<{ requirement: string; reason: string; kind: KnockoutKind }>;
   /** The deterministic skill check, always present — the part that needs no model. */
   skills: {
     held: Array<{ keyword: string; evidence: string }>;
@@ -141,7 +144,13 @@ const AgentSchema = z.object({
     )
     .max(16),
   knockouts: z
-    .array(z.object({ requirement: z.string().max(300), reason: z.string().max(300) }))
+    .array(
+      z.object({
+        kind: z.enum(['degree', 'graduation', 'grade', 'authorisation', 'location', 'other']),
+        requirement: z.string().max(300),
+        reason: z.string().max(300),
+      }),
+    )
     .max(6),
   nextSteps: z.array(z.string().max(240)).max(5),
 });
@@ -159,7 +168,9 @@ How to judge:
 - Compare everything, not only skills: tools and skills, the kind and length of experience, education (level, field, and whether it is completed or still in progress), eligibility rules the posting states, domain background, and location or work mode.
 - Use ONLY the profile provided. Every requirement you mark "meets" or "partial" must list the profile refs that show it in "evidence" (for example "P3", "W1", "K12"). No ref, no credit.
 - Adjacent evidence is "partial", not "meets" — and say what it is in the note (for example: PostgreSQL work is SQL experience).
-- A knockout is a hard eligibility rule the posting states explicitly — a required degree or programme, a graduation year, a minimum grade, work authorisation, a mandatory location — AND that the profile clearly conflicts with. Put the requirement in the posting's own words. If the profile simply does not say (no grade is listed, say), that is "unclear", never a knockout.
+- A knockout is a hard eligibility rule the posting states explicitly — a required degree or programme, a graduation year, work authorisation — AND that the profile clearly conflicts with. Give its kind, and put the requirement in the posting's own words. If the profile simply does not say, that is "unclear", never a knockout.
+- Where the candidate lives now is never a knockout: people relocate for jobs and internships. Treat an office or city requirement as a "location" facet with status "unclear", unless the profile says they cannot move.
+- The profile has no field for grades, CGPA or backlogs, so a grade rule can never be a clear conflict — it is always an "unclear" facet.
 - Pay, stipend, dates and application steps are not requirements unless the posting makes them eligibility rules.
 - Score 0 to 100: 80 and above strong, 65–79 good, 45–64 partial, below 45 weak. Set "verdict" to match the score.
 - Write to the candidate as "you": candid, specific and respectful. No flattery, and no discouragement without a stated reason. The headline is one sentence; the summary is two to four sentences.
@@ -254,9 +265,36 @@ export function groundReport(
   });
 
   const posting = normalizeForMatch(jobText);
-  const knockouts = raw.knockouts
-    .filter((k) => k.requirement.trim() && appearsInPosting(k.requirement, posting))
-    .map((k) => ({ requirement: k.requirement.trim(), reason: k.reason.trim() }));
+  const knockouts: FitReport['knockouts'] = [];
+  for (const k of raw.knockouts) {
+    if (!k.requirement.trim() || !appearsInPosting(k.requirement, posting)) continue;
+
+    // Two kinds are demoted to a question rather than trusted as a rule the candidate
+    // fails, whatever the model says, because the profile cannot ground them:
+    //
+    //   - location: the first live fit check called "in-person at Hyderabad" a knockout
+    //     for a candidate in Chennai. Living elsewhere is not a conflict — people move
+    //     for internships — and the profile has no field that says they will not;
+    //   - grade: the profile has no field for CGPA or backlogs at all, so no grade rule
+    //     can ever be shown to conflict with it.
+    //
+    // Both stay visible, as "unclear", so the candidate still sees the rule.
+    if (k.kind === 'location' || k.kind === 'grade') {
+      facets.push({
+        area: k.kind === 'location' ? 'location' : 'eligibility',
+        requirement: k.requirement.trim(),
+        status: 'unclear',
+        evidence: [],
+        note:
+          k.kind === 'location'
+            ? 'Not a rule you fail — say in your application whether you can work from there.'
+            : 'Your profile does not record grades, so check this one yourself before applying.',
+      });
+      continue;
+    }
+
+    knockouts.push({ requirement: k.requirement.trim(), reason: k.reason.trim(), kind: k.kind });
+  }
 
   const score = Math.max(
     0,

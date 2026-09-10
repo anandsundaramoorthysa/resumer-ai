@@ -34,6 +34,7 @@ import { scoreSkillsCompleteness } from './skills';
 import { scoreEvidence, type EvidenceResult } from './evidence';
 import { BudgetExceededError, type DraftBudget } from '../ai/budget';
 import { AllProvidersFailedError } from '../ai/chain';
+import { isRoleTitleTerm } from '../fit/assess';
 
 export const PASS_THRESHOLD = 8.5;
 
@@ -199,7 +200,15 @@ export async function scoreDocument(
     critiques,
   };
 
-  return { result, genuineGaps: skills.genuineGaps, weakBullets: evidence.weakBullets };
+  // The posting's own title is not a gap in anyone's experience. Keyword extraction lists
+  // it (ATS filters do match titles), so the skills scorer counted it as something the
+  // profile lacks, and the halt text told the EA candidate "the job asks for Product
+  // Analyst Intern … which isn't in your profile". The fit check already excludes title
+  // terms by the same rule; this is where the halt text gets its list.
+  const roleTitle = doc.jobRequirement?.roleTitle ?? '';
+  const genuineGaps = skills.genuineGaps.filter((g) => !isRoleTitleTerm(g, roleTitle));
+
+  return { result, genuineGaps, weakBullets: evidence.weakBullets };
 }
 
 /**

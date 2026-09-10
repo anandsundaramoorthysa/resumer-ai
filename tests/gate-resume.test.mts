@@ -191,4 +191,22 @@ await suiteAsync('quality gate — resuming across requests', async () => {
   });
 });
 
+await suiteAsync('quality gate — what it calls a gap', async () => {
+  await testAsync('the posting’s own title is never reported as experience the profile lacks', async () => {
+    // Live, on the EA internship: "The job asks for Product Analyst Intern, SQL, R …
+    // which isn't in your profile."
+    const titled: JobRequirement = {
+      ...job,
+      roleTitle: 'Product Analyst Intern',
+      atsKeywords: ['Product Analyst Intern', 'Erlang'],
+    };
+    const doc = thinDocument();
+    doc.jobRequirement = titled;
+
+    const { genuineGaps } = await scoreDocument(doc, records);
+    assert.ok(!genuineGaps.includes('Product Analyst Intern'), `got: ${genuineGaps.join(', ')}`);
+    assert.ok(genuineGaps.includes('Erlang'), 'a real gap must still be reported');
+  });
+});
+
 report('gate-resume');
