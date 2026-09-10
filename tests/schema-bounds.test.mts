@@ -102,6 +102,25 @@ suite('JobSchema — a posting cannot ask for an unbounded amount', () => {
     );
   });
 
+  test('a requirement written as a sentence is kept — it once failed every draft', () => {
+    // The production regression, pinned. A 120-character cap on requiredSkills items
+    // rejected the whole response the moment a model returned a degree requirement as
+    // the sentence it always is, and the one provider that answered in time was thrown
+    // away. A cap that fires on real output bounds nothing; it only fails.
+    const degree =
+      'Currently pursuing or recently completed a degree in Computer Science, Statistics, ' +
+      'Mathematics, Data Science, Economics or a related field.';
+    assert(degree.length > 120, 'the fixture must exceed the cap that used to reject it');
+    assert.equal(
+      JobSchema.safeParse(jobWith({ requiredSkills: ['SQL', degree], preferredSkills: [degree] })).success,
+      true,
+    );
+    assert.equal(
+      JobSchema.safeParse(jobWith({ atsKeywords: ['statistical hypothesis testing and experimental design for A/B tests in production'] })).success,
+      true,
+    );
+  });
+
   test('required and preferred skills are bounded too', () => {
     assert.equal(JobSchema.safeParse(jobWith({ requiredSkills: fill(60) })).success, true);
     assert.equal(JobSchema.safeParse(jobWith({ requiredSkills: fill(900) })).success, false);

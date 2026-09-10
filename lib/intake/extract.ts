@@ -40,11 +40,36 @@ export const JobSchema = z.object({
   company: z.string().max(200).optional(),
   seniority: z.enum(['intern', 'entry', 'mid', 'senior', 'lead', 'unknown']),
   category: z.enum(['seo', 'full-stack', 'ai-engineer', 'project-manager', 'data', 'design', 'general']),
-  requiredSkills: z.array(z.string().max(120)).max(80),
-  preferredSkills: z.array(z.string().max(120)).max(80),
+  /*
+   * The per-item caps here are deliberately loose, and the array caps are what does the
+   * protecting.
+   *
+   * A cap on model output does not shorten a long item — it rejects the entire response,
+   * and the chain moves on to the next provider. So a cap that fires on real output does
+   * not bound anything; it turns one long line into "every configured AI provider
+   * failed". That happened in production: requiredSkills items were capped at 120
+   * characters, a model returned a requirement written as a sentence — the kind of line
+   * a degree requirement always is, "Currently pursuing or recently completed a degree
+   * in Computer Science, Statistics, Mathematics…" — and the one provider that answered
+   * in time had its response thrown away. No draft in production could get past reading
+   * the job.
+   *
+   * requiredSkills and preferredSkills hold requirement LINES, so they get the same room
+   * as responsibilities. atsKeywords should be short terms but are not always returned
+   * that way. What these caps must still stop — a 3,000-keyword array, a 5,000-character
+   * paragraph posing as one keyword — is stopped by the array lengths below and by
+   * anything near a paragraph, and tests/schema-bounds.test.mts pins both ends.
+   *
+   * Clamping instead of rejecting would be better in principle, and is unsafe here: the
+   * AI SDK converts this schema with `io: "input"`, where a preprocess's input side is
+   * `unknown` and would be sent to every provider as "any value", and a transform cannot
+   * be represented by `z.toJSONSchema` at all.
+   */
+  requiredSkills: z.array(z.string().max(500)).max(80),
+  preferredSkills: z.array(z.string().max(500)).max(80),
   responsibilities: z.array(z.string().max(500)).max(60),
   atsKeywords: z
-    .array(z.string().max(120))
+    .array(z.string().max(300))
     .max(200)
     .describe('Exact terms an ATS keyword filter would scan for. Prefer the posting\'s own wording.'),
   companyContext: z.string().max(2_000).optional(),
