@@ -286,6 +286,31 @@ export interface ResumeDocument {
   createdAt: Date;
 }
 
+/**
+ * Where the quality loop got to, persisted on the snapshot so a later request can carry
+ * on from here instead of starting over — see `runQualityGate` in lib/quality/loop.ts.
+ *
+ * It exists because of the platform, not the algorithm. Netlify's free tier kills a
+ * function at 30 seconds, and a draft that reads the job, assembles, scores and renders
+ * has time for one revision pass inside that. The loop was designed for four. Rather than
+ * ask the platform for more time, the loop is made resumable: each request does what fits,
+ * writes this down, and the next request picks it up.
+ */
+export interface LoopState {
+  /** Scoring passes run so far, across every request for this resume. */
+  iterations: number;
+  history: Array<{ iteration: number; overall: number; keywordGatePassed: boolean }>;
+  /** Bullets a revision already proved it cannot strengthen — never re-asked. */
+  unimprovable: string[];
+  /** Consecutive passes that failed to move the score. */
+  stagnant: number;
+  previousOverall: number | null;
+  /** What the posting asks for that the profile does not hold — kept for the halt text. */
+  genuineGaps: string[];
+  /** True when another request could still change the result. */
+  canContinue: boolean;
+}
+
 /** REQ-5.2 — scoring result. */
 export interface QualityGateResult {
   keywordGatePassed: boolean;
@@ -307,6 +332,8 @@ export interface QualityGateResult {
    */
   haltReason?: 'iteration-cap' | 'budget-cap' | 'unfixable-gap' | 'no-progress';
   haltExplanation?: string;
+  /** Present on every result the loop returns; what a follow-up request resumes from. */
+  loop?: LoopState;
 }
 
 export interface Critique {
@@ -321,6 +348,7 @@ export interface Critique {
 export type PipelineStage =
   | 'sync'
   | 'understand'
+  | 'fit'
   | 'retrieve'
   | 'draft'
   | 'score'

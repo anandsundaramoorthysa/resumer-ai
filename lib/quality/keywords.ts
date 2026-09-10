@@ -89,6 +89,27 @@ function matches(haystack: string, keyword: string): boolean {
   return false;
 }
 
+/**
+ * The gate's own matcher, for code that has to agree with it.
+ *
+ * The fit assessment (lib/fit/assess.ts) answers "does this profile hold what the posting
+ * asks for?" and the page trim (lib/generate/fit-page.ts) answers "would dropping this
+ * line lose a keyword?". Both questions are only worth asking if they are answered by the
+ * same rule the 70% gate uses — a second, looser matcher would tell someone they hold a
+ * skill the gate then says is missing. So this is the same function, exported, rather than
+ * a copy.
+ *
+ * `haystack` must already be normalised with `normalizeForMatch`.
+ */
+export function keywordMatches(haystack: string, keyword: string): boolean {
+  return matches(haystack, keyword);
+}
+
+/** The normalisation every haystack passed to `keywordMatches` needs. */
+export function normalizeForMatch(text: string): string {
+  return norm(text);
+}
+
 export interface KeywordCoverage {
   passed: boolean;
   coveragePct: number;

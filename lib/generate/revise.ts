@@ -14,14 +14,22 @@ import { z } from 'zod';
 import type {
   Critique,
   ProfileRecord,
+  ProjectRecord,
   ResumeDocument,
+  ResumeSection,
   SkillRecord,
 } from '../types';
 import { generateStructured } from '../ai/chain';
 import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
+import { trimToPage } from './fit-page';
 import { formatDate } from '../render/dates';
 import { holdsKeyword } from '../quality/vocabulary';
+import {
+  keywordMatches,
+  normalizeForMatch,
+  scoreKeywordCoverage,
+} from '../quality/keywords';
 import type { ReviseOutcome } from '../quality/loop';
 
 const ReviseSchema = z.object({
@@ -66,13 +74,18 @@ export async function reviseDocument(
   // ---- 1. Deterministic fixes, no model call --------------------------------
   next = applySkillsFix(next, critiques, allRecords);
   next = applyKeywordFix(next, critiques, allRecords);
+  next = applyRecordSwapIn(next, critiques, allRecords);
   next = sanitizeText(next);
+  next = applyLengthFix(next, critiques);
 
   // ---- 2. Evidence fixes, model-assisted, grounded ---------------------------
+  // Only bullets still on the page. The length fix above may have just removed some, and
+  // a rewrite of a line that is no longer there is a model call bought for nothing.
+  const onPage = new Set(allItemTexts(next));
   const evidenceTargets = critiques
     .filter((c) => c.subScore === 'evidence')
     .map((c) => extractQuoted(c.message))
-    .filter((t): t is string => Boolean(t));
+    .filter((t): t is string => Boolean(t) && onPage.has(t!.trim()));
 
   if (evidenceTargets.length > 0) {
     try {
@@ -222,6 +235,146 @@ function replaceBulletText(
     }
   }
   return doc;
+}
+
+/**
+ * Bring in a project the posting would recognise, in place of one it would not.
+ *
+ * Retrieval picks projects once, before the resume exists, and nothing revisited that
+ * choice. On the EA analytics posting the profile held a project that mentions
+ * regression — a term the posting asks for — and it was not selected, so the keyword gate
+ * counted "regression" missing on a resume whose owner demonstrably has it. The Skills
+ * fix above cannot reach it either: it only adds terms the profile's tags, skill names or
+ * stacks hold, and this one lives in a project's description.
+ *
+ * So when the gate is short, the unused project that would bring the most missing terms
+ * replaces the project on the page that carries the fewest — and only if the page ends up
+ * holding more of the posting's terms than it did. Everything moved is the user's own
+ * record, rendered exactly as assembly renders it, so this is selection, never writing.
+ * One swap per pass keeps each pass's effect measurable.
+ */
+function applyRecordSwapIn(
+  doc: ResumeDocument,
+  critiques: Critique[],
+  records: ProfileRecord[],
+): ResumeDocument {
+  if (!critiques.some((c) => c.subScore === 'keywords')) return doc;
+
+  const coverage = scoreKeywordCoverage(doc);
+  if (coverage.missing.length === 0) return doc;
+
+  const sectionIndex = doc.sections.findIndex((s) => s.key === 'projects');
+  const groups = doc.sections[sectionIndex]?.groups ?? [];
+  if (sectionIndex === -1 || groups.length === 0) return doc;
+
+  const used = new Set<string>();
+  for (const s of doc.sections) {
+    for (const i of s.items) if (i.sourceRecordId) used.add(i.sourceRecordId);
+    for (const g of s.groups ?? []) {
+      for (const i of g.items) if (i.sourceRecordId) used.add(i.sourceRecordId);
+    }
+  }
+
+  // The unused project bringing the most missing terms.
+  let incoming: { record: ProjectRecord; gains: number } | null = null;
+  for (const r of records) {
+    if (r.type !== 'project' || used.has(r.id)) continue;
+    const text = normalizeForMatch(groupText(projectGroup(r)));
+    const gains = coverage.missing.filter((k) => keywordMatches(text, k)).length;
+    if (gains > 0 && (!incoming || gains > incoming.gains)) incoming = { record: r, gains };
+  }
+  if (!incoming) return doc;
+
+  // The project on the page carrying the fewest of the posting's terms; the later one on
+  // a tie, because retrieval ranked the earlier ones higher.
+  const keywords = doc.jobRequirement?.atsKeywords ?? [];
+  let weakest = 0;
+  let weakestValue = Infinity;
+  groups.forEach((g, i) => {
+    const text = normalizeForMatch(groupText(g));
+    const value = keywords.filter((k) => keywordMatches(text, k)).length;
+    if (value <= weakestValue) {
+      weakest = i;
+      weakestValue = value;
+    }
+  });
+
+  const outgoing = groups[weakest];
+  const replacement = projectGroup(incoming.record);
+
+  // Not a way to grow the page. A much longer project would trade a keyword for a length
+  // violation, and the page trim would then remove something else to pay for it.
+  if (wordCount(groupText(replacement)) > wordCount(groupText(outgoing)) * 1.5 + 12) return doc;
+
+  const next = structuredClone(doc);
+  next.sections[sectionIndex].groups![weakest] = replacement;
+
+  // Only a swap that leaves the page holding more of the posting than before. The
+  // outgoing project may have been the only place a term appeared.
+  if (scoreKeywordCoverage(next).matched.length <= coverage.matched.length) return doc;
+
+  // REQ-9.2: the snapshot's list of source records follows what is actually printed.
+  const outgoingIds = new Set(outgoing.items.map((i) => i.sourceRecordId).filter(Boolean));
+  const outgoingHashes = new Set(
+    records.filter((r) => outgoingIds.has(r.id)).map((r) => r.contentHash),
+  );
+  next.recordHashSnapshot = [
+    ...next.recordHashSnapshot.filter((h) => !outgoingHashes.has(h)),
+    incoming.record.contentHash,
+  ];
+
+  return next;
+}
+
+/**
+ * A project rendered exactly as ./assemble.ts renders it.
+ *
+ * Mirrored rather than imported because the assembler builds its groups inline; if that
+ * ever changes shape, a swapped-in project would look different from its neighbours, and
+ * tests/revise-swap.test.mts compares the two.
+ */
+function projectGroup(p: ProjectRecord): NonNullable<ResumeSection['groups']>[number] {
+  return {
+    title: p.name,
+    subtitle: p.stack.slice(0, 6).join(', '),
+    items: [
+      ...(p.description?.trim() ? [{ text: p.description.trim(), sourceRecordId: p.id }] : []),
+      ...p.impactMetrics
+        .filter((m) => typeof m === 'string' && m.trim())
+        .map((m) => ({ text: m.trim(), sourceRecordId: p.id })),
+    ],
+  };
+}
+
+function groupText(g: NonNullable<ResumeSection['groups']>[number]): string {
+  return [g.title, g.subtitle ?? '', ...g.items.map((i) => i.text)].join(' ');
+}
+
+function wordCount(s: string): number {
+  return s.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * The resume runs past its page — remove what the posting cares least about.
+ *
+ * The only formatting critique a revision can act on that is not a character swap. See
+ * ./fit-page.ts for the order things are removed in and what is never touched; it is a
+ * no-op on a resume that is too SHORT, which carries the same rule name.
+ */
+function applyLengthFix(doc: ResumeDocument, critiques: Critique[]): ResumeDocument {
+  const flagged = critiques.some(
+    (c) => c.subScore === 'formatting' && c.message.startsWith('plausible-length'),
+  );
+  return flagged ? trimToPage(doc).document : doc;
+}
+
+function allItemTexts(doc: ResumeDocument): string[] {
+  const out: string[] = [];
+  for (const s of doc.sections) {
+    for (const i of s.items) out.push(i.text.trim());
+    for (const g of s.groups ?? []) for (const i of g.items) out.push(i.text.trim());
+  }
+  return out;
 }
 
 function extractQuoted(message: string): string | null {

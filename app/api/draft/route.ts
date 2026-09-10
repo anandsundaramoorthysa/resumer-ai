@@ -4,28 +4,23 @@
  * Server-Sent Events over the standard Node.js runtime. Streaming does not require the
  * Edge runtime on Vercel, and staying on Node keeps @react-pdf/renderer, docx, mammoth
  * and pdf-parse available — all of which need Node APIs.
+ *
+ * Two ways in. The browser now arrives here after a fit check (app/api/draft/assess),
+ * carrying a sealed assessment: the job was already read and the profile already synced,
+ * so neither is done again and the time goes to the revision loop instead. Called with a
+ * job and no assessment — a script, an older client — it reads the job itself, exactly as
+ * it always has.
  */
 
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
-import {
-  MAX_UPLOAD_BYTES,
-  UnsafeUploadError,
-  extractUploadText,
-  formatFromFile,
-} from '@/lib/import/text';
-import {
-  fileRejection,
-  hasReadableText,
-  unreadableFileMessage,
-  validateJobSubmission,
-  type JobInputRejection,
-} from '@/lib/intake/job-input';
 import { runDraftPipeline, newDraftRunTrace, PipelineError } from '@/lib/pipeline/run';
 import { loadProfileForUser, persistDraft, buildSyncStep } from '@/lib/server/profile';
 import { recordEnrichmentQuestions } from '@/lib/server/enrichment';
 import { recordDraftRun } from '@/lib/server/draft-run';
-import type { PipelineEvent } from '@/lib/types';
+import { readJobSubmission, jsonError } from '@/lib/server/job-submission';
+import { eventStream } from '@/lib/server/sse';
+import { AssessmentTokenError, openAssessment } from '@/lib/fit/token';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -33,160 +28,39 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   const session = await auth();
   const userId = session?.user?.id;
+  if (!userId) return jsonError('Sign in first.', 401);
 
-  if (!userId) {
-    return new Response(JSON.stringify({ error: 'Sign in first.' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  const submission = await readJobSubmission(req, userId);
+  if (!submission.ok) return submission.response;
+  const { jobInput, fileText, fileName, assessment } = submission;
 
-  // Two transports, one endpoint. A file can only arrive as multipart, but everything
-  // that already posts JSON here keeps working untouched — the branch is on what the
-  // request actually says it is, not on a new route.
-  const isMultipart = (req.headers.get('content-type') ?? '')
-    .toLowerCase()
-    .includes('multipart/form-data');
-
-  let jobInput = '';
-  let fileText = '';
-  let fileName = '';
-
-  if (isMultipart) {
-    let form: FormData;
+  // Opened before anything streams, so a stale or foreign fit check is a plain refusal
+  // with a sentence the browser can show, rather than an error frame mid-stream.
+  let assessed: ReturnType<typeof openAssessment> | null = null;
+  if (assessment) {
     try {
-      form = await req.formData();
-    } catch {
-      return reject({
-        problem: 'empty',
-        message: 'That upload could not be read. Try attaching the file again.',
-        status: 400,
-      });
+      assessed = openAssessment(assessment, userId);
+    } catch (err) {
+      if (err instanceof AssessmentTokenError) return jsonError(err.message, 400);
+      throw err;
     }
-
-    const typed = form.get('jobInput');
-    jobInput = typeof typed === 'string' ? typed.trim() : '';
-
-    const file = form.get('jobFile');
-    if (file instanceof File && file.size > 0) {
-      // The browser's declared type is a hint, never the decision: the extension and
-      // the MIME type are both checked here, and the size cap is re-enforced on this
-      // side because the input's `accept` attribute stops nothing that is not a browser.
-      if (file.size > MAX_UPLOAD_BYTES) {
-        return reject(
-          fileRejection('file-too-big', {
-            sizeBytes: file.size,
-            maxBytes: MAX_UPLOAD_BYTES,
-          }),
-        );
-      }
-
-      const format = formatFromFile(file.name, file.type);
-      if (!format) return reject(fileRejection('file-type'));
-
-      try {
-        // Read into memory, use the text, let the bytes go. Nothing is written to disk
-        // or to any store, exactly as the importer promises for the same file types.
-        const buffer = Buffer.from(await file.arrayBuffer());
-        const extracted = await extractUploadText(buffer, format);
-        if (!hasReadableText(extracted.text)) {
-          return reject(unreadableFileMessage(format));
-        }
-        fileText = extracted.text;
-        fileName = file.name;
-      } catch (err) {
-        // Same rule as the SSE error below, for the same reason. `UnsafeUploadError`
-        // messages are written for the person who chose the file — "that DOCX expands
-        // to far more than a document should" tells them what to do next. Anything else
-        // here is a library's internals: mammoth and pdf-parse describe their own
-        // structures, and a decompression guard is exactly the surface where an
-        // attacker probes with malformed input to see what the parser says back.
-        if (!(err instanceof UnsafeUploadError)) {
-          console.error('[draft] job file could not be read for user', userId, err);
-        }
-        return reject({
-          problem: 'file-unreadable',
-          message:
-            err instanceof UnsafeUploadError
-              ? `Could not read that file: ${err.message}`
-              : 'That file could not be read. If it is a PDF, make sure it is not a scan; otherwise try a DOCX, or paste the text instead.',
-          status: 422,
-        });
-      }
-    } else if (file instanceof File) {
-      return reject(fileRejection('file-empty'));
-    }
-  } else {
-    const body = (await req.json().catch(() => ({}))) as { jobInput?: string };
-    jobInput = (body.jobInput ?? '').trim();
   }
 
-  const rejection = validateJobSubmission(jobInput, fileText.length);
-  if (rejection) return reject(rejection);
+  /*
+   * The run record, assembled alongside the stream rather than after it.
+   *
+   * This endpoint is the only place that sees both halves of a draft: the stage events on
+   * their way to the browser, and how the attempt ended. Both used to be discarded; see
+   * `draftRuns` in lib/db/schema.ts. The events and the start time come from the stream
+   * (lib/server/sse.ts); what is decided here is how the attempt ended.
+   */
+  const trace = newDraftRunTrace();
+  let snapshotId: string | null = null;
+  /** Set on every path that does not finish with a resume; null means it did. */
+  let failure: { error?: unknown; kind?: string } | null = null;
 
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      const send = (event: string, data: unknown) => {
-        controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
-        );
-      };
-
-      /*
-       * The run record, assembled alongside the stream rather than after it.
-       *
-       * This endpoint is the only place that sees both halves of a draft: the stage
-       * events on their way to the browser, and how the attempt ended. Both used to be
-       * discarded. The events were written to a socket and forgotten, so there was no
-       * per-run history of any kind; a failure left a row in `ai_usage_daily` and one
-       * `console.error` line in a function log. Six production faults were diagnosed by
-       * hand off that log because it was the only record that existed. See `draftRuns` in
-       * lib/db/schema.ts.
-       *
-       * `startedAt` is taken here, not at the top of the handler: the parse and upload
-       * work above belongs to reading the request, and the timeline is measured from the
-       * first thing the pipeline does so that stage offsets mean what they look like.
-       */
-      const startedAt = new Date();
-      const events: PipelineEvent[] = [];
-      const trace = newDraftRunTrace();
-      let snapshotId: string | null = null;
-      /** Set on every path that does not finish with a resume; null means it did. */
-      let failure: { error?: unknown; kind?: string } | null = null;
-
-      const emit = (e: Omit<PipelineEvent, 'at'>) => {
-        const event = { ...e, at: Date.now() };
-        events.push(event);
-        send('stage', event);
-      };
-
-      /*
-       * A heartbeat, because a silent stream does not survive the trip to the browser.
-       *
-       * Production drafts on Netlify delivered their first burst of events and then
-       * nothing — not the progress rows, not the final error, and a finished draft would
-       * have lost its result the same way. Four timed runs fit one pattern: a model call
-       * left the stream silent for 12 to 25 seconds, and the connection closed for the
-       * browser at the exact moment the server next wrote. Something between the function
-       * and the browser drops an idle stream, and the next write is what reveals it. The
-       * function itself carried on, recorded its usage, and wrote a result into a
-       * connection that was already gone.
-       *
-       * Lines that start with a colon are comments in the event-stream format and every
-       * client ignores them, including the parser in components/draft-console.tsx, which
-       * skips any frame without a `data:` line. A few bytes every three seconds keep the
-       * connection live through the slowest model call.
-       */
-      const heartbeat = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(': keepalive\n\n'));
-        } catch {
-          clearInterval(heartbeat);
-        }
-      }, 3_000);
-
+  return eventStream({
+    run: async ({ send, emit }) => {
       try {
         const profile = await loadProfileForUser(userId);
 
@@ -211,8 +85,11 @@ export async function POST(req: NextRequest) {
             jobInput,
             jobFileText: fileText || undefined,
             jobFileName: fileName || undefined,
-            syncStep: buildSyncStep(userId),
+            // The fit check synced moments ago; a second GitHub round trip finds nothing.
+            syncStep: assessed ? undefined : buildSyncStep(userId),
             trace,
+            job: assessed?.job,
+            fit: assessed?.fit,
           },
           emit,
         );
@@ -250,6 +127,7 @@ export async function POST(req: NextRequest) {
             docx: result.files.docxName,
           },
           document: result.document,
+          fit: result.fit,
         });
       } catch (err) {
         // `PipelineError` messages are written to be read by the person who uploaded
@@ -272,81 +150,32 @@ export async function POST(req: NextRequest) {
               : 'The draft failed unexpectedly. Nothing was saved — try again, and if it keeps happening the server log has the detail.',
           kind: err instanceof PipelineError ? err.kind : 'generic',
         });
-      } finally {
-        // Cleared before anything else: an interval left running keeps the function
-        // alive after the response, which on a 30-second platform is a kill.
-        clearInterval(heartbeat);
-
-        /*
-         * Record the attempt. Here, in the `finally`, for three reasons.
-         *
-         * One call site. Success, pipeline failure and the empty-profile refusal all pass
-         * through this block, so there is no path that returns a response without leaving
-         * a row — and "the runs that vanished are exactly the interesting ones" is how the
-         * gap this closes came about in the first place.
-         *
-         * BEFORE `controller.close()`, which is the whole reason this comment is long.
-         * The obvious order is the other way round — close the stream, let the user have
-         * their resume, then do the bookkeeping off the critical path — and that is how
-         * this was first written. It recorded nothing. Netlify freezes the execution
-         * environment the moment the response ends, so an `await` that outlives the
-         * stream is not slow, it simply never resumes: no row, and not even the catch
-         * below, because the process is suspended mid-await. The first production draft
-         * after the deploy failed at retrieval and left exactly the silence this table
-         * was added to end. Background functions are not on the Free plan, so there is
-         * nowhere else to put it. It costs the user one INSERT — tens of milliseconds
-         * against a draft measured in tens of seconds.
-         *
-         * Inside its own try. The same rule the enrichment write above follows, and stated
-         * there: a failure to write a note about a draft must never turn a finished draft
-         * into an error frame. It matters more here, because this write runs on the
-         * failure path too — a broken observability table that swallowed the failure it
-         * was describing would be worse than the silence it replaced. Now that it also
-         * runs before the close, the guard has a second job: whatever happens here, the
-         * user still gets their stream ended cleanly.
-         *
-         * `errorDetail` is stored, never sent. Whatever the catch above logged for a
-         * developer is kept for the owner and stays out of every SSE frame, for the
-         * reasons that catch spells out.
-         */
-        try {
-          await recordDraftRun({
-            userId,
-            startedAt,
-            finishedAt: new Date(),
-            events,
-            trace,
-            snapshotId: failure ? null : snapshotId,
-            error: failure?.error,
-            errorKind: failure?.kind,
-          });
-        } catch (err) {
-          console.error('[draft] could not record the draft run for user', userId, err);
-        }
-
-        // At most once — a second close throws.
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
       }
     },
-  });
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
+    /*
+     * Record the attempt — before the stream closes, which lib/server/sse.ts guarantees
+     * and explains. One call site: success, pipeline failure and the empty-profile refusal
+     * all pass through here, so there is no path that returns a response without leaving
+     * a row. Inside its own try, because a failure to write a note about a draft must
+     * never turn a finished draft into an error. `errorDetail` is stored, never sent.
+     */
+    finish: async ({ events, startedAt }) => {
+      const f = failure as { error?: unknown; kind?: string } | null;
+      try {
+        await recordDraftRun({
+          userId,
+          startedAt,
+          finishedAt: new Date(),
+          events,
+          trace,
+          snapshotId: f ? null : snapshotId,
+          error: f?.error,
+          errorKind: f?.kind,
+        });
+      } catch (err) {
+        console.error('[draft] could not record the draft run for user', userId, err);
+      }
     },
-  });
-}
-
-function reject(rejection: JobInputRejection): Response {
-  return new Response(JSON.stringify({ error: rejection.message }), {
-    status: rejection.status,
-    headers: { 'Content-Type': 'application/json' },
   });
 }

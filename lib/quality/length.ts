@@ -115,45 +115,29 @@ function contentWords(doc: ResumeDocument): number {
  * told it is long, never that it is short.
  */
 export function scoreLength(doc: ResumeDocument): LengthResult {
-  const job = doc.jobRequirement;
-  const lines = contentLines(doc);
-  const words = contentWords(doc);
+  const m = measure(doc);
+  const { words, lines } = m;
 
-  // No posting, no budget. Seniority is what buys a second page, so with no job attached
-  // the check would be measuring against an assumption. That document is the baseline
-  // resume (REQ-6.7), which exists to show the profile as it stands; its length is a fact
-  // about the profile, and a thin profile is reported by the gaps UI. The keyword gate
-  // declines to judge the baseline for the same reason.
-  if (!job) return { words, lines };
-
-  // Emptiness is already reported by formatting's `has-substance`. Saying it twice would
-  // cost one problem two rules.
-  if (lines === 0) return { words, lines };
-
-  const lineBudget = contentLineAllowance(job, 0);
-  const wordBudget = contentWordAllowance(job, 0);
-
-  if (lines > lineBudget || words > wordBudget * LONG_WORD_TOLERANCE) {
+  if (m.verdict === 'long') {
     return {
       words,
       lines,
       violation: {
         rule: 'plausible-length',
         detail: `${words} words across ${lines} content lines overruns the ${
-          lineBudget > CONTENT_LINES_PER_PAGE ? 'two-page' : 'one-page'
-        } budget of ${lineBudget} lines. A resume that spills onto a page nobody reads to the bottom of loses the material on that page.`,
+          m.lineBudget > CONTENT_LINES_PER_PAGE ? 'two-page' : 'one-page'
+        } budget of ${m.lineBudget} lines. A resume that spills onto a page nobody reads to the bottom of loses the material on that page.`,
       },
     };
   }
 
-  const floor = Math.round(CONTENT_WORDS_PER_PAGE * MIN_PAGE_FRACTION);
-  if (words < floor) {
+  if (m.verdict === 'short') {
     return {
       words,
       lines,
       violation: {
         rule: 'plausible-length',
-        detail: `${words} words is under ${floor} — less than ${Math.round(
+        detail: `${words} words is under ${m.floor} — less than ${Math.round(
           MIN_PAGE_FRACTION * 100,
         )}% of a page. Once the fixed sections are paid for, that leaves too little Experience and Projects for a reader to judge anything by.`,
       },
@@ -161,6 +145,53 @@ export function scoreLength(doc: ResumeDocument): LengthResult {
   }
 
   return { words, lines };
+}
+
+/**
+ * Which way the length is wrong, if it is — for the code that fixes it.
+ *
+ * The score only needs to know THAT the rule failed; the page trim in
+ * ../generate/fit-page.ts needs to know which way, because the fix for too long is the
+ * opposite of the fix for too short, and a trim that cannot tell them apart could cut a
+ * resume from one violation straight into the other. It reads the same measurement
+ * `scoreLength` does rather than repeating the comparison, so the two cannot drift.
+ */
+export function lengthVerdict(doc: ResumeDocument): 'long' | 'short' | 'ok' {
+  const verdict = measure(doc).verdict;
+  return verdict === 'n/a' ? 'ok' : verdict;
+}
+
+/** The one place the length comparison is made. */
+function measure(doc: ResumeDocument): {
+  words: number;
+  lines: number;
+  lineBudget: number;
+  floor: number;
+  verdict: 'long' | 'short' | 'ok' | 'n/a';
+} {
+  const job = doc.jobRequirement;
+  const lines = contentLines(doc);
+  const words = contentWords(doc);
+  const floor = Math.round(CONTENT_WORDS_PER_PAGE * MIN_PAGE_FRACTION);
+
+  // No posting, no budget. Seniority is what buys a second page, so with no job attached
+  // the check would be measuring against an assumption. That document is the baseline
+  // resume (REQ-6.7), which exists to show the profile as it stands; its length is a fact
+  // about the profile, and a thin profile is reported by the gaps UI. The keyword gate
+  // declines to judge the baseline for the same reason.
+  //
+  // Emptiness is already reported by formatting's `has-substance`. Saying it twice would
+  // cost one problem two rules.
+  if (!job || lines === 0) return { words, lines, lineBudget: 0, floor, verdict: 'n/a' };
+
+  const lineBudget = contentLineAllowance(job, 0);
+  const wordBudget = contentWordAllowance(job, 0);
+
+  if (lines > lineBudget || words > wordBudget * LONG_WORD_TOLERANCE) {
+    return { words, lines, lineBudget, floor, verdict: 'long' };
+  }
+  if (words < floor) return { words, lines, lineBudget, floor, verdict: 'short' };
+  return { words, lines, lineBudget, floor, verdict: 'ok' };
 }
 
 /**

@@ -25,6 +25,11 @@ import type {
   RoleRecord,
 } from '@/lib/types';
 import type { PipelineOutput } from '@/lib/pipeline/run';
+import type { FitReport } from '@/lib/fit/agent';
+import type {
+  QualityGateResult as GateResult,
+  ResumeDocument as SnapshotDocument,
+} from '@/lib/types';
 import { latestCommitSha, parseRepoRef } from '@/lib/sync/github';
 import { roleIdentity, splitMergedTitles } from '@/lib/sync/roles';
 import { educationIdentity } from '@/lib/sync/education';
@@ -480,7 +485,10 @@ function chunked<T>(items: T[], size: number): T[][] {
  */
 export async function persistDraft(
   userId: string,
-  result: Pick<PipelineOutput, 'document' | 'score' | 'job' | 'files'>,
+  result: Pick<PipelineOutput, 'document' | 'score' | 'job' | 'files'> & {
+    /** The fit verdict the draft was started under — kept beside the score it explains. */
+    fit?: FitReport | null;
+  },
 ): Promise<string> {
   const [snapshot] = await db
     .insert(resumeSnapshots)
@@ -489,7 +497,10 @@ export async function persistDraft(
       document: result.document as unknown as Record<string, unknown>,
       jobRequirement: (result.job ?? null) as unknown as Record<string, unknown> | null,
       score: result.score.overall,
-      scoreDetail: result.score as unknown as Record<string, unknown>,
+      scoreDetail: {
+        ...(result.score as unknown as Record<string, unknown>),
+        ...(result.fit ? { fit: result.fit } : {}),
+      },
       recordHashSnapshot: result.document.recordHashSnapshot,
       renderMode: result.document.renderMode,
       fileName: result.files.pdfName,
@@ -507,6 +518,95 @@ export async function persistDraft(
   });
 
   return snapshot.id;
+}
+
+/**
+ * A saved resume, as an improvement pass needs it — or null when there is none to improve.
+ *
+ * Scoped by user, like every snapshot read (REQ-7.3). `applicationStatus` comes with it
+ * because REQ-9.2 promises that downloading an application's resume gives "exactly what
+ * was sent then": once the application has moved past `draft`, the snapshot is a record
+ * of something sent, and improving it in place would quietly rewrite that record.
+ */
+export async function loadSnapshotForImprove(
+  userId: string,
+  snapshotId: string,
+): Promise<{
+  document: SnapshotDocument;
+  result: GateResult;
+  fit: FitReport | null;
+  applicationStatus: string | null;
+} | null> {
+  const [row] = await db
+    .select()
+    .from(resumeSnapshots)
+    .where(and(eq(resumeSnapshots.id, snapshotId), eq(resumeSnapshots.userId, userId)))
+    .limit(1);
+  if (!row) return null;
+
+  const [app] = await db
+    .select({ status: applications.status })
+    .from(applications)
+    .where(and(eq(applications.resumeSnapshotId, snapshotId), eq(applications.userId, userId)))
+    .limit(1);
+
+  const detail = (row.scoreDetail ?? {}) as unknown as GateResult & { fit?: FitReport };
+  const { fit, ...result } = detail;
+
+  return {
+    document: row.document as unknown as SnapshotDocument,
+    result: result as GateResult,
+    fit: fit ?? null,
+    applicationStatus: app?.status ?? null,
+  };
+}
+
+/**
+ * Writes an improvement pass back.
+ *
+ * With `document`, the pass produced a better version, and the snapshot, its score and the
+ * tracker row's score all move to it. Without, only the loop state changes — the pass
+ * found nothing better, and what it learned (which bullets cannot be strengthened, how
+ * many passes have stalled) must still survive to the next request, or the next pass would
+ * repeat this one.
+ */
+export async function saveImprovedSnapshot(
+  userId: string,
+  snapshotId: string,
+  update: {
+    result: GateResult;
+    fit: FitReport | null;
+    document?: SnapshotDocument;
+    fileName?: string;
+  },
+): Promise<void> {
+  const scoreDetail = {
+    ...(update.result as unknown as Record<string, unknown>),
+    ...(update.fit ? { fit: update.fit } : {}),
+  };
+
+  const scope = and(eq(resumeSnapshots.id, snapshotId), eq(resumeSnapshots.userId, userId));
+
+  if (!update.document) {
+    await db.update(resumeSnapshots).set({ scoreDetail }).where(scope);
+    return;
+  }
+
+  await db
+    .update(resumeSnapshots)
+    .set({
+      document: update.document as unknown as Record<string, unknown>,
+      score: update.result.overall,
+      scoreDetail,
+      recordHashSnapshot: update.document.recordHashSnapshot,
+      ...(update.fileName ? { fileName: update.fileName } : {}),
+    })
+    .where(scope);
+
+  await db
+    .update(applications)
+    .set({ score: update.result.overall })
+    .where(and(eq(applications.resumeSnapshotId, snapshotId), eq(applications.userId, userId)));
 }
 
 export async function audit(

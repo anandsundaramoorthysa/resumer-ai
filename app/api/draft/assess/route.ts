@@ -1,0 +1,106 @@
+/**
+ * The fit check — "is this role for you?", answered before any resume is written.
+ *
+ * Reads the job, compares the whole profile against it, and streams a verdict with
+ * reasons (lib/fit/agent.ts). It does not draft. The verdict goes back to the browser
+ * with the extracted job sealed inside a token (lib/fit/token.ts): when the fit is good
+ * the browser starts the draft straight away, and when it is not the browser asks first
+ * and starts it only if the answer is yes. Either way the draft request carries the
+ * token, so the posting is read once.
+ *
+ * Nothing is stored for a fit check that works. A job someone looked at and decided
+ * against is not history worth keeping, and an attached posting is promised never to be
+ * stored at all. Only a failed check leaves a row — the silent failure is exactly the
+ * case draft_run exists to catch.
+ */
+
+import { NextRequest } from 'next/server';
+import { auth } from '@/auth';
+import { runAssessment, newDraftRunTrace, PipelineError } from '@/lib/pipeline/run';
+import { loadProfileForUser, buildSyncStep } from '@/lib/server/profile';
+import { errorKindFor, recordDraftRun } from '@/lib/server/draft-run';
+import { readJobSubmission, jsonError } from '@/lib/server/job-submission';
+import { eventStream } from '@/lib/server/sse';
+import { sealAssessment } from '@/lib/fit/token';
+
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return jsonError('Sign in first.', 401);
+
+  const submission = await readJobSubmission(req, userId);
+  if (!submission.ok) return submission.response;
+  const { jobInput, fileText, fileName } = submission;
+
+  const trace = newDraftRunTrace();
+  let failure: { error?: unknown; kind?: string } | null = null;
+
+  return eventStream({
+    run: async ({ send, emit }) => {
+      try {
+        const profile = await loadProfileForUser(userId);
+        if (profile.records.length === 0) {
+          failure = { kind: 'empty-profile' };
+          send('error', {
+            message:
+              'Your profile is empty. Connect your GitHub portfolio or add a few skills and roles first — there is nothing to compare with this job yet.',
+          });
+          return;
+        }
+
+        const out = await runAssessment(
+          {
+            userId,
+            contact: profile.contact,
+            records: profile.records,
+            roles: profile.roles,
+            jobInput,
+            jobFileText: fileText || undefined,
+            jobFileName: fileName || undefined,
+            syncStep: buildSyncStep(userId),
+            trace,
+          },
+          emit,
+        );
+
+        send('assessed', { token: sealAssessment(userId, out.job, out.fit), fit: out.fit });
+      } catch (err) {
+        // Same rule as the draft route: a PipelineError was written for the user, and
+        // anything else was written for a developer and is logged rather than streamed.
+        failure = { error: err };
+        if (!(err instanceof PipelineError)) {
+          console.error('[assess] fit check failed for user', userId, err);
+        }
+        send('error', {
+          message:
+            err instanceof PipelineError
+              ? err.message
+              : 'The fit check failed unexpectedly. Nothing was saved — try again in a minute.',
+          kind: err instanceof PipelineError ? err.kind : 'generic',
+        });
+      }
+    },
+    finish: async ({ events, startedAt }) => {
+      if (!failure) return;
+      const f = failure as { error?: unknown; kind?: string };
+      try {
+        await recordDraftRun({
+          userId,
+          startedAt,
+          finishedAt: new Date(),
+          events,
+          trace,
+          snapshotId: null,
+          error: f.error,
+          // Prefixed, so a failed fit check and a failed draft are counted apart.
+          errorKind: f.kind ?? `assess-${errorKindFor(f.error) ?? 'unknown'}`,
+        });
+      } catch (err) {
+        console.error('[assess] could not record the failed fit check for user', userId, err);
+      }
+    },
+  });
+}

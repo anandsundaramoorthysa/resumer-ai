@@ -4,16 +4,25 @@
  *   keyword gate (70%, pass/fail)
  *     -> weighted score: formatting 0.30 + evidence 0.30 + skills 0.40
  *     -> >= 8.5  : done
- *     -> <  8.5  : critique -> targeted revise -> re-score, max 4 iterations
+ *     -> <  8.5  : critique -> targeted revise -> re-score, up to MAX_ITERATIONS passes
+ *                  per request and MAX_TOTAL_ITERATIONS across every request for one resume
  *     -> exhausted: HONEST FAILURE — best version + why, never a forced pass
  *
  * The invariant that matters most: when the score cannot be reached with real data, the
  * loop stops and says so. It never relaxes the no-fabrication rule to clear the bar
  * (NFR-8). A wording problem gets fixed here; a real experience gap gets reported.
+ *
+ * Resumable, because of where it runs. On Netlify's free tier a function is killed at 30
+ * seconds, and a draft that reads the job, assembles, scores and renders has room for one
+ * revision pass inside that — every production draft stopped there, marked `budget-cap`,
+ * with three of its four passes never taken. Rather than ask the platform for more time,
+ * the loop writes down where it got to (`LoopState`, on `result.loop`) and a later request
+ * hands that back as `resume`. Each request stays short; the loop still gets its passes.
  */
 
 import type {
   Critique,
+  LoopState,
   ProfileRecord,
   QualityGateResult,
   ResumeDocument,
@@ -27,7 +36,18 @@ import { BudgetExceededError, type DraftBudget } from '../ai/budget';
 import { AllProvidersFailedError } from '../ai/chain';
 
 export const PASS_THRESHOLD = 8.5;
+
+/** Scoring passes one request may run. */
 export const MAX_ITERATIONS = 4;
+
+/**
+ * Scoring passes one resume may have in total, across every request that resumes it.
+ *
+ * Twice the per-request allowance. The loop's own no-progress rule is what normally ends
+ * it — two passes that fail to move the score — so this is a ceiling on cost for the rare
+ * resume that keeps inching upward, not a target.
+ */
+export const MAX_TOTAL_ITERATIONS = 8;
 
 export const WEIGHTS = {
   formatting: 0.3,
@@ -126,13 +146,13 @@ export async function scoreDocument(
   // Formatting critiques are kept, and only some of them have a fix path. That is
   // deliberate, so it is worth writing down which.
   //
-  // `reviseDocument` repairs four of these rules mechanically and unconditionally, without
-  // reading the critique at all: icon glyphs, decorative bullet characters, tabs and
-  // numeric dates. The rest — length, the heading allow-list, a missing Skills section, a
-  // document with no substance, the contact block, hyperlink text, presentation mode — are
-  // decided during assembly or by the profile behind it, and no rewrite of the finished
-  // document can close them. Before this change, a document failing on length was told so
-  // four times and failed identically each time.
+  // `reviseDocument` repairs these rules mechanically, without a model: icon glyphs,
+  // decorative bullet characters, tabs, numeric dates, and — since the page trim in
+  // generate/fit-page.ts — a resume that runs past its page. The rest — a resume too
+  // SHORT, the heading allow-list, a missing Skills section, a document with no
+  // substance, the contact block, hyperlink text, presentation mode — are decided during
+  // assembly or by the profile behind it, and no rewrite of the finished document can
+  // close them.
   //
   // They are still emitted rather than suppressed: they are the record of WHY the resume
   // did not clear the bar, they reach the user through the halt explanation, and a
@@ -214,6 +234,7 @@ export type ReviseFn = (
 
 export interface GateOutcome {
   document: ResumeDocument;
+  /** Always carries `loop` — what a later request resumes from. */
   result: QualityGateResult;
   genuineGaps: string[];
   /**
@@ -230,6 +251,8 @@ export interface GateOutcome {
   history: Array<{ iteration: number; overall: number; keywordGatePassed: boolean }>;
 }
 
+type Best = { doc: ResumeDocument; breakdown: ScoreBreakdown };
+
 /**
  * Runs score -> critique -> revise until the bar is cleared or a stop condition hits.
  * `revise` is injected so this module stays free of generation concerns and is testable
@@ -241,101 +264,158 @@ export async function runQualityGate(args: {
   revise: ReviseFn;
   budget?: DraftBudget;
   onIteration?: (iteration: number, result: QualityGateResult) => void;
+  /**
+   * Carry on from a result an earlier request saved, instead of starting over.
+   *
+   * `document` must be the version that result scored. The saved result is not scored
+   * again — its critiques are exactly what that request ran out of time to act on, so the
+   * first step here is the revision it never made, which saves a judge call as well as
+   * the time.
+   */
+  resume?: QualityGateResult;
 }): Promise<GateOutcome> {
-  const { records, revise, budget, onIteration } = args;
+  const { records, revise, budget, onIteration, resume } = args;
+  const saved = resume?.loop;
 
   let current = args.document;
-  let best: { doc: ResumeDocument; breakdown: ScoreBreakdown } | null = null;
-  const history: GateOutcome['history'] = [];
+  let best: Best | null = resume
+    ? {
+        doc: args.document,
+        breakdown: { result: resume, genuineGaps: saved?.genuineGaps ?? [], weakBullets: [] },
+      }
+    : null;
+  const history: GateOutcome['history'] = saved ? [...saved.history] : [];
 
   // Bullets a revision pass has already proved it cannot strengthen. Carried forward so
-  // the evidence scorer stops charging for the same verdict every iteration.
-  const unimprovable = new Set<string>();
+  // the evidence scorer stops charging for the same verdict every iteration — and, now,
+  // every request.
+  const unimprovable = new Set<string>(saved?.unimprovable ?? []);
 
   // Every weak bullet seen, in the order first seen — see GateOutcome.weakBullets.
   const weakSeen: ScoreBreakdown['weakBullets'] = [];
   const weakTexts = new Set<string>();
 
   // Consecutive iterations whose score did not move meaningfully.
-  let stagnant = 0;
-  let previousOverall: number | null = null;
+  let stagnant = saved?.stagnant ?? 0;
+  let previousOverall: number | null = saved?.previousOverall ?? null;
 
-  for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+  let iteration = saved?.iterations ?? 0;
+  const lastThisRequest = Math.min(MAX_TOTAL_ITERATIONS, iteration + MAX_ITERATIONS);
+
+  /** Every way out goes through here, so every result says where the loop got to. */
+  const seal = (outcome: GateOutcome, canContinue: boolean): GateOutcome => {
+    const state: LoopState = {
+      iterations: iteration,
+      history: [...history],
+      unimprovable: [...unimprovable],
+      stagnant,
+      previousOverall,
+      genuineGaps: outcome.genuineGaps,
+      canContinue: canContinue && !outcome.result.passed && iteration < MAX_TOTAL_ITERATIONS,
+    };
+    outcome.result.loop = state;
+    return outcome;
+  };
+
+  // A resumed run already holds a scored breakdown; a fresh one scores first.
+  let pending: ScoreBreakdown | null = best ? best.breakdown : null;
+
+  for (;;) {
     let breakdown: ScoreBreakdown;
-    try {
-      breakdown = await scoreDocument(current, records, budget, [...unimprovable]);
-    } catch (err) {
-      const halt = outOfTime(err);
-      if (halt) return haltForBudget(best, current, history, weakSeen, halt);
-      throw err;
+
+    if (pending) {
+      breakdown = pending;
+      pending = null;
+      if (breakdown.result.passed) {
+        return seal(
+          {
+            document: current,
+            result: breakdown.result,
+            genuineGaps: breakdown.genuineGaps,
+            weakBullets: weakSeen,
+            history,
+          },
+          false,
+        );
+      }
+    } else {
+      iteration += 1;
+      try {
+        breakdown = await scoreDocument(current, records, budget, [...unimprovable]);
+      } catch (err) {
+        const halt = outOfTime(err);
+        if (halt) return seal(haltForBudget(best, current, history, weakSeen, halt), true);
+        throw err;
+      }
+
+      for (const w of breakdown.weakBullets) {
+        if (weakTexts.has(w.text.trim())) continue;
+        weakTexts.add(w.text.trim());
+        weakSeen.push(w);
+      }
+
+      breakdown.result.iterations = iteration;
+      history.push({
+        iteration,
+        overall: breakdown.result.overall,
+        keywordGatePassed: breakdown.result.keywordGatePassed,
+      });
+      onIteration?.(iteration, breakdown.result);
+
+      // Keep the best-scoring version seen, not merely the last one (REQ-5.5) — and on a
+      // resumed run that includes the version the earlier request saved, so a pass that
+      // makes things worse can never replace it.
+      if (!best || breakdown.result.overall > best.breakdown.result.overall) {
+        best = { doc: current, breakdown };
+      }
+
+      if (breakdown.result.passed) {
+        return seal(
+          {
+            document: current,
+            result: breakdown.result,
+            genuineGaps: breakdown.genuineGaps,
+            weakBullets: weakSeen,
+            history,
+          },
+          false,
+        );
+      }
+
+      // Two revisions in a row that failed to move the score are two revisions that were
+      // not revisions. The gain is measured against the previous iteration rather than
+      // against the best seen, because a score that dips and recovers is still movement —
+      // it is the flat line that says the loop has nothing left to try.
+      if (previousOverall !== null) {
+        const gain = breakdown.result.overall - previousOverall;
+        stagnant = gain >= MIN_MEANINGFUL_GAIN ? 0 : stagnant + 1;
+      }
+      previousOverall = breakdown.result.overall;
+
+      if (stagnant >= MAX_STAGNANT_ITERATIONS) {
+        return seal(
+          haltForNoProgress(
+            best,
+            history,
+            weakSeen,
+            `the last ${MAX_STAGNANT_ITERATIONS} revision passes moved the score by less than ${MIN_MEANINGFUL_GAIN}`,
+          ),
+          false,
+        );
+      }
     }
 
-    for (const w of breakdown.weakBullets) {
-      if (weakTexts.has(w.text.trim())) continue;
-      weakTexts.add(w.text.trim());
-      weakSeen.push(w);
+    // Exhausted, for good: no request after this one would be allowed another pass.
+    if (iteration >= MAX_TOTAL_ITERATIONS) {
+      return seal(haltForCap(best!, history, weakSeen, iteration), false);
     }
 
-    breakdown.result.iterations = iteration;
-    history.push({
-      iteration,
-      overall: breakdown.result.overall,
-      keywordGatePassed: breakdown.result.keywordGatePassed,
-    });
-    onIteration?.(iteration, breakdown.result);
-
-    // Keep the best-scoring version seen, not merely the last one (REQ-5.5).
-    if (!best || breakdown.result.overall > best.breakdown.result.overall) {
-      best = { doc: current, breakdown };
-    }
-
-    if (breakdown.result.passed) {
-      return {
-        document: current,
-        result: breakdown.result,
-        genuineGaps: breakdown.genuineGaps,
-        weakBullets: weakSeen,
-        history,
-      };
-    }
-
-    if (iteration === MAX_ITERATIONS) break;
-
-    // Two revisions in a row that failed to move the score are two revisions that were
-    // not revisions. The gain is measured against the previous iteration rather than
-    // against the best seen, because a score that dips and recovers is still movement —
-    // it is the flat line that says the loop has nothing left to try.
-    if (previousOverall !== null) {
-      const gain = breakdown.result.overall - previousOverall;
-      stagnant = gain >= MIN_MEANINGFUL_GAIN ? 0 : stagnant + 1;
-    }
-    previousOverall = breakdown.result.overall;
-
-    if (stagnant >= MAX_STAGNANT_ITERATIONS) {
-      return haltForNoProgress(
-        best!,
-        history,
-        weakSeen,
-        `the last ${MAX_STAGNANT_ITERATIONS} revision passes moved the score by less than ${MIN_MEANINGFUL_GAIN}`,
-      );
-    }
-
-    // Stop while we still have time to render and return something. A function killed
-    // mid-iteration produces nothing at all; stopping one iteration early produces the
-    // best resume we managed, plus an honest note about why it stopped there.
-    if (budget && !budget.hasTimeForAnotherIteration()) {
-      const chosen = best!;
-      chosen.breakdown.result.haltReason = 'budget-cap';
-      chosen.breakdown.result.haltExplanation = `Stopped after ${iteration} attempt(s) at ${chosen.breakdown.result.overall.toFixed(
-        1,
-      )}/10 — another revision pass wouldn't have finished inside this deployment's time limit. This is the best version produced so far.`;
-      return {
-        document: chosen.doc,
-        result: chosen.breakdown.result,
-        genuineGaps: chosen.breakdown.genuineGaps,
-        weakBullets: weakSeen,
-        history,
-      };
+    // Stop while there is still time to render and return something — and say that this
+    // is a pause, not an ending. A function killed mid-iteration produces nothing at all;
+    // stopping one iteration early produces the best resume so far, which a later request
+    // can pick up from exactly here.
+    if (iteration >= lastThisRequest || (budget && !budget.hasTimeForAnotherIteration())) {
+      return seal(pause(best!, history, weakSeen, iteration), true);
     }
 
     let revision: ReviseOutcome;
@@ -343,7 +423,7 @@ export async function runQualityGate(args: {
       revision = await revise(current, breakdown.result.critiques, budget);
     } catch (err) {
       const halt = outOfTime(err);
-      if (halt) return haltForBudget(best, current, history, weakSeen, halt);
+      if (halt) return seal(haltForBudget(best, current, history, weakSeen, halt), true);
       throw err;
     }
 
@@ -352,53 +432,81 @@ export async function runQualityGate(args: {
     // A revision that changed nothing cannot produce a different score, so scoring it
     // again buys a model call and a wait in exchange for the number we already have.
     if (!revision.changed) {
-      return haltForNoProgress(
-        best!,
-        history,
-        weakSeen,
-        'the revision pass produced a document identical to the one it was given',
+      return seal(
+        haltForNoProgress(
+          best!,
+          history,
+          weakSeen,
+          'the revision pass produced a document identical to the one it was given',
+        ),
+        false,
       );
     }
 
     current = revision.document;
   }
+}
 
-  // Exhausted the cap. Report honestly rather than shipping a forced pass.
-  const chosen = best!;
-  const gaps = chosen.breakdown.genuineGaps;
-  chosen.breakdown.result.haltReason = gaps.length > 0 ? 'unfixable-gap' : 'iteration-cap';
-  chosen.breakdown.result.haltExplanation =
-    gaps.length > 0
-      ? `Stopped at ${chosen.breakdown.result.overall.toFixed(
-          1,
-        )}/10 after ${MAX_ITERATIONS} attempts. The job asks for ${gaps.join(
-          ', ',
-        )}, which isn't in your profile. No rewrite can close that honestly — this is the ceiling for this role unless you add real experience covering it.`
-      : `Stopped at ${chosen.breakdown.result.overall.toFixed(
-          1,
-        )}/10 after ${MAX_ITERATIONS} attempts. Showing the best version produced; remaining issues are listed below.`;
-
+function outcomeOf(
+  best: Best,
+  history: GateOutcome['history'],
+  weakBullets: ScoreBreakdown['weakBullets'],
+): GateOutcome {
   return {
-    document: chosen.doc,
-    result: chosen.breakdown.result,
-    genuineGaps: gaps,
-    weakBullets: weakSeen,
+    document: best.doc,
+    result: best.breakdown.result,
+    genuineGaps: best.breakdown.genuineGaps,
+    weakBullets,
     history,
   };
+}
+
+/** Stopped for this request, with more passes available to a later one. */
+function pause(
+  best: Best,
+  history: GateOutcome['history'],
+  weakBullets: ScoreBreakdown['weakBullets'],
+  attempts: number,
+): GateOutcome {
+  const result = best.breakdown.result;
+  result.haltReason = 'budget-cap';
+  result.haltExplanation = `Paused at ${result.overall.toFixed(
+    1,
+  )}/10 after ${attempts} attempt(s) to stay inside the server's time limit. This is the best version so far, and improving can pick up from exactly here.`;
+  return outcomeOf(best, history, weakBullets);
+}
+
+/** Every pass this resume will ever get has been used. Report honestly. */
+function haltForCap(
+  best: Best,
+  history: GateOutcome['history'],
+  weakBullets: ScoreBreakdown['weakBullets'],
+  attempts: number,
+): GateOutcome {
+  const result = best.breakdown.result;
+  const gaps = best.breakdown.genuineGaps;
+  result.haltReason = gaps.length > 0 ? 'unfixable-gap' : 'iteration-cap';
+  result.haltExplanation =
+    gaps.length > 0
+      ? `Stopped at ${result.overall.toFixed(1)}/10 after ${attempts} attempts. The job asks for ${gaps.join(
+          ', ',
+        )}, which isn't in your profile. No rewrite can close that honestly — this is the ceiling for this role unless you add real experience covering it.`
+      : `Stopped at ${result.overall.toFixed(1)}/10 after ${attempts} attempts. Showing the best version produced; remaining issues are listed below.`;
+  return outcomeOf(best, history, weakBullets);
 }
 
 /**
  * Stopping because another iteration cannot change anything.
  *
- * The `unfixable-gap` / `iteration-cap` distinction below is preserved rather than
- * replaced: when the profile genuinely lacks what the posting asks for, that is still the
- * useful thing to tell someone, and it is true whether the loop discovered it on
- * iteration 2 or iteration 4. `no-progress` is for the other case — the score stalled for
- * reasons the user cannot act on — and it exists so the explanation can say the loop
- * stopped early on purpose rather than implying it ran out of attempts it never took.
+ * The `unfixable-gap` / `iteration-cap` distinction is preserved rather than replaced:
+ * when the profile genuinely lacks what the posting asks for, that is still the useful
+ * thing to tell someone, and it is true whether the loop discovered it on iteration 2 or
+ * iteration 4. `no-progress` is for the other case — the score stalled for reasons the
+ * user cannot act on — and it exists so the explanation can say the loop stopped early on
+ * purpose rather than implying it ran out of attempts it never took.
  */
 function haltForNoProgress(
-  best: { doc: ResumeDocument; breakdown: ScoreBreakdown },
+  best: Best,
   history: GateOutcome['history'],
   weakBullets: ScoreBreakdown['weakBullets'],
   because: string,
@@ -415,13 +523,7 @@ function haltForNoProgress(
         )}, which isn't in your profile. No rewrite can close that honestly — this is the ceiling for this role unless you add real experience covering it.`
       : `Stopped at ${score}/10 after ${attempts} attempt(s) because ${because}. Further attempts would have re-run the same work for the same result, so this is the best version produced; remaining issues are listed below.`;
 
-  return {
-    document: best.doc,
-    result: best.breakdown.result,
-    genuineGaps: gaps,
-    weakBullets,
-    history,
-  };
+  return outcomeOf(best, history, weakBullets);
 }
 
 /**
@@ -460,7 +562,7 @@ function outOfTime(err: unknown): string | null {
 }
 
 function haltForBudget(
-  best: { doc: ResumeDocument; breakdown: ScoreBreakdown } | null,
+  best: Best | null,
   current: ResumeDocument,
   history: GateOutcome['history'],
   weakBullets: ScoreBreakdown['weakBullets'],
@@ -490,11 +592,5 @@ function haltForBudget(
   }
   best.breakdown.result.haltReason = 'budget-cap';
   best.breakdown.result.haltExplanation = `${message} Showing the best version produced so far.`;
-  return {
-    document: best.doc,
-    result: best.breakdown.result,
-    genuineGaps: best.breakdown.genuineGaps,
-    weakBullets,
-    history,
-  };
+  return outcomeOf(best, history, weakBullets);
 }
