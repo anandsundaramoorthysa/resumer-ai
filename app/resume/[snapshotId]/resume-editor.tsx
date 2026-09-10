@@ -217,8 +217,23 @@ export function ResumeEditor({
         </p>
       ) : null}
 
-      {/* The rendered resume, mirroring the ats-strict layout */}
-      <article className="rounded-xl border border-line bg-surface p-7">
+      {/*
+        * The rendered resume, mirroring the ats-strict layout.
+        *
+        * The page shell around it is 1152px and everything above — the score, the toolbar,
+        * the export warning — takes all of it. This does not, and the cap is the point
+        * rather than a leftover: what is drawn here is a page. It is the same words that
+        * come out of the PDF exporter onto US Letter, which is 816px at 96dpi, and the
+        * bullets are written and scored against that measure. Left to fill 1152px they
+        * ran past 160 characters a line — a preview that no longer resembles the thing
+        * being previewed, and one where a bullet that wraps to three lines in the export
+        * looks like a comfortable two here.
+        *
+        * `mx-auto` because the cards above it are full-bleed: pinned left it read as a
+        * layout that had failed to fill, centred it reads as a document under a toolbar,
+        * which is what it is.
+        */}
+      <article className="mx-auto max-w-4xl rounded-xl border border-line bg-surface p-7">
         <header className="border-b border-line pb-4">
           <h2 className="text-xl font-bold">{doc.contact.fullName}</h2>
           <p className="mt-1 text-sm text-muted">

@@ -29,13 +29,14 @@ export default async function ApplicationsPage() {
 
   return (
     <div className="min-h-screen min-h-dvh">
-      <AppHeader current="/applications" width="5xl" />
+      <AppHeader current="/applications" width="6xl" />
 
-      <main className="mx-auto max-w-5xl px-5 py-8">
+      <main className="mx-auto max-w-6xl px-5 py-8">
         <h1 className="font-display text-3xl">Applications</h1>
-        {/* Kept at prose width deliberately. This page is max-w-5xl because it holds a
-            six-column table; stretching a paragraph to 1000px to match the table's right
-            edge would trade readable line length for a flush edge, which is backwards. */}
+        {/* Kept at prose width deliberately. The shell is max-w-6xl because this page
+            holds a six-column table, and the table is what that width is for; stretching
+            a paragraph to 1152px to match the table's right edge would trade readable
+            line length for a flush edge, which is backwards. */}
         <p className="mt-1 max-w-prose text-sm text-muted">
           Each row points at the exact resume that was sent, frozen at export — not at
           your profile as it looks today. Change your profile later and this record still

@@ -42,8 +42,16 @@ export async function AppInstallPanel({
     currentRepo !== null &&
     allRepos.some((r) => r.toLowerCase() === currentRepo.toLowerCase());
 
+  /*
+   * No top margin of its own.
+   *
+   * This is the first thing in the left-hand column of the two-column layout on the
+   * settings page, and the `mt-7` it used to carry pushed that column 28px below the
+   * explanation card beside it — two cards at the top of the same row, starting at
+   * different heights. The grid that owns both columns owns the space above them.
+   */
   return (
-    <section className="mt-7 rounded-xl border border-line bg-surface p-5">
+    <section className="rounded-xl border border-line bg-surface p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="font-display text-lg">Repository access</h2>
         {installations.length > 0 ? (

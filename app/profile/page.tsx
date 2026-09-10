@@ -173,9 +173,9 @@ export default async function ProfilePage() {
 
   return (
     <div className="min-h-screen min-h-dvh">
-      <AppHeader current="/profile" width="4xl" />
+      <AppHeader current="/profile" width="6xl" />
 
-      <main className="mx-auto max-w-4xl px-5 py-8">
+      <main className="mx-auto max-w-6xl px-5 py-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="font-display text-3xl">Your profile</h1>
@@ -464,7 +464,13 @@ export default async function ProfilePage() {
                   Nothing recorded under these yet. Anything you add here is yours — a
                   sync will never overwrite it.
                 </p>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {/* Two columns from `sm`, three from `lg`. This block is a list of
+                    "add one of these" stubs — a heading and a small form each — and in
+                    the wider shell two columns left each one about 550px wide for a
+                    control that needs nothing like it. Three keeps the stubs at a
+                    sensible size and shortens the block, which matters because it sits
+                    at the very bottom of an already long page. */}
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {empty.map((type) => (
                     <div key={type}>
                       <h3 className="text-sm font-semibold">{RECORD_FORMS[type].plural}</h3>

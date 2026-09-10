@@ -284,85 +284,98 @@ export function Importer() {
     return (
       <div>
         {error ? <Banner tone="danger">{error}</Banner> : null}
-        <div className="rounded-2xl border border-dashed border-line bg-surface p-6 sm:p-8">
-          <h2 className="font-display text-xl">Upload your existing resume</h2>
-          <p className="mt-2 max-w-prose text-sm text-muted">
-            PDF or DOCX. It is read in memory and never stored — only the facts you
-            confirm on the next screen are saved, and each one is marked as coming from
-            this import so you can always tell it apart from what you typed yourself.
-          </p>
+        {/*
+          * Side by side from `lg`, stacked below it.
+          *
+          * These are two alternatives, not two steps: upload a resume, or hand over a
+          * LinkedIn export. Stacked in a 1152px shell the second one starts below the
+          * fold on a 900px-tall laptop, so the page reads as "upload a resume" with a
+          * footnote — and the LinkedIn route is the better one, because it brings job
+          * descriptions across word for word. `items-start` so the shorter card keeps its
+          * own height instead of stretching to match the four-step list beside it, which
+          * would leave a card that is mostly empty border.
+          */}
+        <div className="grid items-start gap-5 lg:grid-cols-2">
+          <div className="rounded-2xl border border-dashed border-line bg-surface p-6 sm:p-8">
+            <h2 className="font-display text-xl">Upload your existing resume</h2>
+            <p className="mt-2 max-w-prose text-sm text-muted">
+              PDF or DOCX. It is read in memory and never stored — only the facts you
+              confirm on the next screen are saved, and each one is marked as coming from
+              this import so you can always tell it apart from what you typed yourself.
+            </p>
 
-          <label
-            htmlFor="resume-file"
-            className="mt-5 inline-flex min-h-11 cursor-pointer items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
-          >
-            Choose a file
-          </label>
-          <input
-            id="resume-file"
-            type="file"
-            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void run(file);
-              e.target.value = '';
-            }}
-          />
+            <label
+              htmlFor="resume-file"
+              className="mt-5 inline-flex min-h-11 cursor-pointer items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+            >
+              Choose a file
+            </label>
+            <input
+              id="resume-file"
+              type="file"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void run(file);
+                e.target.value = '';
+              }}
+            />
 
-          <p className="mt-4 text-xs text-muted">
-            A scanned or photographed resume has no text layer and cannot be read — if
-            that is all you have, export a fresh PDF from the original document.
-          </p>
-        </div>
+            <p className="mt-4 text-xs text-muted">
+              A scanned or photographed resume has no text layer and cannot be read — if
+              that is all you have, export a fresh PDF from the original document.
+            </p>
+          </div>
 
-        <div className="mt-5 rounded-2xl border border-dashed border-line bg-surface p-6 sm:p-8">
-          <h2 className="font-display text-xl">Or import your LinkedIn profile</h2>
-          <p className="mt-2 max-w-prose text-sm text-muted">
-            Not by scraping it. LinkedIn will hand you the same data itself, with every
-            section complete rather than cut off behind &ldquo;show more&rdquo;, and
-            asking them for it puts your account at no risk at all.
-          </p>
+          <div className="rounded-2xl border border-dashed border-line bg-surface p-6 sm:p-8">
+            <h2 className="font-display text-xl">Or import your LinkedIn profile</h2>
+            <p className="mt-2 max-w-prose text-sm text-muted">
+              Not by scraping it. LinkedIn will hand you the same data itself, with every
+              section complete rather than cut off behind &ldquo;show more&rdquo;, and
+              asking them for it puts your account at no risk at all.
+            </p>
 
-          <ol className="mt-4 max-w-prose list-decimal space-y-1.5 pl-5 text-sm text-muted">
-            <li>
-              On LinkedIn, open{' '}
-              <span className="text-ink">Settings &amp; Privacy → Data privacy → Get a copy of your data</span>.
-            </li>
-            <li>
-              Choose <span className="text-ink">Want something in particular?</span> and tick
-              Positions, Education, Skills, Certifications, Languages, Projects,
-              Publications, Honors, Volunteering and Profile.
-            </li>
-            <li>
-              Request the archive. It usually arrives by email within about ten minutes.
-            </li>
-            <li>Upload the .zip here, exactly as it arrived.</li>
-          </ol>
+            <ol className="mt-4 max-w-prose list-decimal space-y-1.5 pl-5 text-sm text-muted">
+              <li>
+                On LinkedIn, open{' '}
+                <span className="text-ink">Settings &amp; Privacy → Data privacy → Get a copy of your data</span>.
+              </li>
+              <li>
+                Choose <span className="text-ink">Want something in particular?</span> and tick
+                Positions, Education, Skills, Certifications, Languages, Projects,
+                Publications, Honors, Volunteering and Profile.
+              </li>
+              <li>
+                Request the archive. It usually arrives by email within about ten minutes.
+              </li>
+              <li>Upload the .zip here, exactly as it arrived.</li>
+            </ol>
 
-          <label
-            htmlFor="linkedin-file"
-            className="mt-5 inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
-          >
-            Choose your export
-          </label>
-          <input
-            id="linkedin-file"
-            type="file"
-            accept=".zip,.csv,application/zip,text/csv"
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void runLinkedIn(file);
-              e.target.value = '';
-            }}
-          />
+            <label
+              htmlFor="linkedin-file"
+              className="mt-5 inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
+            >
+              Choose your export
+            </label>
+            <input
+              id="linkedin-file"
+              type="file"
+              accept=".zip,.csv,application/zip,text/csv"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void runLinkedIn(file);
+                e.target.value = '';
+              }}
+            />
 
-          <p className="mt-4 max-w-prose text-xs text-muted">
-            The archive is read in memory and never stored. Your job descriptions come
-            across word for word — those are the accomplishments a portfolio repo cannot
-            tell us, and the ones a resume is mostly made of.
-          </p>
+            <p className="mt-4 max-w-prose text-xs text-muted">
+              The archive is read in memory and never stored. Your job descriptions come
+              across word for word — those are the accomplishments a portfolio repo cannot
+              tell us, and the ones a resume is mostly made of.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -546,6 +559,28 @@ export function Importer() {
           const list = grouped.get(type)!;
           const keys = list.map((c) => c.key);
           const on = keys.filter((k) => selected.has(k)).length;
+          /*
+           * Short entries go into columns; long ones stay a list.
+           *
+           * A LinkedIn export produces a Skills group of single words — "Go", "Terraform",
+           * "Kubernetes" — and in the 1152px page shell each of those was a checkbox
+           * followed by 1,050px of nothing, eight rows deep. The Professional summary
+           * group in the same list is a full paragraph and must not be columned at all.
+           *
+           * So the shape is decided from the content rather than the type: a group whose
+           * every entry is a short label with no second line reads as a set of tags and
+           * is laid out as one. 60 characters is roughly what fits one line of a third-width
+           * column here; the longest real skill in a LinkedIn export ("Distributed Systems
+           * Observability and Tracing", 45) sits inside that, and an entry that does run
+           * over simply wraps to a second line rather than dragging the whole group back
+           * into a single column.
+           *
+           * The dashed rule between rows goes with it. It separates one entry from the
+           * next down a single column; across three it would draw a line under every
+           * item except the last of the last column, which reads as a mistake. The grid
+           * gap does that job in the columned form.
+           */
+          const tagLike = list.every((c) => !c.detail && c.label.length <= 60);
           return (
             <fieldset key={type} className="mt-5 rounded-xl border border-line p-4">
               <legend className="px-1.5 text-sm font-semibold">
@@ -560,13 +595,14 @@ export function Importer() {
                   {on === keys.length ? 'Untick all' : 'Tick all'} ({on}/{keys.length})
                 </button>
               </div>
-              <ul>
+              <ul className={tagLike ? 'grid gap-x-6 sm:grid-cols-2 lg:grid-cols-3' : ''}>
                 {list.map((c) => (
                   <CandidateRow
                     key={c.key}
                     candidate={c}
                     checked={selected.has(c.key)}
                     onToggle={() => toggle(c.key)}
+                    divided={!tagLike}
                   />
                 ))}
               </ul>
@@ -621,14 +657,24 @@ function CandidateRow({
   candidate,
   checked,
   onToggle,
+  /**
+   * Whether to draw the dashed rule under the row. Off in the columned groups, where a
+   * per-row underline no longer marks the end of anything — see the caller.
+   */
+  divided = true,
 }: {
   candidate: Candidate;
   checked: boolean;
   onToggle: () => void;
+  divided?: boolean;
 }) {
   return (
     <li>
-      <label className="flex min-h-11 items-start gap-3 border-b border-dashed border-line py-2 last:border-b-0">
+      <label
+        className={`flex min-h-11 items-start gap-3 py-2 ${
+          divided ? 'border-b border-dashed border-line last:border-b-0' : ''
+        }`}
+      >
         <input
           type="checkbox"
           checked={checked}

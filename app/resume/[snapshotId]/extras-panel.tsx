@@ -66,7 +66,7 @@ export function ExtrasPanel({ snapshotId }: { snapshotId: string }) {
   return (
     <section className="mt-6 rounded-xl border border-line bg-surface p-5">
       <h2 className="font-display text-xl">Also from this resume</h2>
-      <p className="mt-1 text-sm text-muted">
+      <p className="mt-1 max-w-prose text-sm text-muted">
         Both are built from the resume above, so they can only say what it already says.
       </p>
 
@@ -102,7 +102,17 @@ export function ExtrasPanel({ snapshotId }: { snapshotId: string }) {
 
       {tab === 'letter' && letter && !loading ? (
         <div className="mt-4">
-          <div className="whitespace-pre-wrap rounded-lg border border-line bg-paper p-4 text-sm leading-relaxed">
+          {/*
+            * Capped at a reading measure, unlike the panel around it.
+            *
+            * A cover letter is continuous prose and this is the copy you paste into an
+            * application, so it is read here before it is sent. `whitespace-pre-wrap`
+            * means it wraps to whatever it is given, and in the 1152px page shell that
+            * was paragraphs about 170 characters wide — roughly two and a half times a
+            * comfortable line, and the length at which the eye loses the start of the
+            * next line. The panel's buttons and warnings underneath still span the card.
+            */}
+          <div className="max-w-prose whitespace-pre-wrap rounded-lg border border-line bg-paper p-4 text-sm leading-relaxed">
             {letter.text}
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -136,7 +146,12 @@ export function ExtrasPanel({ snapshotId }: { snapshotId: string }) {
               ones to prepare an honest answer for.
             </p>
           ) : null}
-          <ul className="space-y-3">
+          {/* Two columns from `lg`. Each question is a short card — a question, one line
+              of why, and a quote from the resume — and ten of them stacked full-width in
+              the 1152px shell was a column of near-empty boxes three screens tall. Paired
+              up, the whole prep sheet is close to one screen, which is how it gets used:
+              scanned before an interview, not read through. */}
+          <ul className="grid gap-3 lg:grid-cols-2">
             {prep.questions.map((q, i) => (
               <li
                 key={i}
