@@ -11,6 +11,7 @@
  */
 
 import mammoth from 'mammoth';
+import { ensureDOMMatrix } from './dommatrix';
 import type { ResumeDocument } from '../types';
 
 export interface SelfTestIssue {
@@ -55,6 +56,11 @@ export async function extractTextFromDocx(buffer: Buffer): Promise<string> {
 }
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+  // Before the import, not after: pdfjs evaluates `new DOMMatrix()` at module load, and
+  // without one — Netlify's Lambda has no native canvas binary — every PDF was refused.
+  // See lib/render/dommatrix.ts.
+  ensureDOMMatrix();
+
   // pdf-parse v2 exposes a PDFParse class (v1 exported a bare function). Imported
   // lazily so the pdfjs runtime it pulls in isn't loaded on every request path.
   const { PDFParse } = (await import('pdf-parse')) as unknown as {
@@ -95,6 +101,11 @@ export async function selfTest(
     // second must not block delivery — the DOCX check validates the same underlying
     // document model, so the shared content is still verified either way.
     if (isParserUnavailable(message)) {
+      // Logged, because nothing else records it. The result below is a pass with a
+      // warning, the finalize step keeps only failures, and so the host problem behind it
+      // reached no one: production reported "0 chars from the PDF" for every draft while
+      // the same parser, used by /import, was refusing every PDF a user uploaded.
+      console.warn(`[selftest] ${format.toUpperCase()} verifier unavailable on this host:`, message);
       return {
         passed: true,
         extractedChars: 0,
@@ -274,4 +285,33 @@ function extractSectionRegion(
   }
 
   return text.slice(after, end);
+}
+
+/**
+ * What the self-test actually verified, said plainly.
+ *
+ * selfTest() above deliberately lets a verifier that cannot start on this host through
+ * rather than blocking delivery, because the other format reads the same document
+ * model. Reasonable — but the finalize step in lib/pipeline/run.ts then claimed "Both files verified — text extracts
+ * cleanly (0 chars from the PDF)" in production: a claim of verification next to a count
+ * showing nothing had been read. Zero characters with no failure recorded is precisely
+ * the parser-unavailable path; a real read of a broken PDF records a text-layer failure.
+ * So it names the file that was checked, and never claims a check that did not run.
+ */
+export function verifiedMessage(
+  pdf: { extractedChars: number; issues: ReadonlyArray<{ check: string }> },
+  docx: { extractedChars: number; issues: ReadonlyArray<{ check: string }> },
+): string {
+  const pdfRan = !pdf.issues.some((i) => i.check === 'parser-unavailable');
+  const docxRan = !docx.issues.some((i) => i.check === 'parser-unavailable');
+  if (pdfRan && docxRan) {
+    return `Both files verified — text extracts cleanly (${pdf.extractedChars} chars from the PDF)`;
+  }
+  if (docxRan) {
+    return `DOCX verified — text extracts cleanly (${docx.extractedChars} chars). The PDF checker can’t run on this server; the PDF is built from the same document.`;
+  }
+  if (pdfRan) {
+    return `PDF verified — text extracts cleanly (${pdf.extractedChars} chars). The DOCX checker can’t run on this server; the DOCX is built from the same document.`;
+  }
+  return 'Both files were generated, but neither checker can run on this server, so they were not verified.';
 }

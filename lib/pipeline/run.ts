@@ -30,7 +30,7 @@ import { reviseDocument } from '../generate/revise';
 import { runQualityGate } from '../quality/loop';
 import { renderResumePdf } from '../render/pdf';
 import { renderResumeDocx } from '../render/docx';
-import { selfTest } from '../render/selftest';
+import { selfTest, verifiedMessage } from '../render/selftest';
 import { resumeFileName } from '../render/filename';
 import type { EnrichmentSignal } from '../profile/enrichment';
 
@@ -307,7 +307,7 @@ async function runDraft(
     status: issues.length === 0 ? 'done' : 'error',
     message:
       issues.length === 0
-        ? `Both files verified — text extracts cleanly (${pdfTest.extractedChars} chars from the PDF)`
+        ? verifiedMessage(pdfTest, docxTest)
         : `Render check found ${issues.length} problem(s) — see details`,
     detail: { issues, pdfChars: pdfTest.extractedChars, docxChars: docxTest.extractedChars },
   });
