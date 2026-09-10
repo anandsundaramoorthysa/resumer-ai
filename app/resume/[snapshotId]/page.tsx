@@ -35,9 +35,9 @@ export default async function ResumePage({
 
   return (
     <div className="min-h-screen min-h-dvh">
-      <AppHeader width="5xl" />
+      <AppHeader width="6xl" />
 
-      <main className="mx-auto max-w-5xl px-5 py-8">
+      <main className="mx-auto max-w-6xl px-5 py-8">
         <ResumeEditor
           snapshotId={row.id}
           initialDocument={row.document as unknown as ResumeDocument}

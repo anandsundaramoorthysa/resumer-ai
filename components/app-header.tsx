@@ -32,7 +32,34 @@ import { Logo } from '@/components/logo';
 import { MobileNav } from '@/components/mobile-nav';
 import { NAV_LINKS } from '@/components/nav-links';
 
-/** Tailwind's max-width scale, as the pages use it — each keeps its own content width. */
+/**
+ * Tailwind's max-width scale. Every signed-in page is `6xl`; the rest exist for the
+ * header to keep matching a page that has a reason to differ.
+ *
+ * They used not to. Each page picked its own container and the six of them landed on four
+ * different numbers — the dashboard at 1152px, Applications and the resume review at
+ * 1024px, Profile at 896px, Import and both Settings screens at 768px. Measured at 1440px
+ * that is 80% of the viewport on the dashboard and 53% on Settings, and at 1920px it is
+ * 60% against 40%: the same application, navigated between, visibly changing its own
+ * margins on every click. The Settings pages were the worst of it — a 768px column of
+ * form floating in 1152px of empty page.
+ *
+ * So the shell is one number now, and the judgement moved inside it. A page does NOT get
+ * to fill 1152px by stretching its paragraphs to 1152px — a 180-character line is not
+ * "using the space", it is unreadable. The rule the pages follow:
+ *
+ *   - Tables, stat rows, card grids and editing surfaces take the full container. They
+ *     have real columns to give the width to.
+ *   - Every paragraph of explanation carries `max-w-prose` (~65ch) regardless of how wide
+ *     its container is. Prose keeps its measure; nothing about the container changes it.
+ *   - A page that is one column of form plus one block of long-form explanation splits
+ *     into `lg:grid-cols-[1.6fr_1fr]` — the dashboard's own proportion — with the
+ *     explanation as the right-hand column. The width is then filled by content that was
+ *     already on the page rather than by inflating a control.
+ *   - The credential pages (/sign-in, /verify-email, /forgot-password, /reset-password)
+ *     are deliberately outside all of this. They are one centred `max-w-md` card and do
+ *     not render this header's signed-in bar at all.
+ */
 export type HeaderWidth = '3xl' | '4xl' | '5xl' | '6xl';
 
 const WIDTHS: Record<HeaderWidth, string> = {
@@ -63,7 +90,11 @@ function isCurrent(href: string, current?: string): boolean {
 export async function AppHeader({
   current,
   userName,
-  width = '5xl',
+  /**
+   * Defaulted to the shell width every page now uses, so a new page that forgets the
+   * prop lines up with the rest instead of inheriting the old 1024px outlier.
+   */
+  width = '6xl',
 }: {
   /** The href of the page being rendered, so it can be marked in the nav. */
   current?: string;
