@@ -18,6 +18,10 @@ import {
 } from '../lib/auth/email-policy';
 import { hashToken } from '../lib/auth/tokens';
 import { linkedAccountPatch } from '../lib/auth/account-linking';
+import {
+  initialPasswordVerdict,
+  needsInitialPassword,
+} from '../lib/auth/initial-password';
 import { sessionSurvivesReset } from '../lib/auth/session-validity';
 import { suite, test, assert } from './harness.mjs';
 
@@ -239,6 +243,122 @@ suite('session validity after a reset', () => {
     // because everything does, so they must not be given the benefit of the doubt.
     for (const junk of [undefined, null, '1772000000000', NaN, {}, Infinity]) {
       assert(!sessionSurvivesReset(junk, RESET_AT), `should refuse ${String(junk)}`);
+    }
+  });
+});
+
+/* ------------------------- the first password on an OAuth-only account ---- */
+
+/**
+ * The gap: signing up with Google or GitHub writes no `passwordHash`, so email +
+ * password sign-in on that same address can never succeed — `authorize()` has nothing to
+ * compare against and returns the same null a wrong password returns. lib/auth/
+ * initial-password.ts decides who may close that gap, and both of its failure directions
+ * are silent in a running app.
+ *
+ * Refusing too much is the mild one: the user keeps signing in with their provider and
+ * nothing looks broken. Allowing too much is a hole — an account that already has a
+ * password being writable from a session, or an unverified row being handed the working
+ * password that lib/auth/account-linking.ts exists to deny it.
+ */
+suite('the first password on a provider-only account', () => {
+  const OAUTH_ONLY = {
+    passwordHash: null,
+    emailVerified: new Date('2026-01-01'),
+    email: 'someone@example.com',
+  };
+  // Shaped like a real stored value so nothing can pass by looking malformed.
+  const EXISTING_HASH = 'scrypt$32768$8$1$c2FsdA==$a2V5';
+
+  test('an OAuth account with no password is offered the step', () => {
+    assert(needsInitialPassword(OAUTH_ONLY), 'this is the whole reason the step exists');
+  });
+
+  test('an account that already has a password is not', () => {
+    // If this were true, a provider session could replace a password whose holder never
+    // typed the old one — a password change with no knowledge of the password. Changing
+    // one goes through the reset flow, which requires the inbox.
+    assert(
+      !needsInitialPassword({ ...OAUTH_ONLY, passwordHash: EXISTING_HASH }),
+      'an existing credential is never overwritten from a session',
+    );
+  });
+
+  test('an unverified row is not, however it got there', () => {
+    // The combination `linkedAccountPatch` refuses to create: a password that works on a
+    // row nobody has proved they own. This step must not be the way it appears.
+    assert(!needsInitialPassword({ ...OAUTH_ONLY, emailVerified: null }));
+    assert(!needsInitialPassword({ ...OAUTH_ONLY, emailVerified: undefined }));
+  });
+
+  test('a missing row is not', () => {
+    assert(!needsInitialPassword(null), 'a deleted account is not an opportunity');
+    assert(!needsInitialPassword(undefined));
+  });
+
+  test('the row linking just stripped a password from is exactly who this serves', () => {
+    // `linkedAccountPatch(null)` is the unverified row whose password was discarded when
+    // a provider verified it. It ends up verified with no password — the state that
+    // cannot sign in with email at all. That user is the point of this step: they are now
+    // inside a session the provider authenticated, which is stronger proof of ownership
+    // than the mailed link the reset flow would otherwise have demanded.
+    const patch = linkedAccountPatch(null);
+    assert(
+      needsInitialPassword({ email: OAUTH_ONLY.email, ...patch }),
+      'a provider-verified row with no password may set one',
+    );
+  });
+
+  test('the same strength rules as sign-up and reset', () => {
+    // A weaker bar here would be a hole in the fence rather than a convenience: a
+    // password set on this path signs in through `authorize()` like any other.
+    const weak = initialPasswordVerdict(OAUTH_ONLY, 'password123');
+    assert(!weak.ok && weak.refusal === 'weak', 'the commonest password in every list');
+    assert(weak.problems!.length > 0, 'and the reason is named, since the user chose it');
+
+    assert(!initialPasswordVerdict(OAUTH_ONLY, 'short').ok, 'too short is still too short');
+    assert(
+      initialPasswordVerdict(OAUTH_ONLY, 'mist over the harbour wall').ok,
+      'and a passphrase passes',
+    );
+  });
+
+  test('the email rule is applied against this account, not a blank string', () => {
+    // Passing the row's own address through is what makes "someone-2026-x" refusable.
+    // Drop it and the check silently degrades to length-only for the one guess most
+    // likely to be tried against this specific account.
+    const r = initialPasswordVerdict(OAUTH_ONLY, 'someone-2026-x');
+    assert(!r.ok && r.refusal === 'weak', 'contains the local part of the address');
+  });
+
+  test('a strong password is still refused when the row may not have one', () => {
+    // The verdict is re-run server-side against a freshly read row, so these are the
+    // states a second tab or a stale form can present. Strength must not be able to talk
+    // its way past them.
+    const strong = 'mist over the harbour wall';
+
+    const taken = initialPasswordVerdict({ ...OAUTH_ONLY, passwordHash: EXISTING_HASH }, strong);
+    assert(!taken.ok && taken.refusal === 'already-set', 'never a password change');
+
+    const unverified = initialPasswordVerdict({ ...OAUTH_ONLY, emailVerified: null }, strong);
+    assert(!unverified.ok && unverified.refusal === 'unverified', 'verification is not skippable');
+
+    assert.equal(initialPasswordVerdict(null, strong).refusal, 'already-set', 'no row, no write');
+  });
+
+  test('every refusal carries a sentence the user can act on', () => {
+    // This action runs inside a session, so unlike the pre-sign-in endpoints it is not
+    // hiding whether an account exists — a blank refusal here would just strand someone
+    // in their own account with no idea what to do next.
+    const cases = [
+      { state: OAUTH_ONLY, password: 'password123' },
+      { state: { ...OAUTH_ONLY, passwordHash: EXISTING_HASH }, password: 'mist over the harbour wall' },
+      { state: { ...OAUTH_ONLY, emailVerified: null }, password: 'mist over the harbour wall' },
+    ];
+    for (const { state, password } of cases) {
+      const r = initialPasswordVerdict(state, password);
+      assert(!r.ok, 'refused');
+      assert(typeof r.message === 'string' && r.message.length > 20, `explained: ${r.message}`);
     }
   });
 });

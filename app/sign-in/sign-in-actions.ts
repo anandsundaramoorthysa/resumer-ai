@@ -46,6 +46,21 @@ export async function passwordSignInAction(
   return { ok: true, message: 'Signed in.' };
 }
 
+/**
+ * Provider sign-in, which lands on the password step rather than the dashboard.
+ *
+ * Not because every provider user needs one — /set-password redirects straight to `/`
+ * for any account that already has a password, so this is a no-op for everyone except
+ * the accounts it exists for. The redirect target is decided here rather than after the
+ * fact because the answer is not known yet: whether a row exists, and whether it holds a
+ * password, is only settled inside the OAuth callback, and `signIn` takes its
+ * `redirectTo` before any of that has happened.
+ *
+ * Signing up with Google or GitHub writes no `passwordHash`, so email + password sign-in
+ * on that same address fails — indistinguishably from a wrong password, by design. This
+ * is where that account is offered the missing half. See app/set-password/page.tsx for
+ * why it is a step on the way in and not a gate on every route.
+ */
 export async function oauthSignInAction(provider: 'github' | 'google'): Promise<void> {
-  await signIn(provider, { redirectTo: '/' });
+  await signIn(provider, { redirectTo: '/set-password' });
 }
