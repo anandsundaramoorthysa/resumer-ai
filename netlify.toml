@@ -48,6 +48,13 @@
     "mammoth",
   ]
 
+  # pdfjs loads its worker by absolute path at runtime, so nothing references this file
+  # statically and build-time tracing left it out: every PDF upload in production failed
+  # with "Setting up fake worker failed: Cannot find module .../pdf.worker.mjs". The
+  # import in lib/render/selftest.ts should be enough on its own; this states it outright
+  # so the file cannot go missing again if that import is ever moved or tidied away.
+  included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"]
+
 # Scheduled functions are picked up from netlify/functions by their `schedule` export,
 # so there is nothing to declare here. netlify/functions/daily-sync.mts runs at 04:15 UTC
 # and only pings /api/cron/sync — it must stay a trigger, because a real portfolio sync

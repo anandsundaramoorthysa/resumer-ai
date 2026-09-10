@@ -70,6 +70,33 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
     };
   };
 
+  /*
+   * Pull pdfjs's worker into the deployed bundle.
+   *
+   * pdfjs imports `pdfjs-dist/legacy/build/pdf.worker.mjs` by absolute path when it sets
+   * up its worker. Nothing references that file statically, so build-time tracing never
+   * sees it, and it was missing from Netlify's function: every PDF failed with
+   * `Setting up fake worker failed: Cannot find module .../pdf.worker.mjs`.
+   *
+   * This import names the file with a literal specifier, which the build CAN trace, so
+   * the file ships. pdfjs's own path lookup then finds it, and Node serves it from the
+   * module cache rather than reading it twice.
+   *
+   * Not `pdf-parse/worker`, which the vendor's serverless note recommends: that module
+   * begins `import { Canvas, createCanvas, DOMMatrix, ImageData, Path2D } from
+   * "@napi-rs/canvas"`, so importing it would make the native binary a hard requirement
+   * at import time — the very dependency this file exists to avoid, and one this host
+   * does not satisfy.
+   *
+   * Wrapped, because a host where this cannot resolve should still get pdfjs's own error
+   * about the worker rather than a failure from this line.
+   */
+  try {
+    await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+  } catch {
+    /* pdfjs will report its own worker failure below */
+  }
+
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
   try {
     const { text } = await parser.getText();
