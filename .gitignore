@@ -82,6 +82,16 @@ desktop.ini
 /screenshots/
 /.playwright/
 .playwright-mcp/
+# Browser-verification output from ad-hoc audit runs, same as /screenshots above.
+/shots-hdr/
+
+# ---------------------------------------------------------------------------
+# Agent worktrees. Each carries its own node_modules, and eslint already ignores
+# this path for the same reason: one left behind after a merge turned a clean
+# lint run into 1,310 errors in code this project did not write.
+# ---------------------------------------------------------------------------
+/.*/
+!/.github/
 
 # ---------------------------------------------------------------------------
 # drizzle-kit's output directory (`out` in drizzle.config.ts).
