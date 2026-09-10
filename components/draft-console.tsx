@@ -78,6 +78,17 @@ interface PassRecord {
   improved: boolean;
 }
 
+/** What came of a "I do have that" sentence — what was saved, and what was refused. */
+interface AmendResult {
+  added: string | null;
+  dropped: string[];
+  unplaced: string[];
+  message: string | null;
+}
+
+/** Short enough to be a sentence, long enough to name a skill and where it was used. */
+const MIN_AMEND_CHARS = 10;
+
 /**
  * Reads an event stream until it ends. Returns whether the server said how it ended.
  *
@@ -128,6 +139,8 @@ export function DraftConsole() {
   const [declined, setDeclined] = useState(false);
   const [result, setResult] = useState<CompletePayload | null>(null);
   const [passes, setPasses] = useState<PassRecord[]>([]);
+  const [amendPending, setAmendPending] = useState(false);
+  const [amendResult, setAmendResult] = useState<AmendResult | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const tokenRef = useRef<string | null>(null);
   const stopRef = useRef(false);
@@ -340,6 +353,63 @@ export function DraftConsole() {
     else setPhase('deciding');
   }, [busy, draft, file, jobInput, onStage, postStream]);
 
+  /**
+   * "I do have that, my profile just never said so."
+   *
+   * The sentence goes to the profile through the same validation the resume importer
+   * uses, and the fit is then judged again on the profile as it now stands. If that
+   * clears the bar the draft starts by itself — the user has already said what they
+   * wanted, and asking them a second time for the same answer is a click for nothing.
+   */
+  const amend = useCallback(
+    async (text: string) => {
+      const token = tokenRef.current;
+      if (!token) return;
+
+      setAmendPending(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/draft/assess/amend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assessment: token, text }),
+        });
+        const payload = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          added?: string | null;
+          dropped?: string[];
+          unplaced?: string[];
+          message?: string;
+          fit?: FitReport;
+          token?: string;
+        };
+
+        if (!res.ok) {
+          setError(payload.error ?? 'That could not be saved.');
+          return;
+        }
+
+        setAmendResult({
+          added: payload.added ?? null,
+          dropped: payload.dropped ?? [],
+          unplaced: payload.unplaced ?? [],
+          message: payload.message ?? null,
+        });
+
+        if (payload.fit && payload.token) {
+          tokenRef.current = payload.token;
+          setFit(payload.fit);
+          if (payload.fit.decision === 'proceed') await draft(payload.token);
+        }
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') setError((err as Error).message);
+      } finally {
+        setAmendPending(false);
+      }
+    },
+    [draft],
+  );
+
   const draftAnyway = useCallback(() => {
     if (tokenRef.current) void draft(tokenRef.current);
   }, [draft]);
@@ -550,6 +620,9 @@ export function DraftConsole() {
           autoProceeded={fit.decision === 'proceed'}
           onYes={draftAnyway}
           onNo={decline}
+          onAmend={amend}
+          amendPending={amendPending}
+          amendResult={amendResult}
         />
       )}
 
@@ -616,6 +689,9 @@ function FitCard({
   autoProceeded,
   onYes,
   onNo,
+  onAmend,
+  amendPending,
+  amendResult,
 }: {
   fit: FitReport;
   deciding: boolean;
@@ -623,6 +699,9 @@ function FitCard({
   autoProceeded: boolean;
   onYes: () => void;
   onNo: () => void;
+  onAmend: (text: string) => void;
+  amendPending: boolean;
+  amendResult: AmendResult | null;
 }) {
   const good = fit.verdict === 'strong' || fit.verdict === 'good';
   const badge = good
@@ -762,6 +841,22 @@ function FitCard({
         </p>
       )}
 
+      {/*
+        The list above is what the profile does not SAY. For a real person a good part of
+        it is not a gap at all — they have done the thing and never wrote it down, and
+        until now the only way to fix that was to leave this page, find the right editor,
+        and type the fact into the right shape. Most people would draft a worse resume
+        instead. So: say it here, in a sentence.
+      */}
+      {(deciding || amendResult) && (
+        <AmendBox
+          missing={fit.skills.missing}
+          pending={amendPending}
+          result={amendResult}
+          onSubmit={onAmend}
+        />
+      )}
+
       {deciding && (
         <div className="mt-4 rounded-xl border border-line p-4">
           <p className="text-sm font-semibold">
@@ -796,6 +891,104 @@ function FitCard({
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * Saying what the profile left out, and having it saved properly.
+ *
+ * Deliberately one plain box rather than a form per record type. The point is that
+ * someone looking at "SQL — not named in your profile" can answer in the words they
+ * would use out loud; routing that into a skill, a project or a role is the server's
+ * job (lib/profile/claim.ts), and it will refuse anything the sentence does not support.
+ *
+ * What is refused is shown, not hidden. If the reading dropped half of what was written,
+ * the person needs to know that before they believe their profile now says it.
+ */
+function AmendBox({
+  missing,
+  pending,
+  result,
+  onSubmit,
+}: {
+  missing: string[];
+  pending: boolean;
+  result: AmendResult | null;
+  onSubmit: (text: string) => void;
+}) {
+  const [text, setText] = useState('');
+  const example = missing[0] ?? 'SEO';
+
+  return (
+    <div className="mt-4 rounded-xl border border-line p-4">
+      <p className="text-sm font-semibold">Do you actually have any of these?</p>
+      <p className="mt-1 text-xs text-muted">
+        If something above is missing only because your profile never mentioned it, say so
+        here and it will be saved to your profile — then this role is judged again. Only
+        what you write is saved; nothing is filled in for you.
+      </p>
+
+      <label htmlFor="amend" className="sr-only">
+        What you have done that your profile does not mention
+      </label>
+      <textarea
+        id="amend"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+        disabled={pending}
+        placeholder={`e.g. I've done ${example} on all my own products and for ferventers.com — mostly technical audits.`}
+        className="mt-3 w-full resize-y rounded-xl border border-muted bg-paper px-3.5 py-3 text-sm outline-none placeholder:text-muted focus:border-brand disabled:opacity-60"
+      />
+
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            onSubmit(text);
+            setText('');
+          }}
+          disabled={pending || text.trim().length < MIN_AMEND_CHARS}
+          className="min-h-11 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {pending ? 'Saving and re-checking…' : 'Save and check again'}
+        </button>
+        <span className="text-xs text-muted">
+          Saved to your profile, so every future resume can use it.
+        </span>
+      </div>
+
+      {result && (
+        <div className="mt-3 space-y-2 text-sm" aria-live="polite">
+          {result.added && (
+            <p className="rounded-lg bg-success-tint px-3 py-2 text-success">{result.added}</p>
+          )}
+          {result.message && !result.added && (
+            <p className="rounded-lg bg-paper px-3 py-2 text-muted">{result.message}</p>
+          )}
+          {result.dropped.length > 0 && (
+            <div className="rounded-lg bg-warning-tint px-3 py-2 text-warning">
+              <p className="font-semibold">Not saved, because your note didn’t say it:</p>
+              <ul className="mt-1 list-disc pl-5">
+                {result.dropped.map((d, i) => (
+                  <li key={i}>{d}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.unplaced.length > 0 && (
+            <div className="rounded-lg bg-paper px-3 py-2 text-muted">
+              <p className="font-semibold">Couldn’t place this part of what you wrote:</p>
+              <ul className="mt-1 list-disc pl-5">
+                {result.unplaced.map((u, i) => (
+                  <li key={i}>“{u}”</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

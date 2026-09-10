@@ -178,7 +178,7 @@ export async function runDraftPipeline(
  * timed out, and fell back to the rules-only report — with 5 seconds of its budget still
  * unspent. The same job, when reading it took 5.9s, got the full review.
  */
-const ASSESS_RESERVE_MS = 1_500;
+export const ASSESS_RESERVE_MS = 1_500;
 
 /**
  * The fit check's own clock — longer than a draft's, because it renders nothing.
@@ -190,7 +190,7 @@ const ASSESS_RESERVE_MS = 1_500;
  * the whole request near 25 — inside the platform limit with margin. Overridable with
  * MAX_ASSESS_SECONDS for a host with a different limit.
  */
-const ASSESS_TIME_BUDGET_MS = (() => {
+export const ASSESS_TIME_BUDGET_MS = (() => {
   const seconds = Number(process.env.MAX_ASSESS_SECONDS);
   return (Number.isFinite(seconds) && seconds > 0 ? seconds : 22) * 1000;
 })();
