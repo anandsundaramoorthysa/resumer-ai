@@ -93,14 +93,6 @@ export async function POST() {
       pdfName: resumeFileName(document, 'pdf'),
       docxName: resumeFileName(document, 'docx'),
     },
-    selfTest: {
-      pdfPassed: pdfTest.passed,
-      docxPassed: docxTest.passed,
-      issues: [...pdfTest.issues, ...docxTest.issues]
-        .filter((i) => i.severity === 'fail')
-        .map((i) => `${i.check}: ${i.detail}`),
-    },
-    budget: { calls: 0, tokens: 0 },
   });
 
   return Response.json({

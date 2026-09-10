@@ -23,6 +23,7 @@ import {
 } from '@/lib/intake/job-input';
 import { runDraftPipeline, PipelineError } from '@/lib/pipeline/run';
 import { loadProfileForUser, persistDraft, buildSyncStep } from '@/lib/server/profile';
+import { recordEnrichmentQuestions } from '@/lib/server/enrichment';
 import type { PipelineEvent } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -162,6 +163,26 @@ export async function POST(req: NextRequest) {
         );
 
         const snapshotId = await persistDraft(userId, result);
+
+        /*
+         * File what this draft could not evidence against the records it concerns.
+         *
+         * After the snapshot and inside its own try: the resume exists by this point and
+         * is about to be handed to the user, and a failure to write a follow-up question
+         * must not turn a finished draft into an error frame. Logged where logs are read
+         * rather than surfaced, for the reason the catch below gives — nothing thrown by
+         * the database was written for the person who uploaded a job description.
+         */
+        try {
+          await recordEnrichmentQuestions(
+            userId,
+            result.enrichment,
+            profile.records,
+            profile.roles,
+          );
+        } catch (err) {
+          console.error('[draft] could not record enrichment questions for user', userId, err);
+        }
 
         send('complete', {
           snapshotId,

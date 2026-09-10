@@ -470,10 +470,17 @@ function chunked<T>(items: T[], size: number): T[][] {
 
 /* ------------------------------------------------------------- persistence -- */
 
-/** REQ-9.2 — freeze exactly what was produced, so the tracker can point at it. */
+/**
+ * REQ-9.2 — freeze exactly what was produced, so the tracker can point at it.
+ *
+ * Takes only the four fields it actually stores rather than a whole `PipelineOutput`.
+ * The baseline route (REQ-6.7) never runs the pipeline — no job, no gate, no loop — and
+ * hand-builds this argument, so every field added to the pipeline's output used to
+ * become a field the baseline had to fake with a value nothing would ever read.
+ */
 export async function persistDraft(
   userId: string,
-  result: PipelineOutput,
+  result: Pick<PipelineOutput, 'document' | 'score' | 'job' | 'files'>,
 ): Promise<string> {
   const [snapshot] = await db
     .insert(resumeSnapshots)

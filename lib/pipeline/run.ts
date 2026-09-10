@@ -32,6 +32,7 @@ import { renderResumePdf } from '../render/pdf';
 import { renderResumeDocx } from '../render/docx';
 import { selfTest } from '../render/selftest';
 import { resumeFileName } from '../render/filename';
+import type { EnrichmentSignal } from '../profile/enrichment';
 
 export type Emit = (event: Omit<PipelineEvent, 'at'>) => void;
 
@@ -61,6 +62,15 @@ export interface PipelineOutput {
   };
   selfTest: { pdfPassed: boolean; docxPassed: boolean; issues: string[] };
   budget: { calls: number; tokens: number };
+  /**
+   * What this draft could not evidence, per record — see lib/profile/enrichment.ts.
+   *
+   * Returned rather than written, for the same reason the snapshot is: this module runs
+   * the engine and touches no tables. The caller that already persists the draft
+   * persists the questions, and a caller that only wants a resume (scripts/e2e-draft.mts,
+   * the dev route) gets the signal and ignores it without leaving rows behind.
+   */
+  enrichment: EnrichmentSignal;
 }
 
 /**
@@ -314,6 +324,22 @@ async function runDraft(
     },
     selfTest: { pdfPassed: pdfTest.passed, docxPassed: docxTest.passed, issues },
     budget: budget.snapshot(),
+    /*
+     * The three things this run could not evidence, collected in one place.
+     *
+     * Every field here already existed and was already discarded: `rejected` became a
+     * sentence in the draft note, `weakBullets` became critiques the revision pass could
+     * not act on, and `genuineGaps` became one clause of the halt explanation. Gathering
+     * them costs nothing — no extra model call, no extra query — because the run has
+     * already paid for all three.
+     */
+    enrichment: {
+      rejectedRewrites: assembled.rejectedRewrites,
+      weakBullets: outcome.weakBullets,
+      genuineGaps: outcome.genuineGaps,
+      document,
+      job,
+    },
   };
 }
 
