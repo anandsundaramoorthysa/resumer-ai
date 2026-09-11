@@ -28,6 +28,16 @@ Rules:
 - Use the posting's own terms where the facts genuinely support them — that is what an ATS scans for.
 - Plain, confident, specific. No clichés ("passionate", "results-driven", "go-getter").`;
 
+/**
+ * What a summary may name: the profile's facts, plus the job it is written for. Naming the
+ * target role ("a Product Analyst internship") is not a claim about the candidate — it was
+ * refused as "Analyst" because no profile mentions the job it is applying to. The posting's
+ * skills are NOT added: claiming one the profile lacks is exactly what this check refuses.
+ */
+export function summaryGroundingSource(facts: string, job: JobRequirement): string {
+  return `${facts}\n${job.roleTitle}\n${job.company ?? ''}`;
+}
+
 export async function draftSummary(args: {
   job: JobRequirement;
   /** Everything the summary may draw on, as plain text. Also what it is checked against. */
@@ -50,7 +60,7 @@ ${args.facts}`,
       console.warn('[summary] dropped: empty or too long —', text.split(' ').length, 'words');
       return null;
     }
-    const violations = findUngroundedTokens(text, args.facts);
+    const violations = findUngroundedTokens(text, summaryGroundingSource(args.facts, args.job));
     if (violations.length > 0) {
       // Logged, because a missing summary is otherwise silent: the resume simply has none.
       console.warn('[summary] dropped by grounding:', violations.map((v) => v.token).join(', '));

@@ -14,6 +14,7 @@ import {
 } from '../lib/generate/resume-lines';
 import { lengthVerdict } from '../lib/quality/length';
 import { isGrounded } from '../lib/generate/grounding';
+import { summaryGroundingSource } from '../lib/generate/summary';
 import { canonicalSkillName } from '../lib/skills/identity';
 import type { JobRequirement, ProfileRecord, ResumeDocument } from '../lib/types';
 
@@ -137,6 +138,19 @@ suite('the summary\'s grounding', () => {
 
   test('an acronym at a sentence start is still checked', () => {
     assert.ok(!isGrounded('Skilled in Python. AWS certified.', facts));
+  });
+
+  test('a hyphenated compound of a known name is grounded', () => {
+    // Refused in production as "pythondriven".
+    assert.ok(isGrounded('Delivers Python-driven analysis with SQL.', facts));
+    assert.ok(!isGrounded('Delivers Kafka-driven pipelines.', facts));
+  });
+
+  test('the target role may be named; the posting\'s skills may not be claimed', () => {
+    const source = summaryGroundingSource(facts, job);
+    // Refused in production as "Analyst".
+    assert.ok(isGrounded('Data Science student seeking a Data Analyst Intern role.', source));
+    assert.ok(!isGrounded('Expert in Tableau.', source));
   });
 });
 
