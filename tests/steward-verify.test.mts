@@ -56,6 +56,16 @@ suite('steward gate — rewording', () => {
     assert.equal(run([p({ recordId: 's5', field: 'name', value: 'docker' })]).suggestions.length, 0);
   });
 
+  test('a stack never loses a real skill, even when the model asks', () => {
+    // The live model proposed dropping RAG from a chatbot's stack.
+    const bot = rec('p2', 'project', { name: 'Botinigo', description: 'An admission chatbot.', stack: ['RAG', 'Next.js', 'Climate Change'] });
+    const r = verifyProposals([p({ recordId: 'p2', field: 'stack', listValue: ['Next.js'] })], [bot], [role]);
+    assert.equal(r.suggestions.length, 0);
+    assert.ok(r.refused[0].includes('RAG'));
+    const ok = verifyProposals([p({ recordId: 'p2', field: 'stack', listValue: ['RAG', 'Next.js'] })], [bot], [role]);
+    assert.equal(ok.suggestions.length, 1);
+  });
+
   test('a stack may lose a subject-matter entry but never gain one', () => {
     assert.equal(run([p({ recordId: 'p1', field: 'stack', listValue: ['Python', 'Flask', 'Speedtest'] })]).suggestions.length, 1);
     assert.equal(run([p({ recordId: 'p1', field: 'stack', listValue: ['Python', 'Flask', 'Django'] })]).suggestions.length, 0);

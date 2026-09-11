@@ -11,7 +11,7 @@
  */
 
 import { findUngroundedTokens } from '../generate/grounding';
-import { SKILL_CATEGORIES as CATEGORIES, SKILL_CATEGORY_LABELS } from '../skills/categories';
+import { SKILL_CATEGORIES as CATEGORIES, SKILL_CATEGORY_LABELS, classifySkill } from '../skills/categories';
 import { formFor } from '../profile/forms';
 import { labelOf, words } from './rules';
 import { tidyText } from './tidy';
@@ -173,6 +173,16 @@ export function verifyProposals(
         // A stack may only lose entries — never gain one the project did not list.
         if (after.length === 0 || after.length >= before.length || !after.every((a) => known.has(bare(a)))) {
           refuse(p, 'a stack rewrite may only remove entries');
+          continue;
+        }
+        // And only entries that are not a recognised skill. Told to keep techniques, the
+        // model still proposed dropping RAG and a VS Code extension API from real stacks;
+        // the classifier knows those are things you build with, and "Climate Change" is not.
+        const kept = new Set(after.map(bare));
+        const dropped = before.filter((b) => !kept.has(bare(b)));
+        const real = dropped.filter((d) => classifySkill(d) !== null);
+        if (real.length > 0) {
+          refuse(p, `would drop ${real.join(', ')}, which are real skills`);
           continue;
         }
         draft = { ...base, kind: 'fix', title: 'Keep only the technologies in the stack', changes: { stack: { from: before, to: after } } };
