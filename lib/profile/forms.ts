@@ -108,6 +108,7 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
       { name: 'credential', label: 'Degree', kind: 'text', required: true, placeholder: 'B.Sc. Computer Science' },
       { name: 'institution', label: 'Institution', kind: 'text', required: true },
       { name: 'field', label: 'Field', kind: 'text' },
+      { name: 'grade', label: 'Grade', kind: 'text', placeholder: '7.5 / 10', hint: 'CGPA or percentage, exactly as it should print.' },
       { name: 'startDate', label: 'Started', kind: 'text', placeholder: '2022-06', hint: 'Year, or YYYY-MM.' },
       { name: 'endDate', label: 'Finished', kind: 'text', placeholder: '2026-05' },
     ],

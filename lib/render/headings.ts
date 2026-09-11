@@ -25,7 +25,7 @@ export const HEADING_ALLOW_LIST: Record<SectionKey, string[]> = {
   // or "Writing" heading is not, and an unrecognised heading loses the whole section.
   publications: ['Publications', 'Publications & Writing', 'Research'],
   awards: ['Awards', 'Awards & Honors', 'Honors & Awards'],
-  achievements: ['Achievements', 'Achievements & Activities'],
+  achievements: ['Achievements', 'Achievements & Activities', 'Campus and Community Activities'],
   volunteering: ['Volunteer Experience', 'Leadership & Volunteering', 'Leadership'],
   languages: ['Languages'],
   interests: ['Interests', 'Interests & Activities'],

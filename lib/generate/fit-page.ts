@@ -25,11 +25,14 @@
  */
 
 import type { ResumeDocument, SectionKey } from '../types';
-import { lengthVerdict } from '../quality/length';
+import { lengthVerdict, MIN_BULLETS_KEPT_PER_ROLE } from '../quality/length';
 import { scoreKeywordCoverage } from '../quality/keywords';
 
-const PROTECTED: ReadonlySet<SectionKey> = new Set(['summary', 'skills', 'education']);
-const MIN_BULLETS_KEPT_PER_ROLE = 2;
+// Printed in every resume, as the owner asked — the trim takes projects and older
+// bullets instead. Certifications are already capped at three by the assembler.
+const PROTECTED: ReadonlySet<SectionKey> = new Set([
+  'summary', 'skills', 'education', 'achievements', 'volunteering', 'certifications',
+]);
 /** Far more removals than any real document needs; a guard, not a budget. */
 const MAX_REMOVALS = 80;
 

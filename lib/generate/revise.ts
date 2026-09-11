@@ -23,6 +23,7 @@ import { generateStructured } from '../ai/chain';
 import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
 import { trimToPage } from './fit-page';
+import { formatSkillRow, groupSkills, parseSkillRow } from './resume-lines';
 import { formatDate } from '../render/dates';
 import { holdsKeyword } from '../quality/vocabulary';
 import {
@@ -165,16 +166,21 @@ function applySkillsFix(
   const section = doc.sections.find((s) => s.key === 'skills');
   if (!section) return doc;
 
-  const current = section.items[0]?.text ?? '';
-  const existing = new Set(
-    current.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+  // Skills is labelled rows now ("Databases: MongoDB, MySQL"). Additions are regrouped
+  // with the rest; the spoken-languages row is kept exactly as it was.
+  const rows = section.items.map((i) => parseSkillRow(i.text));
+  const spoken = rows.filter((r) => r.label === 'Languages');
+  const names = rows.filter((r) => r.label !== 'Languages').flatMap((r) => r.names);
+  const existing = new Set(names.map((n) => n.toLowerCase()));
+  const categoryOf = new Map(
+    records.filter((r): r is SkillRecord => r.type === 'skill').map((s) => [s.name, s.category]),
   );
-  const merged = [
-    ...additions.filter((a) => !existing.has(a.toLowerCase())),
-    ...current.split(',').map((s) => s.trim()).filter(Boolean),
-  ];
+  const merged = [...additions.filter((a) => !existing.has(a.toLowerCase())), ...names];
 
-  section.items = [{ text: merged.join(', '), sourceRecordId: null }];
+  section.items = [...groupSkills(merged, (n) => categoryOf.get(n)), ...spoken].map((r) => ({
+    text: formatSkillRow(r),
+    sourceRecordId: null,
+  }));
   return doc;
 }
 

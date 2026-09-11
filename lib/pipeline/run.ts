@@ -307,6 +307,7 @@ async function runDraft(
       contact: input.contact,
       job,
       records: selected,
+      allRecords: records,
       roles: input.roles,
       budget,
     });

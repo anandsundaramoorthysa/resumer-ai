@@ -86,6 +86,28 @@ function contentLines(doc: ResumeDocument): number {
   }, 0);
 }
 
+/** Sections that give way to make room; everything else is printed in every resume. */
+const OPTIONAL_SECTIONS = new Set(['projects', 'publications', 'interests']);
+
+/** Bullets a role always keeps; ../generate/fit-page.ts may trim any beyond these. */
+export const MIN_BULLETS_KEPT_PER_ROLE = 2;
+
+/**
+ * The lines no trim can remove — what decides whether a second page is needed.
+ * Experience counts each role's title and its first bullets only: the rest are the
+ * trim's to cut, so a long list of bullets must not buy itself a second page.
+ */
+function requiredLines(doc: ResumeDocument): number {
+  return doc.sections
+    .filter((s) => !OPTIONAL_SECTIONS.has(s.key))
+    .reduce((n, s) => {
+      const groups = s.groups ?? [];
+      const perGroup = (items: number) =>
+        s.key === 'experience' ? Math.min(items, MIN_BULLETS_KEPT_PER_ROLE) : items;
+      return n + s.items.length + groups.reduce((m, g) => m + 1 + perGroup(g.items.length), 0);
+    }, 0);
+}
+
 /**
  * Headings are excluded on purpose: "Professional Experience" is two words of structure,
  * not two words of content, and counting them would let a thin resume pad its way past
@@ -184,8 +206,13 @@ function measure(doc: ResumeDocument): {
   // cost one problem two rules.
   if (!job || lines === 0) return { words, lines, lineBudget: 0, floor, verdict: 'n/a' };
 
-  const lineBudget = contentLineAllowance(job, 0);
-  const wordBudget = contentWordAllowance(job, 0);
+  // A second page when what MUST be printed — every role, every activity, grouped
+  // skills — does not fit on one. Only the optional sections are trimmed to fit.
+  const onePage = contentLineAllowance(job, 0);
+  const twoPages =
+    onePage === CONTENT_LINES_PER_PAGE && requiredLines(doc) > CONTENT_LINES_PER_PAGE;
+  const lineBudget = twoPages ? onePage * 2 : onePage;
+  const wordBudget = contentWordAllowance(job, 0) * (twoPages ? 2 : 1);
 
   if (lines > lineBudget || words > wordBudget * LONG_WORD_TOLERANCE) {
     return { words, lines, lineBudget, floor, verdict: 'long' };

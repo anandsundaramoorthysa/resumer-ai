@@ -38,6 +38,15 @@ import { profileFor } from '../retrieval/categories';
 import { generateStructured } from '../ai/chain';
 import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
+import { draftSummary } from './summary';
+import {
+  educationLine,
+  educationYears,
+  formatSkillRow,
+  groupSkills,
+  relevanceScore,
+  topByRelevance,
+} from './resume-lines';
 import { coerceHeading } from '../render/headings';
 import { formatDate, formatDateRange } from '../render/dates';
 import { canonicalSkillName, dedupeBySkillIdentity } from '../skills/identity';
@@ -239,7 +248,8 @@ export function distributeBulletsByRecency(
  * Sections eligible to be cut when the page is full. Nothing carrying evidence of what
  * someone can do is ever in here.
  */
-export const DROPPABLE_SECTIONS: SectionKey[] = ['interests', 'languages', 'volunteering'];
+// Volunteering prints in every resume, and Languages is now a row of Skills.
+export const DROPPABLE_SECTIONS: SectionKey[] = ['interests'];
 
 /**
  * Drop order follows the category's own ranking, not a fixed list.
@@ -299,6 +309,12 @@ export interface AssembleInput {
   contact: ContactInfo;
   job: JobRequirement | null;
   records: ProfileRecord[];
+  /**
+   * The whole profile, not just what retrieval selected. Education, activities,
+   * volunteering, certifications and writing are chosen from here, because they print in
+   * every resume whether or not retrieval thought they matched this job.
+   */
+  allRecords?: ProfileRecord[];
   roles: RoleRecord[];
   budget?: DraftBudget;
   /** Set false for the baseline resume (REQ-6.7) — no job to tailor toward. */
@@ -362,23 +378,52 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     (r): r is ExperienceBulletRecord => r.type === 'experience-bullet',
   );
   const projects = records.filter((r): r is ProjectRecord => r.type === 'project');
-  const education = records.filter((r) => r.type === 'education');
-  const certifications = records.filter((r) => r.type === 'certification');
-  const achievements = records.filter((r) => r.type === 'achievement');
+  const all = input.allRecords ?? records;
+  // Every qualification, newest first.
+  const education = all
+    .filter((r): r is Extract<ProfileRecord, { type: 'education' }> => r.type === 'education')
+    .sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? ''));
+  // Only the three most relevant — a list of 27 certificates is noise, three good ones
+  // are evidence.
+  const certifications = topByRelevance(all.filter((r) => r.type === 'certification'), job, 3);
+  // Printed in every resume under "Campus and Community Activities".
+  const achievements = all.filter((r) => r.type === 'achievement');
   const summaries = records.filter((r): r is SummaryRecord => r.type === 'summary');
-  const papers = records.filter((r): r is PublicationRecord => r.type === 'publication');
-  const articles = records.filter((r): r is WritingRecord => r.type === 'writing');
-  const awards = records.filter((r): r is AwardRecord => r.type === 'award');
-  const volunteering = records.filter(
-    (r): r is VolunteeringRecord => r.type === 'volunteering',
+  // Papers only when they bear on this job; blog posts, the three most relevant.
+  const papers = all.filter(
+    (r): r is PublicationRecord => r.type === 'publication' && relevanceScore(r, job) > 0,
   );
-  const languages = records.filter((r): r is LanguageRecord => r.type === 'language');
+  const articles = topByRelevance(
+    all.filter((r): r is WritingRecord => r.type === 'writing'),
+    job,
+    3,
+  );
+  const awards = records.filter((r): r is AwardRecord => r.type === 'award');
+  const volunteering = all.filter((r): r is VolunteeringRecord => r.type === 'volunteering');
+  const languages = all.filter((r): r is LanguageRecord => r.type === 'language');
   const interests = records.filter((r): r is InterestRecord => r.type === 'interest');
 
   const totalYears = estimateYears(roles);
   const allowance = bulletAllowance(job, totalYears);
   const lineBudget = contentLineAllowance(job, totalYears);
   const trimmedBullets = distributeBulletsByRecency(bullets, roles, allowance);
+
+  // --- Summary, drafted in parallel with the rewrite below ---------------------
+  // Started now so it costs no extra wall-clock time. The facts are both the prompt and
+  // what the draft is grounded against — see ./summary.ts.
+  const summaryFacts = [
+    ...rolesByRecency(roles).map(
+      (r) => `${r.title} at ${r.company} (${formatDateRange(r.startDate, r.endDate)})`,
+    ),
+    ...education.map((e) => `${e.credential}${e.field ? `, ${e.field}` : ''} — ${e.institution}`),
+    `Skills: ${skills.map((s) => s.name).join(', ')}`,
+    ...trimmedBullets.map((b) => b.text),
+    ...projects.map((p) => `${p.name}: ${p.description ?? ''}`),
+    ...achievements.map((a) => (a as Extract<ProfileRecord, { type: 'achievement' }>).title),
+    ...newestFirst(summaries).slice(0, 1).map((s) => s.text),
+  ].join('\n');
+  const summaryPromise =
+    shouldRewrite && job ? draftSummary({ job, facts: summaryFacts, budget }) : Promise.resolve(null);
 
   // --- Grounded rewrite (REQ-4.4) --------------------------------------------
   const rewrites = new Map<string, string>();
@@ -439,19 +484,21 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
   // --- Sections ---------------------------------------------------------------
   const byKey: Partial<Record<SectionKey, ResumeSection>> = {};
 
-  // A summary is used, never composed: nothing here has licence to write a claim about
-  // the user that no record supports (NFR-8). Only the newest one is printed — two
-  // summaries is a contradiction, not a longer summary.
-  const summary = newestFirst(summaries)[0];
-  if (summary && summary.text.trim()) {
+  // A summary written for this job, grounded against the profile (./summary.ts). If the
+  // draft fails its grounding check, the newest stored summary is used instead; if there
+  // is none, the resume has no summary rather than an invented one.
+  const drafted = await summaryPromise;
+  const stored = newestFirst(summaries)[0];
+  const summaryText = drafted ?? stored?.text.trim() ?? '';
+  if (summaryText) {
     byKey.summary = {
       key: 'summary',
       heading: coerceHeading('summary', undefined),
-      items: [{ text: summary.text.trim(), sourceRecordId: summary.id }],
+      items: [{ text: summaryText, sourceRecordId: drafted ? null : stored!.id }],
     };
   }
 
-  if (skills.length > 0) {
+  if (skills.length > 0 || languages.length > 0) {
     // Ordered so job-required skills lead — the Skills section is weighted heavily
     // by parsers, so what sits at the front of it matters.
     //
@@ -461,35 +508,32 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     // "React, ReactJS, react" costs three of the section's most valuable slots to say
     // one thing, and gives a parser three tokens where a recruiter sees carelessness.
     const ordered = dedupeBySkillIdentity(orderSkillsForJob(skills, job), (s) => s.name);
+    // Labelled rows — "Databases: MongoDB, MySQL" — the layout the owner asked for.
+    // Spoken languages are the last row rather than a section of their own.
+    const categoryOf = new Map(ordered.map((s) => [canonicalSkillName(s.name), s.category]));
+    const rows = groupSkills(
+      ordered.map((s) => canonicalSkillName(s.name)),
+      (n) => categoryOf.get(n),
+    );
+    if (languages.length > 0) rows.push({ label: 'Languages', names: languages.map(languageLabel) });
     byKey.skills = {
       key: 'skills',
       heading: coerceHeading('skills', undefined),
-      items: [
-        {
-          text: ordered.map((s) => canonicalSkillName(s.name)).join(', '),
-          sourceRecordId: null,
-        },
-      ],
+      items: rows.map((row) => ({ text: formatSkillRow(row), sourceRecordId: null })),
     };
   }
 
-  if (trimmedBullets.length > 0) {
-    // Printed newest-first for the same reason the bullets are allocated that way: a
-    // reader reads down, and the allocation would be invisible under any other order.
-    const groups = rolesByRecency(roles)
-      .map((role) => {
-        const items = trimmedBullets
-          .filter((b) => b.roleId === role.id)
-          .map((b) => ({ text: bulletText(b), sourceRecordId: b.id }));
-        if (items.length === 0) return null;
-        return {
-          title: role.title,
-          subtitle: role.company,
-          dateRange: formatDateRange(role.startDate, role.endDate),
-          items,
-        };
-      })
-      .filter((g): g is NonNullable<typeof g> => g !== null);
+  if (roles.length > 0 || trimmedBullets.length > 0) {
+    // EVERY role, newest first, with its dates exactly as stored — including roles with no
+    // bullets. A role missing from the resume is a gap in the timeline a recruiter asks about.
+    const groups = rolesByRecency(roles).map((role) => ({
+      title: role.title,
+      subtitle: role.company,
+      dateRange: formatDateRange(role.startDate, role.endDate),
+      items: trimmedBullets
+        .filter((b) => b.roleId === role.id)
+        .map((b) => ({ text: bulletText(b), sourceRecordId: b.id })),
+    }));
 
     const orphans = trimmedBullets
       .filter((b) => !roles.some((r) => r.id === b.roleId))
@@ -526,18 +570,16 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
   }
 
   if (education.length > 0) {
+    // Institution and years on one line, the degree under it — no field printed twice.
     byKey.education = {
       key: 'education',
       heading: coerceHeading('education', undefined),
-      items: education.map((e) => {
-        const rec = e as Extract<ProfileRecord, { type: 'education' }>;
-        return {
-          text: [rec.credential, rec.field, rec.institution, formatDateRange(rec.startDate, rec.endDate)]
-            .filter(Boolean)
-            .join(' · '),
-          sourceRecordId: rec.id,
-        };
-      }),
+      items: [],
+      groups: education.map((rec) => ({
+        title: rec.institution,
+        dateRange: educationYears(rec.startDate, rec.endDate),
+        items: [{ text: educationLine(rec.credential, rec.field, rec.grade), sourceRecordId: rec.id }],
+      })),
     };
   }
 
@@ -583,7 +625,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
   if (achievements.length > 0) {
     byKey.achievements = {
       key: 'achievements',
-      heading: coerceHeading('achievements', undefined),
+      heading: coerceHeading('achievements', 'Campus and Community Activities'),
       items: achievements.map((a) => {
         const rec = a as Extract<ProfileRecord, { type: 'achievement' }>;
         return { text: `${rec.title}${rec.description ? ` — ${rec.description}` : ''}`, sourceRecordId: rec.id };
@@ -599,16 +641,6 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
         text: joinParts([v.role, v.organization, formatDate(v.date)], v.description),
         sourceRecordId: v.id,
       })),
-    };
-  }
-
-  // One comma-joined line, the way Skills is rendered. A bullet each turns four facts
-  // worth half a line into four lines, and those lines come out of Experience.
-  if (languages.length > 0) {
-    byKey.languages = {
-      key: 'languages',
-      heading: coerceHeading('languages', undefined),
-      items: [joinedLine(languages.slice(0, JOINED_LINE_MAX_ITEMS), languageLabel)],
     };
   }
 
@@ -636,7 +668,14 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     sections,
     jobRequirement: job,
     renderMode: 'ats-strict',
-    recordHashSnapshot: records.map((r) => r.contentHash),
+    // Everything printed, including the always-included records retrieval did not select.
+    recordHashSnapshot: [
+      ...new Set(
+        [...records, ...education, ...certifications, ...achievements, ...volunteering, ...papers, ...articles, ...languages].map(
+          (r) => r.contentHash,
+        ),
+      ),
+    ],
     createdAt: new Date(),
   };
 

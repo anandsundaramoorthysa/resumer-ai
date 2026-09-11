@@ -260,7 +260,7 @@ await suiteAsync('new sections render', async () => {
     'publications',
     'awards',
     'volunteering',
-    'languages',
+    'achievements',
     'interests',
   ];
 
@@ -304,8 +304,19 @@ await suiteAsync('new sections render', async () => {
 });
 
 await suiteAsync('publications', async () => {
-  await testAsync('papers and articles share one section, papers first', async () => {
+  // Papers print only when they bear on the job, so these use a posting the fixture's
+  // paper ("On Retrieval Floors") is relevant to.
+  const researchJob = () => job({ atsKeywords: ['TypeScript', 'React', 'retrieval'] });
+
+  await testAsync('a paper unrelated to the job is left off; blog posts stay', async () => {
     const { document } = await build(fullProfile());
+    const items = section(document, 'publications')!.items.map((i) => i.text);
+    assert(!items.some((t) => t.includes('On Retrieval Floors')), 'an unrelated paper must not print');
+    assert(items.some((t) => t.includes('Why Your ATS Drops Your Resume')), 'blog posts print');
+  });
+
+  await testAsync('papers and articles share one section, papers first', async () => {
+    const { document } = await build(fullProfile(), researchJob());
     const items = section(document, 'publications')!.items.map((i) => i.text);
     assert.equal(items.length, 2, 'both the paper and the article belong here');
     assert(items[0].includes('On Retrieval Floors'), 'the paper leads');
@@ -317,7 +328,7 @@ await suiteAsync('publications', async () => {
   });
 
   await testAsync('title, venue, date and DOI are all shown', async () => {
-    const { document } = await build(fullProfile());
+    const { document } = await build(fullProfile(), researchJob());
     const paper = section(document, 'publications')!.items[0].text;
     assert(paper.includes('SIGIR'), 'venue');
     assert(paper.includes('Jun 2024'), 'date, spelled out');
@@ -330,23 +341,23 @@ await suiteAsync('publications', async () => {
       {
         ...base(),
         type: 'publication',
-        title: 'Work In Progress',
+        title: 'Work In Progress on Retrieval',
         venue: 'arXiv',
         status: 'under-review',
       },
     ];
-    const { document } = await build(records);
+    const { document } = await build(records, researchJob());
     const line = section(document, 'publications')!.items[0].text;
     assert(line.includes('Under review'), `status missing from "${line}"`);
   });
 });
 
 await suiteAsync('one-line sections', async () => {
-  await testAsync('languages render as a single comma-joined line', async () => {
+  await testAsync('spoken languages are the last row of Skills', async () => {
     const { document } = await build(fullProfile());
-    const s = section(document, 'languages')!;
-    assert.equal(s.items.length, 1, 'one line, not one bullet per language');
-    assert.equal(s.items[0].text, 'Tamil (Native), English (Professional)');
+    assert(!section(document, 'languages'), 'no separate Languages section');
+    const rows = section(document, 'skills')!.items.map((i) => i.text);
+    assert.equal(rows[rows.length - 1], 'Languages: Tamil (Native), English (Professional)');
   });
 
   await testAsync('interests render as a single line', async () => {
@@ -382,15 +393,18 @@ await suiteAsync('page budget', async () => {
     const { document, droppedForSpace } = await build(fullPage());
     assert.deepEqual(droppedForSpace, ['interests'], 'only interests should go');
     assert(!section(document, 'interests'), 'interests still present');
-    assert(section(document, 'languages'), 'languages must outlive interests');
+    assert(
+      section(document, 'skills')!.items.some((i) => i.text.startsWith('Languages:')),
+      'the languages row must outlive interests',
+    );
     assert(section(document, 'volunteering'), 'volunteering must outlive interests');
   });
 
-  await testAsync('languages then volunteering follow, in that order', async () => {
+  await testAsync('only interests are ever dropped — volunteering and languages always print', async () => {
     const { document, droppedForSpace } = await build(overflowing());
-    assert.deepEqual(droppedForSpace, ['interests', 'languages', 'volunteering']);
-    assert(!section(document, 'languages'));
-    assert(!section(document, 'volunteering'));
+    assert.deepEqual(droppedForSpace, ['interests']);
+    assert(section(document, 'volunteering'), 'volunteering prints in every resume');
+    assert(section(document, 'skills')!.items.some((i) => i.text.startsWith('Languages:')));
   });
 
   await testAsync('substance is never dropped for space', async () => {

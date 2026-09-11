@@ -66,8 +66,8 @@ const styles = StyleSheet.create({
     lineHeight: 1.4,
     color: '#000000',
   },
-  name: { fontSize: 18, fontFamily: 'Helvetica-Bold', marginBottom: 4 },
-  contactLine: { fontSize: 9.5, marginBottom: 2 },
+  name: { fontSize: 18, fontFamily: 'Helvetica-Bold', marginBottom: 4, textAlign: 'center' },
+  contactLine: { fontSize: 9.5, marginBottom: 2, textAlign: 'center' },
   sectionHeading: {
     fontSize: 11.5,
     fontFamily: 'Helvetica-Bold',
@@ -77,8 +77,15 @@ const styles = StyleSheet.create({
     borderBottomColor: '#000000',
     paddingBottom: 2,
   },
-  groupTitleRow: { marginTop: 7 },
-  groupTitle: { fontSize: 10.5, fontFamily: 'Helvetica-Bold' },
+  // Title left, dates right, on one line.
+  groupTitleRow: { marginTop: 7, flexDirection: 'row', justifyContent: 'space-between' },
+  groupTitle: { fontSize: 10.5, fontFamily: 'Helvetica-Bold', flex: 1, paddingRight: 8 },
+  // "Label:" in a fixed column, values beside it — wrapped lines stay aligned.
+  skillRow: { flexDirection: 'row', marginTop: 2.5 },
+  skillLabel: { width: 135, fontFamily: 'Helvetica-Bold' },
+  skillValue: { flex: 1 },
+  // The degree under an institution.
+  eduLine: { fontFamily: 'Helvetica-Oblique', marginTop: 1, paddingLeft: 10 },
   groupSubtitle: { fontSize: 10 },
   groupDates: { fontSize: 9.5 },
   bulletRow: { flexDirection: 'row', marginTop: 2.5, paddingRight: 4 },
@@ -87,7 +94,7 @@ const styles = StyleSheet.create({
   plainItem: { marginTop: 2.5 },
 
   // --- presentation mode only ---------------------------------------------
-  contactGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 3 },
+  contactGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 3, justifyContent: 'center' },
   contactCell: { flexDirection: 'row', alignItems: 'center', marginRight: 14, marginTop: 3 },
   contactCellText: { fontSize: 9.5, marginLeft: 4 },
   accentRule: { marginTop: 8, borderBottomWidth: 1.5, borderBottomColor: ACCENT_COLOR },
@@ -274,7 +281,12 @@ function ResumePdf({ doc }: { doc: ResumeDocument }) {
             </Text>
 
             {section.items.map((item, i) =>
-              rendersAsPlainLine(section.key) ? (
+              section.key === 'skills' && item.text.includes(': ') ? (
+                <View key={i} style={styles.skillRow}>
+                  <Text style={styles.skillLabel}>{item.text.slice(0, item.text.indexOf(': ') + 1)}</Text>
+                  <Text style={styles.skillValue}>{item.text.slice(item.text.indexOf(': ') + 2)}</Text>
+                </View>
+              ) : rendersAsPlainLine(section.key) ? (
                 <Text key={i} style={styles.plainItem}>
                   {item.text}
                 </Text>
@@ -299,12 +311,16 @@ function ResumePdf({ doc }: { doc: ResumeDocument }) {
                     <Text style={styles.groupDates}>{group.dateRange}</Text>
                   ) : null}
                 </View>
-                {group.items.map((item, i) => (
-                  <View key={i} style={styles.bulletRow}>
-                    <Text style={styles.bulletMark}>•</Text>
-                    <Text style={styles.bulletText}>{item.text}</Text>
-                  </View>
-                ))}
+                {group.items.map((item, i) =>
+                  section.key === 'education' ? (
+                    <Text key={i} style={styles.eduLine}>{item.text}</Text>
+                  ) : (
+                    <View key={i} style={styles.bulletRow}>
+                      <Text style={styles.bulletMark}>•</Text>
+                      <Text style={styles.bulletText}>{item.text}</Text>
+                    </View>
+                  ),
+                )}
               </View>
             ))}
           </View>

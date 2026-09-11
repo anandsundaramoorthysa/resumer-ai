@@ -102,6 +102,8 @@ export interface EducationRecord extends ProfileRecordBase {
   institution: string;
   credential: string;
   field?: string;
+  /** Printed after the degree — "7.5 / 10". Optional; most records have none. */
+  grade?: string;
   startDate?: string;
   endDate?: string;
 }

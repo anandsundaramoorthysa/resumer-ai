@@ -15,6 +15,7 @@ import {
   HeadingLevel,
   Packer,
   Paragraph,
+  TabStopType,
   TextRun,
 } from 'docx';
 import type { ResumeDocument } from '../types';
@@ -26,14 +27,20 @@ const BODY_SIZE = 21; // half-points => 10.5pt
 const NAME_SIZE = 36; // 18pt
 const HEADING_SIZE = 23; // 11.5pt
 
-function body(text: string, opts: { bold?: boolean; size?: number } = {}): TextRun {
+function body(text: string, opts: { bold?: boolean; italics?: boolean; size?: number } = {}): TextRun {
   return new TextRun({
     text,
     font: FONT,
     size: opts.size ?? BODY_SIZE,
     bold: opts.bold ?? false,
+    italics: opts.italics ?? false,
   });
 }
+
+/** A4 width less the 900-twip side margins: where a right-aligned date sits. */
+const RIGHT_EDGE = 11906 - 900 * 2;
+/** Where skill values start, so wrapped lines align under the first. */
+const SKILL_COLUMN = 2600;
 
 function bulletParagraph(text: string): Paragraph {
   return new Paragraph({
@@ -61,6 +68,7 @@ export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
   children.push(
     new Paragraph({
       children: [body(c.fullName, { bold: true, size: NAME_SIZE })],
+      alignment: AlignmentType.CENTER,
       spacing: { after: 60 },
     }),
   );
@@ -70,6 +78,7 @@ export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
     children.push(
       new Paragraph({
         children: [body(contactBits.join('  |  '), { size: 19 })],
+        alignment: AlignmentType.CENTER,
         spacing: { after: 30 },
       }),
     );
@@ -96,7 +105,9 @@ export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
         }),
       );
     });
-    children.push(new Paragraph({ children: runs, spacing: { after: 120 } }));
+    children.push(
+      new Paragraph({ children: runs, alignment: AlignmentType.CENTER, spacing: { after: 120 } }),
+    );
   }
 
   // --- Sections -------------------------------------------------------------
@@ -118,7 +129,20 @@ export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
     );
 
     for (const item of section.items) {
-      if (rendersAsPlainLine(section.key)) {
+      const colon = item.text.indexOf(': ');
+      if (section.key === 'skills' && colon > 0) {
+        children.push(
+          new Paragraph({
+            tabStops: [{ type: TabStopType.LEFT, position: SKILL_COLUMN }],
+            indent: { left: SKILL_COLUMN, hanging: SKILL_COLUMN },
+            children: [
+              body(item.text.slice(0, colon + 1), { bold: true }),
+              body(`\t${item.text.slice(colon + 2)}`),
+            ],
+            spacing: { after: 40 },
+          }),
+        );
+      } else if (rendersAsPlainLine(section.key)) {
         children.push(
           new Paragraph({ children: [body(item.text)], spacing: { after: 40 } }),
         );
@@ -128,23 +152,28 @@ export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
     }
 
     for (const group of section.groups ?? []) {
+      // Title left, dates right-aligned on the same line.
       const titleRuns: TextRun[] = [body(group.title, { bold: true })];
       if (group.subtitle) titleRuns.push(body(` — ${group.subtitle}`));
+      if (group.dateRange) titleRuns.push(body(`\t${group.dateRange}`, { size: 19 }));
       children.push(
         new Paragraph({
           children: titleRuns,
+          tabStops: [{ type: TabStopType.RIGHT, position: RIGHT_EDGE }],
           spacing: { before: 120, after: 20 },
         }),
       );
-      if (group.dateRange) {
+      for (const item of group.items) {
         children.push(
-          new Paragraph({
-            children: [body(group.dateRange, { size: 19 })],
-            spacing: { after: 40 },
-          }),
+          section.key === 'education'
+            ? new Paragraph({
+                children: [body(item.text, { italics: true })],
+                indent: { left: 200 },
+                spacing: { after: 40 },
+              })
+            : bulletParagraph(item.text),
         );
       }
-      for (const item of group.items) children.push(bulletParagraph(item.text));
     }
   }
 
