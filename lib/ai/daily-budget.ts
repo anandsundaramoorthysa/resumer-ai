@@ -138,17 +138,18 @@ export async function assertDailyBudget(
   userId: string,
   limits: BudgetLimits = DAILY_BUDGET,
 ): Promise<void> {
-  // First, and for everyone: how fast. No quota below binds the owner, so this is what
-  // stops a bot on a stolen session or a script looping a route — see LIMITS.ai.
-  const ip = await callerIp().catch(() => null);
-  const burst = await rateLimit('ai', userId, ip);
-  if (!burst.allowed) {
-    console.error('[budget] AI burst limit hit for user', userId, ip ? '(with an IP)' : '');
-    throw new BudgetExceededError('rate', 'more than the limit in ten minutes');
-  }
-
   const owners = await ownerUserIds();
   const isOwner = owners.includes(userId);
+
+  // First, and for everyone: how fast. No quota below binds the owner, so this is what
+  // stops a bot on a stolen session or a script looping a route — the owner has a higher
+  // ceiling of their own (LIMITS['ai-owner']), everyone else LIMITS.ai.
+  const ip = await callerIp().catch(() => null);
+  const burst = await rateLimit(isOwner ? 'ai-owner' : 'ai', userId, ip);
+  if (!burst.allowed) {
+    console.error('[budget] AI burst limit hit for user', userId, isOwner ? '(the owner account)' : '', ip ? '(with an IP)' : '');
+    throw new BudgetExceededError('rate', 'more than the limit in ten minutes');
+  }
 
   // An account the owner has not approved spends nothing. This is the lock behind every
   // page's redirect to /pending (lib/server/approval.ts), for a request that skips pages.

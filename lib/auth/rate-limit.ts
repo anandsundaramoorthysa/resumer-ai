@@ -17,7 +17,7 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { authAttempts } from '@/lib/db/schema';
 
-export type AuthAction = 'sign-in' | 'sign-up' | 'reset-request' | 'verify' | 'set-password' | 'ai';
+export type AuthAction = 'sign-in' | 'sign-up' | 'reset-request' | 'verify' | 'set-password' | 'ai' | 'ai-owner';
 
 interface Limit {
   max: number;
@@ -73,6 +73,13 @@ export const LIMITS: Record<AuthAction, { subject: Limit; ip: Limit }> = {
    * the profile review (one per batch); a loop reaches it in seconds.
    */
   ai: { subject: { max: 60, windowMs: 10 * 60_000 }, ip: { max: 120, windowMs: 10 * 60_000 } },
+  /*
+   * The same limit for the owner's account (OWNER_EMAILS), at the owner's chosen 240 in
+   * ten minutes. Its own bucket, so the owner's requests never count against the ordinary
+   * ceiling and nobody else's count against this one. The connection limit is twice the
+   * account's, as for everyone: at the ordinary 120 it would stop the owner first.
+   */
+  'ai-owner': { subject: { max: 240, windowMs: 10 * 60_000 }, ip: { max: 480, windowMs: 10 * 60_000 } },
 };
 
 /**

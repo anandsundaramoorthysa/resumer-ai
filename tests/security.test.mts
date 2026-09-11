@@ -53,7 +53,7 @@ suite('rate-limit bucket keys', () => {
  * anything — both of which leave `rateLimit` returning "allowed" forever.
  */
 suite('every action has a ceiling', () => {
-  const ACTIONS: AuthAction[] = ['sign-in', 'sign-up', 'reset-request', 'verify', 'set-password', 'ai'];
+  const ACTIONS: AuthAction[] = ['sign-in', 'sign-up', 'reset-request', 'verify', 'set-password', 'ai', 'ai-owner'];
 
   test('no action can be added without a limit', () => {
     for (const action of ACTIONS) {
@@ -88,11 +88,19 @@ suite('every action has a ceiling', () => {
     assert(limit.ip.max >= limit.subject.max, 'one machine may hold more than one session');
   });
 
+  test("the owner's burst limit is the owner's choice, and still a limit", () => {
+    const owner = LIMITS['ai-owner'];
+    assert.equal(owner.subject.max, 240, 'set by the owner: 240 in ten minutes');
+    assert.equal(owner.subject.windowMs, 10 * 60_000);
+    assert(owner.ip.max >= owner.subject.max, 'the connection limit cannot stop the owner first');
+    assert.equal(LIMITS.ai.subject.max, 60, 'and everyone else is unchanged');
+  });
+
   test('nothing is looser than sign-in, which is the only one guessing pays off against', () => {
     for (const action of ACTIONS) {
       // Not a credential: nothing is guessed by starting a draft, so it is bounded by the
       // burst test above instead.
-      if (action === 'sign-in' || action === 'ai') continue;
+      if (action === 'sign-in' || action === 'ai' || action === 'ai-owner') continue;
       const perHour = (LIMITS[action].subject.max * 60 * 60_000) / LIMITS[action].subject.windowMs;
       const signInPerHour =
         (LIMITS['sign-in'].subject.max * 60 * 60_000) / LIMITS['sign-in'].subject.windowMs;
