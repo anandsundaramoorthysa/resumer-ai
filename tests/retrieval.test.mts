@@ -155,3 +155,28 @@ suite('ranking still produces a usable selection', () => {
 });
 
 report('retrieval');
+
+suite('what the posting says twice, and what it says about only one record', () => {
+  test('a term stated as both a keyword and a required skill is counted once', () => {
+    // jobFor puts every term in both lists, which is how a real posting arrives. Counting
+    // it twice made six unrelated projects tie exactly on a doubled "Python".
+    const { ranked } = rankRecords([bullet('b1', 'Built an ingestion service in Python')], jobFor(['Python']));
+    assert.deepEqual(ranked[0].matchedKeywords, ['Python']);
+  });
+
+  test('matching a term most of the profile holds says less than matching a rare one', () => {
+    const common = Array.from({ length: 8 }, (_, i) => bullet(`c${i}`, 'Wrote Python scripts for the team'));
+    const rare = bullet('r1', 'Built a regression model of customer value');
+    const alsoPython = bullet('p1', 'Automated a report with Python');
+    const { ranked } = rankRecords([...common, rare, alsoPython], jobFor(['Python', 'regression']));
+    const top = ranked[0];
+    assert.ok(top.record.id === 'r1', `expected the regression record first, got ${top.record.id}`);
+  });
+
+  test('an on-domain record with no keyword at all still outranks an off-domain one', () => {
+    const onDomain = bullet('d1', 'Ran exploratory data analysis over survey responses', ['analytics']);
+    const offDomain = bullet('o1', 'Restyled the marketing site with Tailwind CSS');
+    const { ranked } = rankRecords([offDomain, onDomain], jobFor(['Snowflake'], 'data'));
+    assert.ok(ranked[0].record.id === 'd1', `expected the data record first, got ${ranked[0].record.id}`);
+  });
+});

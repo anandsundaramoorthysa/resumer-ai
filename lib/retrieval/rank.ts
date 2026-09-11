@@ -140,30 +140,74 @@ export function domainFit(record: ProfileRecord, job: JobRequirement): number {
   return Math.min(1, (hits + jobHits * 1.5) / denom);
 }
 
+interface PostingTerm {
+  /** Normalised, for matching. */
+  term: string;
+  /** As the posting wrote it — what callers show and count. */
+  label: string;
+  /** Required skills count more than "nice to have". */
+  weight: number;
+}
+
+/**
+ * The posting's terms, each once.
+ *
+ * A posting states the same word in more than one place — "Python" as an ATS keyword and
+ * again as a required skill — and every list was concatenated, so that word counted twice
+ * while a term stated once counted once. On the EA posting six unrelated projects tied
+ * exactly, each on a doubled "Python" or "SQL", and the one project about prediction
+ * ranked seventh.
+ */
+export function postingTerms(job: JobRequirement): PostingTerm[] {
+  const required = new Set(job.requiredSkills.map(norm));
+  const out = new Map<string, PostingTerm>();
+  for (const raw of [...job.atsKeywords, ...job.requiredSkills, ...job.preferredSkills]) {
+    const term = norm(raw);
+    if (!term) continue;
+    const weight = required.has(term) ? 1.5 : 1;
+    const seen = out.get(term);
+    if (!seen || weight > seen.weight) out.set(term, { term, label: raw.trim(), weight });
+  }
+  return [...out.values()];
+}
+
+/**
+ * How much it says about a record that it holds a given term, 0..1.
+ *
+ * Inverse document frequency, over this profile. "Python" appears in sixteen of the
+ * owner's records and "regression" in one: matching the first says almost nothing about
+ * which record belongs on a data resume, and matching the second says a great deal. Ranked
+ * without it, a CGPA calculator and a prediction model scored identically because both
+ * mention Python — and the calculator won on insertion order.
+ */
+function rarityWeights(terms: PostingTerm[], texts: string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  const n = Math.max(1, texts.length);
+  // The ceiling: a term no record holds. Everything is scaled against it so the numbers
+  // stay 0..1 whatever the profile size.
+  const maxIdf = Math.log(1 + n);
+  for (const { term } of terms) {
+    const df = texts.reduce((count, text) => (hasTerm(text, term) ? count + 1 : count), 0);
+    out.set(term, Math.log(1 + n / (1 + df)) / maxIdf);
+  }
+  return out;
+}
+
 function keywordOverlap(
-  record: ProfileRecord,
-  job: JobRequirement,
+  text: string,
+  terms: PostingTerm[],
+  rarity: Map<string, number>,
 ): { score: number; matched: string[] } {
-  const text = recordText(record);
-  const pool = [
-    ...job.atsKeywords,
-    ...job.requiredSkills,
-    ...job.preferredSkills.map((s) => s),
-  ];
-  if (pool.length === 0) return { score: 0, matched: [] };
+  if (terms.length === 0) return { score: 0, matched: [] };
 
   const matched: string[] = [];
   let weighted = 0;
-  for (const term of pool) {
-    const t = norm(term);
-    if (!t) continue;
-    if (hasTerm(text, t)) {
-      matched.push(term);
-      // Required skills count more than "nice to have".
-      weighted += job.requiredSkills.some((r) => norm(r) === t) ? 1.5 : 1;
-    }
+  for (const { term, label, weight } of terms) {
+    if (!hasTerm(text, term)) continue;
+    matched.push(label);
+    weighted += weight * (rarity.get(term) ?? 1);
   }
-  return { score: Math.min(1, weighted / Math.max(4, pool.length * 0.5)), matched };
+  return { score: Math.min(1, weighted / Math.max(4, terms.length * 0.5)), matched };
 }
 
 export interface RankOptions {
@@ -267,6 +311,12 @@ function rankAtFloor(
   const ranked: RankedRecord[] = [];
   const excluded: ProfileRecord[] = [];
 
+  // Once for the whole corpus rather than per record: the text of each record, and how
+  // ordinary each posting term is across this profile.
+  const terms = postingTerms(job);
+  const texts = records.filter((r) => !r.flaggedForRemoval).map(recordText);
+  const rarity = rarityWeights(terms, texts);
+
   for (const record of records) {
     if (record.flaggedForRemoval) {
       excluded.push(record);
@@ -281,11 +331,15 @@ function rankAtFloor(
     }
 
     // Stage 2 — rank what survived (REQ-4.3).
-    const { score: keywordScore, matched } = keywordOverlap(record, job);
+    const { score: keywordScore, matched } = keywordOverlap(recordText(record), terms, rarity);
 
     ranked.push({
       record,
-      score: keywordScore * (0.7 + 0.3 * fit), // domain fit nudges ordering too
+      // Added, not multiplied. Multiplying made domain fit vanish exactly where it was
+      // needed: a record the posting names nothing from scored 0 whatever it was about, so
+      // "Machine Learning" and a CGPA calculator were indistinguishable on a data posting.
+      // Keyword overlap still dominates; fit is what orders everything it cannot separate.
+      score: 0.75 * keywordScore + 0.25 * fit,
       keywordScore,
       matchedKeywords: matched,
       domainFit: fit,
