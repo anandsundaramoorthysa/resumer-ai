@@ -46,6 +46,7 @@ import type { ResumeDocument } from '../types';
  */
 Font.registerHyphenationCallback((word) => [word]);
 import { coerceHeading } from './headings';
+import { tidyResumeText } from '../generate/display-text';
 import { rendersAsPlainLine } from './sections';
 
 /**
@@ -66,7 +67,7 @@ const styles = StyleSheet.create({
     lineHeight: 1.4,
     color: '#000000',
   },
-  name: { fontSize: 18, fontFamily: 'Helvetica-Bold', marginBottom: 4, textAlign: 'center' },
+  name: { fontSize: 18, fontFamily: 'Helvetica-Bold', lineHeight: 1.2, marginBottom: 6, textAlign: 'center' },
   contactLine: { fontSize: 9.5, marginBottom: 2, textAlign: 'center' },
   sectionHeading: {
     fontSize: 11.5,
@@ -86,7 +87,9 @@ const styles = StyleSheet.create({
   skillValue: { flex: 1 },
   // The degree under an institution.
   eduLine: { fontFamily: 'Helvetica-Oblique', marginTop: 1, paddingLeft: 10 },
-  groupSubtitle: { fontSize: 10 },
+  // Regular weight set explicitly: nested in the bold title, it inherited Helvetica-Bold
+  // and printed project stacks bold, unlike the DOCX.
+  groupSubtitle: { fontSize: 10, fontFamily: 'Helvetica' },
   groupDates: { fontSize: 9.5 },
   bulletRow: { flexDirection: 'row', marginTop: 2.5, paddingRight: 4 },
   bulletMark: { width: 10 },
@@ -331,7 +334,9 @@ function ResumePdf({ doc }: { doc: ResumeDocument }) {
 }
 
 export async function renderResumePdf(doc: ResumeDocument): Promise<Buffer> {
-  return renderToBuffer(<ResumePdf doc={doc} />);
+  // Capitalised at render time, so text from the assembler, a revision or the editor is
+  // all covered. Scorers compare case-insensitively, so they are unaffected.
+  return renderToBuffer(<ResumePdf doc={tidyResumeText(doc)} />);
 }
 
 /**

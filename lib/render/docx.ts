@@ -20,6 +20,7 @@ import {
 } from 'docx';
 import type { ResumeDocument } from '../types';
 import { coerceHeading } from './headings';
+import { tidyResumeText } from '../generate/display-text';
 import { rendersAsPlainLine } from './sections';
 
 const FONT = 'Arial';
@@ -60,6 +61,7 @@ export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
       'Presentation mode is PDF-only. Export the ats-strict version for DOCX.',
     );
   }
+  doc = tidyResumeText(doc);
 
   const children: Paragraph[] = [];
   const c = doc.contact;

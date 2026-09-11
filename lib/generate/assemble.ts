@@ -49,7 +49,7 @@ import {
 } from './resume-lines';
 import { coerceHeading } from '../render/headings';
 import { formatDate, formatDateRange } from '../render/dates';
-import { canonicalSkillName, dedupeBySkillIdentity } from '../skills/identity';
+import { canonicalSkillName, dedupeBySkillIdentity, dedupeSkillNames } from '../skills/identity';
 
 /** A second page is only worth opening if there is enough career to fill it. */
 function twoPagesJustified(job: JobRequirement | null, totalYears: number): boolean {
@@ -554,7 +554,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
       items: [],
       groups: projects.map((p) => ({
         title: p.name,
-        subtitle: p.stack.slice(0, 6).join(', '),
+        subtitle: dedupeSkillNames(p.stack).slice(0, 6).join(', '),
         // A project with no description still belongs on the resume — its name and
         // stack are the point — but it must not contribute an item with no text.
         items: [
@@ -590,7 +590,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
       items: certifications.map((c) => {
         const rec = c as Extract<ProfileRecord, { type: 'certification' }>;
         return {
-          text: [rec.name, rec.issuer].filter(Boolean).join(' · '),
+          text: [rec.name, rec.issuer, formatDate(rec.issuedDate)].filter(Boolean).join(' · '),
           sourceRecordId: rec.id,
         };
       }),
