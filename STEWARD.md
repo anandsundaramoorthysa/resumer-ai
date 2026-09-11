@@ -175,6 +175,32 @@ an ordinary suggestion, and a form saving a skill into a category the table disa
 says so first. On a resume, a method no Skills rule already places gets a Methods and
 Practices row instead of falling into Other.
 
+## 4b. Classifying any skill, for anyone
+
+`lib/skills/categories.ts` answers in layers, cheapest first, stopping at the first
+confident one:
+
+1. **Dictionary** (`lib/skills/dictionary.ts`, ~660 skills), looked up through the alias
+   table so every spelling lands on one entry. Certain.
+2. **Variants of the name** against the same dictionary: the acronym in brackets, an
+   acronym spelled out after its plural is removed ("LLMs"), a qualifying tail removed
+   ("RAG pipelines"), each half of "Emacs / Org Mode". Certain.
+3. **Shape rules** — "… API" platform, "… Development" method, "….js" framework. Likely.
+4. **Model**, only for names none of the above place (`lib/skills/classify-ai.ts`):
+   verified to the six categories, cached in `skill_category` for every user, so a name is
+   asked about once, ever. Never in a save path. No user id in the cache; personal-looking
+   names are neither sent nor stored.
+
+On the owner's 103 skills: 100 certain, 3 likely, none unplaced. Where it acts: sync and
+import take the dictionary's answer over the extractor's when certain; LinkedIn and draft
+answers use it instead of a blind `tool`; the skill form files as the name is typed until
+the person chooses; the steward proposes re-filings (certain ones among the quick fixes)
+and asks the model about the rest. A re-filing that lands on an identical skill merges.
+
+Testing it exposed a pre-existing retrieval flaw: the relevance floor counted survivors of
+any type as "viable", so a thin job reading could remove every experience bullet. The floor
+now also keeps each core type held in quantity (lib/retrieval/rank.ts, `keepsEveryCoreType`).
+
 ## 5. Test plan
 
 - Unit: tidy, every rule (fixtures taken from the real profile's defects), the verifier
