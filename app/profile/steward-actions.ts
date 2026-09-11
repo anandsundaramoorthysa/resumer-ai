@@ -81,7 +81,13 @@ export async function applySuggestionAction(
   }
 }
 
-/** Several quick fixes in one request; each succeeds or fails on its own. */
+/**
+ * Several quick fixes in one request; each succeeds or fails on its own.
+ *
+ * No revalidatePath here: in a server action it re-renders the whole profile page into
+ * the response, and the browser sends several of these in a row. The page refreshes once,
+ * after the last one (profile-assistant.tsx).
+ */
 export async function applyQuickFixesAction(
   suggestions: Suggestion[],
 ): Promise<ActionResult<{ applied: string[]; failed: number }>> {
@@ -101,7 +107,6 @@ export async function applyQuickFixesAction(
         failed++;
       }
     }
-    revalidatePath('/profile');
     return { ok: true, data: { applied, failed } };
   } catch (err) {
     return { ok: false, message: sentence(err) };

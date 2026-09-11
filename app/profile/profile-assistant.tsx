@@ -13,6 +13,7 @@
  */
 
 import { useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { STEWARD_SECTIONS, type StewardSection, type Suggestion } from '@/lib/steward/types';
 import type { AssistantExtraction } from '@/lib/server/steward';
 import {
@@ -88,6 +89,7 @@ function ReviewTool() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [bulkPending, startBulk] = useTransition();
+  const router = useRouter();
 
   const start = async () => {
     setSuggestions([]);
@@ -229,6 +231,8 @@ function ReviewTool() {
                     );
                     setNotice(`Applying quick fixes… ${done} of ${quick.length}`);
                   }
+                  // One refresh for the whole batch, rather than a page render per request.
+                  router.refresh();
                   setNotice(
                     `Applied ${done} quick fix${done === 1 ? '' : 'es'}${failed ? `; ${failed} could not be applied — review again` : ''}. Suggestions about those records were cleared; review again to recheck them.`,
                   );
@@ -281,7 +285,7 @@ function dedupe(list: Suggestion[]): Suggestion[] {
  * seconds with room to spare, and a profile of seventy takes six requests rather than
  * fifteen.
  */
-const QUICK_CHUNK = 12;
+const QUICK_CHUNK = 10;
 
 const KIND_ORDER: Record<Suggestion['kind'], number> = { merge: 0, remove: 1, move: 2, fix: 3, ask: 4 };
 function order(list: Suggestion[]): Suggestion[] {

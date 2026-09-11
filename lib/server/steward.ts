@@ -139,8 +139,15 @@ async function dismissedFor(userId: string): Promise<Set<string>> {
   return new Set(rows.map((r) => r.id));
 }
 
-/** Time for one review request's model call, inside the host's 30-second ceiling. */
-const REVIEW_TIME_BUDGET_MS = 22_000;
+/**
+ * Time for one review request's model calls, inside the host's 30-second ceiling.
+ *
+ * 22 s measured as too much: with the profile loaded first and the usage written after,
+ * requests ran to 29.4 s and two were killed at exactly 30 (a 504, and React's
+ * "Connection closed" in the page). 17 s leaves a real margin and still fits two 8-second
+ * provider attempts.
+ */
+const REVIEW_TIME_BUDGET_MS = 17_000;
 
 export async function reviewSection(
   userId: string,

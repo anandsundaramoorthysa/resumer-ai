@@ -93,7 +93,7 @@ const SECTION_FOCUS: Record<StewardSection, string> = {
 };
 
 /** How long one provider gets before the chain moves on. */
-const PER_ATTEMPT_MS = 12_000;
+const PER_ATTEMPT_MS = 8_000;
 
 export async function proposeChanges(args: {
   section: StewardSection;
