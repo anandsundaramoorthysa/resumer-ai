@@ -174,7 +174,7 @@ export async function AppHeader({
                   <Link
                     href={link.href}
                     aria-current={active ? 'page' : undefined}
-                    className={`relative inline-flex h-full min-h-11 items-center rounded-md px-2 text-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-brand lg:px-3 ${
+                    className={`relative inline-flex h-full min-h-11 items-center rounded-md px-1.5 text-sm md:px-2 transition-colors focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-brand lg:px-3 ${
                       active ? 'font-semibold text-ink' : 'font-medium text-muted hover:text-ink'
                     }`}
                   >

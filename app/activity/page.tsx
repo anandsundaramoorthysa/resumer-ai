@@ -143,7 +143,7 @@ export default async function ActivityPage() {
             </p>
             <ul className="mt-4 space-y-2">
               {usage.map((u) => (
-                <li key={u.day} className="grid grid-cols-[5.5rem_1fr_auto] items-center gap-3 text-xs">
+                <li key={u.day} className="grid grid-cols-[2.5rem_1fr_9.5rem] items-center gap-3 text-xs">
                   <span className="font-mono text-muted">{u.day.slice(5)}</span>
                   <span className="h-2 overflow-hidden rounded-full bg-line" aria-hidden>
                     <span
@@ -151,7 +151,7 @@ export default async function ActivityPage() {
                       style={{ width: `${Math.min(100, (u.calls / dailyLimit.maxCalls) * 100)}%` }}
                     />
                   </span>
-                  <span className="font-mono tabular">
+                  <span className="text-right font-mono tabular">
                     {u.calls} calls · {(u.tokens / 1000).toFixed(0)}k tokens
                   </span>
                 </li>
@@ -161,7 +161,10 @@ export default async function ActivityPage() {
 
           <section aria-labelledby="changes-heading">
             <h2 id="changes-heading" className="font-display text-2xl">Profile changes</h2>
-            <p className="mt-1 text-sm text-muted">The newest {changes.length} changes to your profile.</p>
+            <p className="mt-1 text-sm text-muted">
+              {changes.length ? `The newest ${changes.length} changes to your profile.` : 'No profile changes recorded yet.'}
+            </p>
+            {changes.length > 0 && (
             <ul className="mt-4 divide-y divide-line rounded-xl border border-line bg-surface">
               {changes.map((c) => (
                 <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-x-3 px-4 py-2.5 text-sm">
@@ -177,6 +180,7 @@ export default async function ActivityPage() {
                 </li>
               ))}
             </ul>
+            )}
           </section>
         </div>
       </main>
