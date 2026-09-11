@@ -22,6 +22,9 @@ import {
   type RecordForm,
 } from '@/lib/profile/forms';
 import { deleteProfileRecord, saveRecord, type Result } from './record-actions';
+import { checkRecordAction } from './steward-actions';
+import { SaveCheckPanel } from './save-check';
+import type { SaveCheck } from '@/lib/server/steward';
 
 /**
  * Where a fact came from, said plainly. "synced" for everything that was not typed by
@@ -256,6 +259,10 @@ function RecordFields({
 }) {
   const [values, setValues] = useState(initial);
   const [pending, startTransition] = useTransition();
+  const [stage, setStage] = useState<'checking' | 'saving'>('checking');
+  // The steward's say before the first Save (lib/server/steward.ts#checkCandidate). Once
+  // shown, the next Save saves; the check never blocks a save, and never runs twice.
+  const [check, setCheck] = useState<SaveCheck | null>(null);
 
   // The same registry check the server runs, so the button explains itself before a
   // round trip rather than after one.
@@ -263,8 +270,18 @@ function RecordFields({
 
   const submit = () => {
     startTransition(async () => {
+      if (!check) {
+        setStage('checking');
+        const c = await checkRecordAction(form.type, values, recordId ?? null);
+        if (c.ok && (c.data.notes.length > 0 || c.data.rewrites.length > 0)) {
+          setCheck(c.data);
+          return;
+        }
+      }
+      setStage('saving');
       const r = await saveRecord(form.type, recordId ?? null, values);
       onDone(r);
+      if (r.ok) setCheck(null);
       if (r.ok && !recordId) setValues(initial);
     });
   };
@@ -280,6 +297,10 @@ function RecordFields({
         />
       ))}
 
+      {check ? (
+        <SaveCheckPanel check={check} onUse={(field, value) => setValues((v) => ({ ...v, [field]: value }))} />
+      ) : null}
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -287,7 +308,7 @@ function RecordFields({
           disabled={pending || missing.length > 0}
           className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
         >
-          {pending ? 'Saving…' : recordId ? 'Save' : 'Add'}
+          {pending ? (stage === 'checking' ? 'Checking…' : 'Saving…') : recordId || check ? 'Save' : 'Add'}
         </button>
         <button
           type="button"

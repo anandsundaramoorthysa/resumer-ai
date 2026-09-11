@@ -16,6 +16,9 @@
 import { useState, useTransition } from 'react';
 import { assessBullet, BULLET_EXAMPLE, type BulletParts } from '@/lib/profile/bullet';
 import { addBullet, editBullet, deleteProfileRecord, type Result } from './record-actions';
+import { checkRecordAction } from './steward-actions';
+import { SaveCheckPanel } from './save-check';
+import type { SaveCheck } from '@/lib/server/steward';
 
 export interface ExistingBullet {
   id: string;
@@ -136,16 +139,32 @@ function BulletForm({
     outcome: initial?.outcome ?? '',
   });
   const [pending, startTransition] = useTransition();
+  const [stage, setStage] = useState<'checking' | 'saving'>('checking');
+  const [check, setCheck] = useState<SaveCheck | null>(null);
 
   const assessment = assessBullet(parts);
   const canSave = parts.action.trim().length > 0 && !pending;
 
   const submit = () => {
     startTransition(async () => {
+      if (!check) {
+        setStage('checking');
+        const c = await checkRecordAction(
+          'experience-bullet',
+          { roleId, action: parts.action, scale: parts.scale ?? '', outcome: parts.outcome ?? '' },
+          recordId ?? null,
+        );
+        if (c.ok && (c.data.notes.length > 0 || c.data.rewrites.length > 0)) {
+          setCheck(c.data);
+          return;
+        }
+      }
+      setStage('saving');
       const r = recordId
         ? await editBullet(recordId, roleId, parts.action, parts.scale ?? '', parts.outcome ?? '')
         : await addBullet(roleId, parts.action, parts.scale ?? '', parts.outcome ?? '');
       onDone(r);
+      if (r.ok) setCheck(null);
       if (r.ok && !recordId) setParts({ action: '', scale: '', outcome: '' });
     });
   };
@@ -194,6 +213,10 @@ function BulletForm({
         on your resume, and inventing one is worse than a weak line.
       </p>
 
+      {check ? (
+        <SaveCheckPanel check={check} onUse={(_field, value) => setParts((p) => ({ ...p, action: value }))} />
+      ) : null}
+
       <div className="mt-3 flex gap-2">
         <button
           type="button"
@@ -201,7 +224,7 @@ function BulletForm({
           disabled={!canSave}
           className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
         >
-          {pending ? 'Saving…' : recordId ? 'Save' : 'Add'}
+          {pending ? (stage === 'checking' ? 'Checking…' : 'Saving…') : recordId || check ? 'Save' : 'Add'}
         </button>
         {onCancel ? (
           <button

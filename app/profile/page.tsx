@@ -11,6 +11,7 @@ import { EnrichmentQuestion } from './enrichment-question';
 import { loadEnrichmentQueue } from '@/lib/server/enrichment';
 import { BulletEditor, type ExistingBullet } from './bullet-editor';
 import { RecordEditor, type EditableRecord } from './record-editor';
+import { ProfileAssistant } from './profile-assistant';
 import { RECORD_FORMS, describeRecord, formFor } from '@/lib/profile/forms';
 import { findProfileGaps } from '@/lib/profile/gaps';
 import type { ProfileRecord, RoleRecord } from '@/lib/types';
@@ -186,6 +187,10 @@ export default async function ProfilePage() {
             </p>
           </div>
         </div>
+
+        {/* The steward's front door (STEWARD.md). First on the page, because it is the
+            fastest way to both fill a thin profile and fix a full one. */}
+        <ProfileAssistant empty={decided.length === 0} />
 
         {decided.length === 0 && reviewCount === 0 ? (
           <div className="mt-8 rounded-xl border border-dashed border-line p-8 text-center">
