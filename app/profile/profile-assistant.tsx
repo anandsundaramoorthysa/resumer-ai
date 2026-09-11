@@ -275,8 +275,13 @@ function dedupe(list: Suggestion[]): Suggestion[] {
   return list.filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
 }
 
-/** Quick fixes per request. Each is a read, a write and an audit row. */
-const QUICK_CHUNK = 5;
+/**
+ * Quick fixes per request. Each is a read, a write and an audit row — measured at well
+ * under a second against the production database, so twelve sit inside the host's thirty
+ * seconds with room to spare, and a profile of seventy takes six requests rather than
+ * fifteen.
+ */
+const QUICK_CHUNK = 12;
 
 const KIND_ORDER: Record<Suggestion['kind'], number> = { merge: 0, remove: 1, move: 2, fix: 3, ask: 4 };
 function order(list: Suggestion[]): Suggestion[] {
