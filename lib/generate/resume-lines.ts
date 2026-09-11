@@ -142,6 +142,29 @@ export function educationYears(start?: string, end?: string): string {
   return s && e && s !== e ? `${s} – ${e}` : e || s;
 }
 
+/**
+ * A qualification as the summary writer sees it — with its years, and whether it is done.
+ *
+ * The facts used to carry the credential and institution and no dates, so the model had
+ * to guess, and it guessed finished: the EA draft opened "Recent M.Sc. Data Science
+ * graduate" for a degree that ends in 2027. The grounding check cannot catch that — it
+ * refuses numbers and names the facts lack, and "graduate" is neither — so the only fix
+ * is to state the fact the claim contradicts.
+ */
+export function educationFact(
+  e: { credential: string; field?: string; institution: string; startDate?: string; endDate?: string },
+  now: Date = new Date(),
+): string {
+  const years = educationYears(e.startDate, e.endDate);
+  const end = /^(\d{4})(?:-(\d{1,2}))?/.exec(e.endDate?.trim() ?? '');
+  const ongoing =
+    /present|current|ongoing|pursuing/i.test(e.endDate ?? '') ||
+    (end !== null &&
+      Number(end[1]) * 12 + (end[2] ? Number(end[2]) - 1 : 11) >= now.getFullYear() * 12 + now.getMonth());
+  const when = [years, ongoing ? 'in progress, not yet completed' : ''].filter(Boolean).join(', ');
+  return `${e.credential}${e.field ? `, ${e.field}` : ''} — ${e.institution}${when ? ` (${when})` : ''}`;
+}
+
 /* --------------------------------------------------------------- relevance -- */
 
 /** How many of the posting's terms a record mentions. */

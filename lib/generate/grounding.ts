@@ -9,6 +9,8 @@
  * Deliberately conservative: when in doubt, keep the user's own words.
  */
 
+import { keywordMatches, normalizeForMatch } from '../quality/keywords';
+
 /** Words that are capitalized for grammar, not because they're proper nouns. */
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'as', 'at', 'be', 'built', 'by', 'delivered', 'designed', 'developed',
@@ -57,7 +59,7 @@ export function extractProperNouns(text: string): string[] {
 }
 
 export interface GroundingViolation {
-  kind: 'number' | 'entity';
+  kind: 'number' | 'entity' | 'keyword';
   token: string;
 }
 
@@ -91,6 +93,11 @@ function containsFigure(source: string, figure: string): boolean {
 export function findUngroundedTokens(
   candidate: string,
   source: string,
+  /**
+   * The posting's own keywords. A rewrite may not add one its source does not already
+   * match — see the loop at the end of this function.
+   */
+  postingTerms: readonly string[] = [],
 ): GroundingViolation[] {
   const sourceNorm = source.toLowerCase();
   const sourceNumbers = new Set(extractNumbers(source));
@@ -117,6 +124,25 @@ export function findUngroundedTokens(
     violations.push({ kind: 'entity', token: entity });
   }
 
+  // The posting's lowercase terms. The two checks above only see figures and capitalised
+  // names, and the model is shown the posting's keyword list while it writes, so a skill
+  // written in lower case walked straight through: on the EA analyst posting the bullet
+  // "Integrated open-source AI models into web applications using Flask" came back as
+  // "Integrated predictive modeling AI models…", "understand their market" became "define
+  // business questions", and the summary claimed "time-series forecasting … to support
+  // experimentation" — none of it in the profile, all of it counted by the 70% keyword
+  // gate. Matched with the gate's own matcher, so what is refused here is exactly what the
+  // gate would have credited.
+  if (postingTerms.length > 0) {
+    const cand = normalizeForMatch(candidate);
+    const src = normalizeForMatch(source);
+    for (const term of postingTerms) {
+      if (keywordMatches(cand, term) && !keywordMatches(src, term)) {
+        violations.push({ kind: 'keyword', token: term });
+      }
+    }
+  }
+
   return violations;
 }
 
@@ -132,8 +158,9 @@ export function isGrounded(candidate: string, source: string): boolean {
 export function acceptRewriteOrFallback(
   candidate: string,
   source: string,
+  postingTerms: readonly string[] = [],
 ): { text: string; accepted: boolean; violations: GroundingViolation[] } {
-  const violations = findUngroundedTokens(candidate, source);
+  const violations = findUngroundedTokens(candidate, source, postingTerms);
   if (violations.length === 0 && candidate.trim().length > 0) {
     return { text: candidate.trim(), accepted: true, violations };
   }

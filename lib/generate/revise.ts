@@ -103,7 +103,11 @@ export async function reviseDocument(
       const map = new Map<string, string>();
       for (const r of data.revisions) {
         // Verified against the original, same as first-pass generation.
-        const verdict = acceptRewriteOrFallback(r.revised, r.original);
+        const verdict = acceptRewriteOrFallback(
+          r.revised,
+          r.original,
+          doc.jobRequirement?.atsKeywords ?? [],
+        );
         if (verdict.accepted && verdict.text.trim() !== r.original.trim()) {
           map.set(r.original.trim(), verdict.text);
         }

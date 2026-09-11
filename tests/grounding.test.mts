@@ -393,6 +393,43 @@ suite('grounding, specific cases', () => {
     assert.ok(v.some((x) => x.kind === 'entity' && x.token === 'vercel'));
     assert.ok(v.some((x) => x.kind === 'number' && x.token === '8'));
   });
+
+  test("a rewrite may not add a posting term its source doesn't state — the EA rewrites", () => {
+    const terms = ['predictive modeling', 'business questions', 'Python'];
+    const src = 'Integrated open-source AI models into web applications using Flask.';
+    const r = acceptRewriteOrFallback(
+      'Integrated predictive modeling AI models into web applications using Flask.',
+      src,
+      terms,
+    );
+    assert.equal(r.accepted, false);
+    assert.deepEqual(r.violations, [{ kind: 'keyword', token: 'predictive modeling' }]);
+    assert.equal(
+      acceptRewriteOrFallback(
+        'Collaborated with clients to define business questions and requirements.',
+        'Collaborated with clients to understand their market, audience, and technical requirements.',
+        terms,
+      ).accepted,
+      false,
+    );
+  });
+
+  test('a posting term the source already states may be kept or reworded', () => {
+    const terms = ['predictive modeling', 'integration'];
+    assert.equal(
+      acceptRewriteOrFallback(
+        'Delivered predictive modeling for churn in the billing app.',
+        'Did predictive modeling for churn in the billing app.',
+        terms,
+      ).accepted,
+      true,
+    );
+    // Matched as the gate matches, so a plural in the source still states the term.
+    assert.equal(
+      acceptRewriteOrFallback('Owned the payment integration.', 'Owned the payment integrations.', terms).accepted,
+      true,
+    );
+  });
 });
 
 report('grounding');
