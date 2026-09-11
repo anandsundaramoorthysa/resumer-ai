@@ -76,6 +76,9 @@ const HEDGES = [
   'under the guidance', 'under guidance', 'learning', 'learned', 'studied', 'explored',
 ];
 
+/** Longer than any one bullet: past this, the source is a corpus, not the same claim. */
+const SINGLE_CLAIM_CHARS = 400;
+
 /** Verbs that claim the work was the writer's to direct. */
 const OWNERSHIP = [
   'led', 'leading', 'owned', 'owning', 'managed', 'managing', 'spearheaded', 'headed',
@@ -101,7 +104,13 @@ const saysAny = (text: string, phrases: readonly string[]): string | null => {
 export function findScopeInflation(candidate: string, source: string): GroundingViolation[] {
   const out: GroundingViolation[] = [];
 
-  const hedged = saysAny(source, HEDGES);
+  // The hedge half only makes sense when the source IS this claim — a rewritten bullet
+  // against the bullet it came from. A summary is checked against the whole profile, where
+  // some other line saying "helped" would delete every sentence: measured, it removed the
+  // entire summary from the EA draft. Ownership is checked either way, because claiming
+  // "Led" when nothing in the profile says so is a fabrication at any length.
+  const singleClaim = source.length <= SINGLE_CLAIM_CHARS;
+  const hedged = singleClaim ? saysAny(source, HEDGES) : null;
   if (hedged && !saysAny(candidate, HEDGES)) out.push({ kind: 'scope', token: hedged });
 
   const claimed = saysAny(candidate, OWNERSHIP);

@@ -38,15 +38,33 @@ type Grade = (typeof GRADES)[number];
  */
 export const GRADE_VALUE: Record<Grade, number> = { strong: 1, partial: 0.4, weak: 0 };
 
+/**
+ * What a line is missing, as a code rather than a sentence.
+ *
+ * The model used to write a phrase of explanation per line, and output length is what a
+ * model call costs in TIME: on a full page the grade came back after more than seven
+ * seconds, past the draft's whole remaining clock, so evidence — 30% of the score — was
+ * counted as zero on every draft. One word per line instead, and the sentence the user
+ * reads is written here, where it costs nothing.
+ */
+const MISSING = ['scale', 'outcome', 'both', 'specifics', 'none'] as const;
+type Missing = (typeof MISSING)[number];
+
+const PROBLEM_TEXT: Record<Missing, string> = {
+  scale: 'No scale is stated — how big, how many, or for whom.',
+  outcome: 'No outcome is stated — what changed as a result.',
+  both: 'No scale and no outcome are stated.',
+  specifics: 'Too general to evidence anything — it names no specific work.',
+  none: 'No specific scale or outcome is stated.',
+};
+
 const EvidenceSchema = z.object({
   grades: z
     .array(
       z.object({
         id: z.string().describe('The line id exactly as given, e.g. "L3"'),
         grade: z.enum(GRADES),
-        problem: z
-          .string()
-          .describe('For partial or weak: what is missing — scale, outcome, specificity. Empty for strong.'),
+        missing: z.enum(MISSING).describe('For partial or weak: what it lacks. "none" for strong.'),
       }),
     )
     .describe('One entry per line id'),
@@ -81,7 +99,9 @@ Give every line exactly one grade:
   weak    — a duty, a generic claim, or a bare tool mention with nothing specific about what was done.
             "Responsible for database optimization using PostgreSQL"
 
-Grade what is actually written. Do not speculate about what the person might have done, and never suggest inventing numbers — a line with no result stated is not strong, and saying so is correct.`;
+Grade what is actually written. Do not speculate about what the person might have done, and never suggest inventing numbers — a line with no result stated is not strong, and saying so is correct.
+
+Answer with the line id, the grade, and one word for what it is missing: scale, outcome, both, specifics, or none. No explanations — the wording is written elsewhere.`;
 
 /**
  * The lines this sub-score is about: Experience and Projects.
@@ -124,7 +144,7 @@ export function evidenceLines(doc: ResumeDocument): EvidenceLine[] {
  */
 export function scoreFromGrades(
   lines: readonly EvidenceLine[],
-  grades: ReadonlyArray<{ id: string; grade: Grade; problem: string }>,
+  grades: ReadonlyArray<{ id: string; grade: Grade; missing?: string; problem?: string }>,
   alreadyTried: readonly string[] = [],
 ): Omit<EvidenceResult, 'provider'> {
   if (lines.length === 0) return { score: 1, weakBullets: [] };
@@ -145,7 +165,10 @@ export function scoreFromGrades(
         sectionKey: line.sectionKey,
         itemIndex: line.itemIndex,
         text: line.text,
-        problem: g?.problem?.trim() || 'No specific scale or outcome is stated.',
+        problem:
+          g?.problem?.trim() ||
+          PROBLEM_TEXT[(g?.missing ?? 'none') as Missing] ||
+          PROBLEM_TEXT.none,
       });
     }
   }

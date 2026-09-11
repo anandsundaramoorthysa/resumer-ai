@@ -123,12 +123,24 @@ const QUOTA_SIGNATURES = [
   'quota',
   'insufficient_quota',
   'resource_exhausted',
-  '429',
 ];
+
+/** A status code, not any run of digits: "Received 4297.2" benched all five providers. */
+const STATUS_429 = /(?<!\d)429(?!\d)/;
+
+/**
+ * A fault on this side, which says nothing about the provider.
+ *
+ * Benching on one costs every provider at once — measured: a fractional millisecond passed
+ * to AbortSignal.timeout made all five fail in the same eight milliseconds, and the message
+ * "Received 4297.2" was read as an HTTP 429 by the rule above, so the whole chain sat out a
+ * five-minute cooldown for a bug of ours.
+ */
+const LOCAL_FAULT = /out of range|is not a function|cannot read propert|not iterable|invalid_type/i;
 
 function isQuotaError(message: string): boolean {
   const m = message.toLowerCase();
-  return QUOTA_SIGNATURES.some((s) => m.includes(s));
+  return QUOTA_SIGNATURES.some((s) => m.includes(s)) || STATUS_429.test(m);
 }
 
 const TIMEOUT_SIGNATURES = [
@@ -195,6 +207,7 @@ export type { BenchReason };
  * cooldown — otherwise a tight budget would slowly bench every provider we have.
  */
 export function benchReason(message: string, cutShort = false): BenchReason | null {
+  if (LOCAL_FAULT.test(message)) return null;
   if (isQuotaError(message)) return 'quota';
   if (isOverloadError(message)) return 'overload';
   if (!cutShort && isTimeoutError(message)) return 'slow';
@@ -213,14 +226,18 @@ function noteFailure(id: ProviderId, message: string, cutShort = false): boolean
 
 /**
  * How long the next attempt may take: the smaller of the per-attempt cap and whatever
- * is left of the caller's overall deadline.
+ * is left of the caller's overall deadline — and, while there is another provider to
+ * fall back to, a share of what is left rather than all of it.
  */
-function attemptWindow(
+export function attemptWindow(
   deadlineAt: number,
   perAttemptMs: number,
 ): { ms: number; viable: boolean; cutShort: boolean } {
   const left = deadlineAt - Date.now();
-  const ms = Math.min(perAttemptMs, left);
+  // Whole milliseconds: AbortSignal.timeout refuses a fraction outright ("The value of
+  // 'delay' is out of range… Received 4297.2" — measured, when a proportional window was
+  // tried here, as all five providers failing in the same eight milliseconds).
+  const ms = Math.floor(Math.min(perAttemptMs, left));
   return { ms, viable: ms >= MIN_ATTEMPT_MS, cutShort: left < perAttemptMs };
 }
 

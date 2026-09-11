@@ -460,3 +460,16 @@ suite('a rewrite may not claim more of the work than the source did', () => {
     assert(!r.accepted && r.text === 'Built the billing service', 'the user own words are printed');
   });
 });
+
+suite('the hedge rule needs the source to be the same claim', () => {
+  test('a summary checked against the whole profile is not deleted by one "helped" elsewhere', () => {
+    const profile = `Skills: Python, SQL, Streamlit. ${'Helped the team with reporting. '.repeat(20)}Built a churn dashboard.`;
+    const sentence = 'Data analyst who builds dashboards in Python and SQL.';
+    assert(findScopeInflation(sentence, profile).length === 0, 'kept');
+  });
+
+  test('but claiming to have led something the profile never mentions still fails', () => {
+    const profile = `Skills: Python, SQL. ${'Wrote reports for the team. '.repeat(20)}`;
+    assert(findScopeInflation('Led the analytics team', profile).length > 0, 'refused');
+  });
+});

@@ -39,6 +39,13 @@ import { generateStructured } from '../ai/chain';
 import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
 import { draftSummary } from './summary';
+
+/**
+ * The least time worth starting a bullet rewrite with, once the render and grading
+ * reserves are taken out. A rewrite call that cannot finish costs the whole stage and
+ * returns the text it started from.
+ */
+const REWRITE_MIN_MS = Number(process.env.DRAFT_REWRITE_MIN_MS ?? 9_000);
 import {
   educationFact,
   educationLine,
@@ -364,7 +371,7 @@ export interface AssembleResult {
      *   grounding    the model answered and the grounding check refused some of it
      *   call-failed  the request itself threw; no bullet was ever judged
      */
-    reason: 'none' | 'grounding' | 'call-failed';
+    reason: 'none' | 'grounding' | 'call-failed' | 'no-time';
   };
   /** Sections that were built and then cut for space, in the order they were cut. */
   droppedForSpace: SectionKey[];
@@ -443,7 +450,17 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     reason: 'none',
   };
 
-  if (shouldRewrite && trimmedBullets.length > 0 && job) {
+  // The rewrite is the one model call in a draft that can be skipped without losing
+  // anything: it rephrases bullets the user already wrote, and a rewrite that cannot
+  // finish falls back to those same words. So when the clock is too short for both, the
+  // evidence grade wins. Measured on the owner's profile under production's 20-second
+  // budget: the rewrite spent eight seconds and every bullet fell back anyway, and the
+  // grading call — 30% of the score — was then abandoned at its deadline.
+  if (shouldRewrite && trimmedBullets.length > 0 && job && budget && budget.callDeadlineMs() < REWRITE_MIN_MS) {
+    rewriteFallback.attempted = trimmedBullets.length;
+    rewriteFallback.count = trimmedBullets.length;
+    rewriteFallback.reason = 'no-time';
+  } else if (shouldRewrite && trimmedBullets.length > 0 && job) {
     stats.attempted = trimmedBullets.length;
     rewriteFallback.attempted = trimmedBullets.length;
     try {

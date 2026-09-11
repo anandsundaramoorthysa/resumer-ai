@@ -13,7 +13,7 @@
  * healthy one for a minute and throws away the provider that is working.
  */
 
-import { benchReason } from '../lib/ai/chain';
+import { attemptWindow as attemptWindowForTest, benchReason } from '../lib/ai/chain';
 import { suite, test, assert } from './harness.mjs';
 
 /** Verbatim, from the production function log. */
@@ -61,5 +61,25 @@ suite('provider failures — which ones bench the provider', () => {
 
   test('a number that merely contains 503 does not bench', () => {
     assert.equal(benchReason('prompt used 5031 tokens'), null);
+  });
+});
+
+suite('an attempt window is a whole number of milliseconds', () => {
+  test('AbortSignal.timeout refuses a fraction, and every provider then fails at once', () => {
+    const w = attemptWindowForTest(Date.now() + 7162.7, 10_000);
+    assert(Number.isInteger(w.ms), `got ${w.ms}`);
+  });
+});
+
+suite('what must never bench a provider', () => {
+  test('a run of digits is not an HTTP 429', () => {
+    assert(benchReason('The value of "delay" is out of range. Received 4297.2') === null, 'our own bug');
+    assert(benchReason('Request failed with status 429') === 'quota', 'a real one still benches');
+  });
+
+  test('a fault on this side benches nothing', () => {
+    for (const m of ['x is not a function', 'Cannot read properties of undefined', 'invalid_type in response']) {
+      assert(benchReason(m) === null, m);
+    }
   });
 });

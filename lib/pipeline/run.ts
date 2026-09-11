@@ -26,7 +26,7 @@ import type {
   ResumeDocument,
   RoleRecord,
 } from '../types';
-import { DRAFT_BUDGET, DraftBudget } from '../ai/budget';
+import { DRAFT_BUDGET, DraftBudget, GRADING_RESERVE_MS } from '../ai/budget';
 import { assertDailyBudget, recordDailyUsage } from '../ai/daily-budget';
 import { userMessage } from '../server/user-message';
 import { extractJobRequirement } from '../intake/extract';
@@ -68,7 +68,7 @@ export interface DraftRunTrace {
   budget: { calls: number; tokens: number };
   job: { roleTitle: string; company: string } | null;
   score: { overall: number; keywordCoveragePct: number; haltReason: string | null } | null;
-  rewrite: { attempted: number; fallbacks: number; reason: 'none' | 'grounding' | 'call-failed' };
+  rewrite: { attempted: number; fallbacks: number; reason: 'none' | 'grounding' | 'call-failed' | 'no-time' };
 }
 
 export function newDraftRunTrace(): DraftRunTrace {
@@ -301,15 +301,21 @@ async function runDraft(
   emit({ stage: 'draft', status: 'running', message: 'Drafting your resume…' });
   let assembled;
   try {
-    assembled = await assembleResume({
-      userId: input.userId,
-      contact: input.contact,
-      job,
-      records: selected,
-      allRecords: records,
-      roles: input.roles,
-      budget,
-    });
+    // Held back so the evidence grade — 30% of the score, and the only sub-score that
+    // needs a model call — is still affordable when assembly has finished. Without it,
+    // assembly spent the clock and the resume was scored by three deterministic checks
+    // and a zero.
+    assembled = await budget.stage(GRADING_RESERVE_MS, () =>
+      assembleResume({
+        userId: input.userId,
+        contact: input.contact,
+        job,
+        records: selected,
+        allRecords: records,
+        roles: input.roles,
+        budget,
+      }),
+    );
   } catch (err) {
     emit({ stage: 'draft', status: 'error', message: describeAiError(err) });
     throw err;
@@ -342,6 +348,8 @@ async function runDraft(
       ? ''
       : assembled.rewriteFallback.reason === 'call-failed'
         ? `used your own wording throughout — the rephrasing step didn't answer this time`
+        : assembled.rewriteFallback.reason === 'no-time'
+          ? `used your own wording throughout — there was time to score this draft properly or to rephrase it, not both`
         : `kept your original wording on ${assembled.rewriteFallback.count} bullet(s) where a rewrite would have added something not in your profile`;
 
   const draftNotes = [

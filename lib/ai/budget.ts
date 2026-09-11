@@ -78,6 +78,16 @@ export const DRAFT_TIME_BUDGET_MS = defaultTimeBudgetMs();
 export const RENDER_RESERVE_MS = Number(process.env.DRAFT_RENDER_RESERVE_MS ?? 8_000);
 
 /**
+ * Time kept back from assembly for the evidence grade that follows it.
+ *
+ * A grading call over a page of lines takes 4-7 seconds on the fast tier. Without this,
+ * assembly spent the whole clock and evidence — 30% of the score, and the one sub-score
+ * that needs a model — was counted as zero: measured at 7.3s of 15s for assembly on the
+ * owner's profile, and a resume scored 6.5 by a scorer that never saw it.
+ */
+export const GRADING_RESERVE_MS = Number(process.env.DRAFT_GRADING_RESERVE_MS ?? 7_000);
+
+/**
  * The smallest deadline worth handing a call.
  *
  * Two reasons it is floored rather than allowed to reach zero. `chain.ts` reads a falsy
@@ -173,6 +183,9 @@ export class DraftBudget {
     return { ...this.usage };
   }
 
+  /** Held back for later stages while `stage()` runs — see below. */
+  private stageReserveMs = 0;
+
   get elapsedMs(): number {
     return Date.now() - this.startedAt;
   }
@@ -197,7 +210,26 @@ export class DraftBudget {
    * budget exists to prevent.
    */
   callDeadlineMs(reserveMs: number = this.reserveMs): number {
-    return Math.max(MIN_CALL_DEADLINE_MS, this.remainingMs - reserveMs);
+    return Math.max(MIN_CALL_DEADLINE_MS, this.remainingMs - reserveMs - this.stageReserveMs);
+  }
+
+  /**
+   * Runs one stage with extra time held back for the stages after it.
+   *
+   * Measured on the owner's profile against the EA posting, under production's 20-second
+   * budget: assembly took 7.3 of the 15 seconds of model time, and the evidence grade —
+   * the one sub-score that needs a model, worth 30% of the total — then ran out of time
+   * and was counted as zero. The resume was scored 6.5 by a scorer that never got to look
+   * at it. Assembly degrades gracefully (a rewrite that cannot finish falls back to the
+   * user's own sentence); an ungraded evidence score does not degrade, it collapses.
+   */
+  async stage<T>(reserveMs: number, fn: () => Promise<T>): Promise<T> {
+    this.stageReserveMs = Math.max(0, reserveMs);
+    try {
+      return await fn();
+    } finally {
+      this.stageReserveMs = 0;
+    }
   }
 
   /**

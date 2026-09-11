@@ -11,13 +11,14 @@
  *      it a chain could issue twenty provider requests and record one.
  */
 
-import { assert, report, suite, test } from './harness.mjs';
+import { assert, report, suite, suiteAsync, test, testAsync } from './harness.mjs';
 import {
   DraftBudget,
   RENDER_RESERVE_MS,
   BudgetExceededError,
   draftCallOptions,
   defaultTimeBudgetMs,
+  GRADING_RESERVE_MS,
 } from '@/lib/ai/budget';
 import { appBudgetState } from '@/lib/ai/daily-budget';
 
@@ -159,6 +160,23 @@ suite("the whole app's daily allowance", () => {
   test('80% warns while everything still works', () => {
     const s = appBudgetState({ calls: 85, tokens: 0 }, limits);
     assert(s.warn && !s.exhausted, 'warns early enough to act');
+  });
+});
+
+suiteAsync('a stage can hold time back for the stages after it', async () => {
+  await testAsync('inside the stage, a call may not spend what the next one needs', async () => {
+    const budget = new DraftBudget(LIMITS, 20_000);
+    const whole = budget.callDeadlineMs();
+    let inside = 0;
+    await budget.stage(7_000, async () => {
+      inside = budget.callDeadlineMs();
+    });
+    assert(inside <= whole - 6_900, `held back ${whole - inside}ms`);
+    assert(budget.callDeadlineMs() > inside, 'and the reserve is released afterwards');
+  });
+
+  test('the grading reserve is real time, not a token', () => {
+    assert(GRADING_RESERVE_MS >= 4_000, `got ${GRADING_RESERVE_MS}`);
   });
 });
 
