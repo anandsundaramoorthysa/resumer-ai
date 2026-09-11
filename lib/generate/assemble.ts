@@ -645,13 +645,19 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
   }
 
   if (volunteering.length > 0) {
+    // Laid out like Experience — role, organisation, dates on the right — newest first.
     byKey.volunteering = {
       key: 'volunteering',
       heading: coerceHeading('volunteering', undefined),
-      items: volunteering.map((v) => ({
-        text: joinParts([v.role, v.organization, formatDate(v.date)], v.description),
-        sourceRecordId: v.id,
-      })),
+      items: [],
+      groups: [...volunteering]
+        .sort((a, b) => startKey(b.date) - startKey(a.date))
+        .map((v) => ({
+          title: v.role,
+          subtitle: v.organization,
+          dateRange: volunteerDates(v.date),
+          items: v.description?.trim() ? [{ text: v.description.trim(), sourceRecordId: v.id }] : [],
+        })),
     };
   }
 
@@ -764,6 +770,22 @@ function statusLabel(status: NonNullable<PublicationRecord['status']>): string {
 function languageLabel(l: LanguageRecord): string {
   return l.proficiency ? `${l.name} (${capitalize(l.proficiency)})` : l.name;
 }
+
+/** "2025-06 – 2026-04" and "Jun 2025 – Apr 2026" both print as "Jun 2025 – Apr 2026". */
+function volunteerDates(date: string | undefined): string {
+  const [start, end] = (date ?? '').split(/\s+[–—-]\s+/);
+  return end ? formatDateRange(start, end) : formatDate(start);
+}
+
+/** Sortable start of a free-text date: "Jun 2025 – …" or "2025-06 – …" → 202506. */
+function startKey(date: string | undefined): number {
+  const m = /(?:([A-Za-z]{3})[a-z]*\s+)?(\d{4})(?:-(\d{1,2}))?/.exec(date ?? '');
+  if (!m) return 0;
+  const month = m[3] ? Number(m[3]) : m[1] ? MONTH_NAMES.indexOf(m[1].toLowerCase()) + 1 : 0;
+  return Number(m[2]) * 100 + month;
+}
+
+const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 function joinParts(parts: Array<string | undefined>, trailing?: string): string {
   const head = parts.filter((p): p is string => Boolean(p && p.trim())).join(' · ');

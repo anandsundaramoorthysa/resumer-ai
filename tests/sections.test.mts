@@ -275,9 +275,31 @@ await suiteAsync('new sections render', async () => {
         isAllowedHeading(key, s!.heading),
         `"${s!.heading}" is not an ATS-recognised heading for ${key}`,
       );
-      assert(s!.items.length > 0, `${key} rendered with no items`);
+      assert(s!.items.length + (s!.groups?.length ?? 0) > 0, `${key} rendered with no items`);
     });
   }
+
+  await testAsync('volunteering is laid out like experience: role, organisation, dates', async () => {
+    const { document } = await build(fullProfile());
+    const [g] = section(document, 'volunteering')!.groups!;
+    assert.equal(g.title, 'Organiser');
+    assert.equal(g.subtitle, 'Chennai JS');
+    assert.equal(g.dateRange, '2023');
+  });
+
+  await testAsync('volunteering sorts newest first, whichever way its dates were written', async () => {
+    const vol = (role: string, date: string) =>
+      ({ ...base(), type: 'volunteering', role, organization: 'Loyola College', date }) as ProfileRecord;
+    const { document } = await build([
+      ...fullProfile().filter((r) => r.type !== 'volunteering'),
+      vol('Lab Incharge', 'Jul 2023 – Apr 2025'),
+      vol('Student Representative', '2025-06 – 2026-04'),
+      vol('IIC President', 'Oct 2024 – Apr 2025'),
+    ]);
+    const groups = section(document, 'volunteering')!.groups!;
+    assert.deepEqual(groups.map((g) => g.title), ['Student Representative', 'IIC President', 'Lab Incharge']);
+    assert.equal(groups[0].dateRange, 'Jun 2025 – Apr 2026');
+  });
 
   await testAsync('summary is the first section', async () => {
     const { document } = await build(fullProfile());
@@ -288,7 +310,8 @@ await suiteAsync('new sections render', async () => {
     const { document } = await build(fullProfile());
     const traced: SectionKey[] = ['summary', 'publications', 'awards', 'volunteering'];
     for (const key of traced) {
-      for (const item of section(document, key)!.items) {
+      const s = section(document, key)!;
+      for (const item of [...s.items, ...(s.groups ?? []).flatMap((g) => g.items)]) {
         assert(item.sourceRecordId, `${key} item lost its traceability id`);
       }
     }
