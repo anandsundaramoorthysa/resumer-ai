@@ -290,7 +290,7 @@ async function runStep(
     // Thrown rather than reported softly. The catch in `advanceSyncJob` marks the job
     // failed with this message, which is what should happen — a job that cannot make
     // progress today should say so and stop, not sit at 'running' while a client polls it.
-    await assertDailyBudget(userId);
+    await assertDailyBudget(userId, undefined, 'sync');
 
     // Per-slice, so the circuit breaker applies to a sync the same way it applies to an
     // import, and so there is a usage figure to record at all. This whole path used to

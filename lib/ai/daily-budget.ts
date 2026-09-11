@@ -134,22 +134,40 @@ export const OWNER_ALERT_CALLS = Number(process.env.OWNER_ALERT_CALLS ?? 1_000);
  * draft is the right cost, and the per-draft budget already bounds what a single run can
  * spend after this passes.
  */
+/** Which burst bucket a request draws on — see LIMITS in lib/auth/rate-limit.ts. */
+export type AiPurpose = 'general' | 'sync';
+
+/**
+ * The burst limit alone: refuses a request that comes too fast for this account.
+ *
+ * Exported for the one caller that spends no AI but must still be bounded with the sync —
+ * connecting a repository. Everything that spends AI reaches it through assertDailyBudget.
+ */
+export async function assertBurst(userId: string, purpose: AiPurpose = 'general'): Promise<void> {
+  const isOwner = (await ownerUserIds()).includes(userId);
+  const action =
+    purpose === 'sync' ? (isOwner ? 'ai-sync-owner' : 'ai-sync') : isOwner ? 'ai-owner' : 'ai';
+  const ip = await callerIp().catch(() => null);
+  const burst = await rateLimit(action, userId, ip);
+  if (!burst.allowed) {
+    console.error('[budget] burst limit hit:', action, 'for user', userId, ip ? '(with an IP)' : '');
+    throw new BudgetExceededError('rate', 'more than the limit in ten minutes');
+  }
+}
+
 export async function assertDailyBudget(
   userId: string,
   limits: BudgetLimits = DAILY_BUDGET,
+  /** 'sync' for the portfolio sync, which has its own, larger burst bucket. */
+  purpose: AiPurpose = 'general',
 ): Promise<void> {
   const owners = await ownerUserIds();
   const isOwner = owners.includes(userId);
 
   // First, and for everyone: how fast. No quota below binds the owner, so this is what
-  // stops a bot on a stolen session or a script looping a route — the owner has a higher
-  // ceiling of their own (LIMITS['ai-owner']), everyone else LIMITS.ai.
-  const ip = await callerIp().catch(() => null);
-  const burst = await rateLimit(isOwner ? 'ai-owner' : 'ai', userId, ip);
-  if (!burst.allowed) {
-    console.error('[budget] AI burst limit hit for user', userId, isOwner ? '(the owner account)' : '', ip ? '(with an IP)' : '');
-    throw new BudgetExceededError('rate', 'more than the limit in ten minutes');
-  }
+  // stops a bot on a stolen session or a script looping a route. Four buckets — owner or
+  // not, sync or everything else — in LIMITS (lib/auth/rate-limit.ts).
+  await assertBurst(userId, purpose);
 
   // An account the owner has not approved spends nothing. This is the lock behind every
   // page's redirect to /pending (lib/server/approval.ts), for a request that skips pages.

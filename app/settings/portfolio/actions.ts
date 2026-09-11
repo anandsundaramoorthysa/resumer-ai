@@ -8,6 +8,7 @@ import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { parseRepoRef, latestCommitSha } from '@/lib/sync/github';
+import { assertBurst } from '@/lib/ai/daily-budget';
 
 export interface ActionResult {
   ok: boolean;
@@ -45,6 +46,13 @@ export async function connectRepo(
   const input = String(formData.get('repo') ?? '').trim();
 
   if (!input) return { ok: false, message: 'Enter a repository, e.g. owner/name.' };
+
+  // Counted with the sync (LIMITS['ai-sync']): each attempt calls GitHub, several times.
+  try {
+    await assertBurst(userId, 'sync');
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'Too many attempts. Wait a few minutes.' };
+  }
 
   const ref = parseRepoRef(input);
   if (!ref) {

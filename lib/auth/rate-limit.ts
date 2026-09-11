@@ -17,7 +17,16 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { authAttempts } from '@/lib/db/schema';
 
-export type AuthAction = 'sign-in' | 'sign-up' | 'reset-request' | 'verify' | 'set-password' | 'ai' | 'ai-owner';
+export type AuthAction =
+  | 'sign-in'
+  | 'sign-up'
+  | 'reset-request'
+  | 'verify'
+  | 'set-password'
+  | 'ai'
+  | 'ai-owner'
+  | 'ai-sync'
+  | 'ai-sync-owner';
 
 interface Limit {
   max: number;
@@ -80,6 +89,16 @@ export const LIMITS: Record<AuthAction, { subject: Limit; ip: Limit }> = {
    * account's, as for everyone: at the ordinary 120 it would stop the owner first.
    */
   'ai-owner': { subject: { max: 240, windowMs: 10 * 60_000 }, ip: { max: 480, windowMs: 10 * 60_000 } },
+  /*
+   * Connecting a portfolio and syncing it — their own bucket, set by the owner. A sync
+   * makes one AI request per slice of the repository (lib/sync/stepped.ts), so a large
+   * portfolio is hundreds of requests in a few minutes that are one action to the person
+   * running it; counted against the drafting limit it would lock drafting out too, and
+   * the other way round. Connect attempts count here as well: they spend no AI, but each
+   * one calls GitHub, and hammering them is the same abuse by another door.
+   */
+  'ai-sync': { subject: { max: 300, windowMs: 10 * 60_000 }, ip: { max: 600, windowMs: 10 * 60_000 } },
+  'ai-sync-owner': { subject: { max: 600, windowMs: 10 * 60_000 }, ip: { max: 1_200, windowMs: 10 * 60_000 } },
 };
 
 /**

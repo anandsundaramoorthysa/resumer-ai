@@ -53,7 +53,10 @@ suite('rate-limit bucket keys', () => {
  * anything — both of which leave `rateLimit` returning "allowed" forever.
  */
 suite('every action has a ceiling', () => {
-  const ACTIONS: AuthAction[] = ['sign-in', 'sign-up', 'reset-request', 'verify', 'set-password', 'ai', 'ai-owner'];
+  const ACTIONS: AuthAction[] = [
+    'sign-in', 'sign-up', 'reset-request', 'verify', 'set-password',
+    'ai', 'ai-owner', 'ai-sync', 'ai-sync-owner',
+  ];
 
   test('no action can be added without a limit', () => {
     for (const action of ACTIONS) {
@@ -96,11 +99,21 @@ suite('every action has a ceiling', () => {
     assert.equal(LIMITS.ai.subject.max, 60, 'and everyone else is unchanged');
   });
 
+  test('connecting and syncing a portfolio have their own limit, the owner double', () => {
+    const owner = LIMITS['ai-sync-owner'];
+    const normal = LIMITS['ai-sync'];
+    assert.equal(owner.subject.max, 600, 'owner: 600 requests in ten minutes');
+    assert.equal(owner.ip.max, 1_200, 'owner: 1,200 per connection');
+    assert.equal(normal.subject.max, owner.subject.max / 2, 'everyone else: half');
+    assert.equal(normal.ip.max, owner.ip.max / 2, 'and half per connection');
+    for (const l of [owner, normal]) assert.equal(l.subject.windowMs, 10 * 60_000, 'over ten minutes');
+  });
+
   test('nothing is looser than sign-in, which is the only one guessing pays off against', () => {
     for (const action of ACTIONS) {
       // Not a credential: nothing is guessed by starting a draft, so it is bounded by the
       // burst test above instead.
-      if (action === 'sign-in' || action === 'ai' || action === 'ai-owner') continue;
+      if (action === 'sign-in' || action.startsWith('ai')) continue;
       const perHour = (LIMITS[action].subject.max * 60 * 60_000) / LIMITS[action].subject.windowMs;
       const signInPerHour =
         (LIMITS['sign-in'].subject.max * 60 * 60_000) / LIMITS['sign-in'].subject.windowMs;

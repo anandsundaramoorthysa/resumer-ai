@@ -66,7 +66,7 @@ what's still needed when you load it, so you can do this one piece at a time.
 | `ALERT_EMAIL` | Failure alerts | Where the hourly draft-failure email goes. |
 | `MAX_DRAFT_SECONDS` / `MAX_ASSESS_SECONDS` / `AI_ATTEMPT_TIMEOUT_MS` | Host time limits | Optional. Defaults suit a 30-second function; see `lib/ai/budget.ts`. |
 | `APP_DAILY_MAX_CALLS` / `APP_DAILY_MAX_TOKENS` | Cost ceiling for everyone together | Optional; defaults 2,000 calls and 20M tokens a day. |
-| `OWNER_EMAILS` | The owner's account | Your own address. No daily quota and outside the shared pool; still bound by a burst limit of 240 AI requests per 10 minutes (60 for every other account), with a Sentry alert past `OWNER_ALERT_CALLS` (1,000) a day. |
+| `OWNER_EMAILS` | The owner's account | Your own address. No daily quota and outside the shared pool; still bound by a burst limit of 240 AI requests per 10 minutes (60 for every other account), and a separate one for connecting and syncing a portfolio: 600 per 10 minutes (300 for everyone else), 1,200 per connection (600), with a Sentry alert past `OWNER_ALERT_CALLS` (1,000) a day. |
 | `FIRECRAWL_API_KEY` | Optional | Only needed to paste job *links*. Pasting job *text* always works. |
 
 `.env.example` documents the rest, including the tuning variables for the sync and the
