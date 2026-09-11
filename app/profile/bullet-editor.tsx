@@ -153,7 +153,7 @@ function BulletForm({
           'experience-bullet',
           { roleId, action: parts.action, scale: parts.scale ?? '', outcome: parts.outcome ?? '' },
           recordId ?? null,
-        );
+        ).catch(() => ({ ok: false as const, message: '' }));
         if (c.ok && (c.data.notes.length > 0 || c.data.rewrites.length > 0)) {
           setCheck(c.data);
           return;

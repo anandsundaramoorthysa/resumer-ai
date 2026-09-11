@@ -250,7 +250,8 @@ export function Importer() {
     if (candidates.length === 0) return;
     setChecking(true);
     try {
-      const found = await reviewImportAction(candidates);
+      // Advice only: a failed request leaves the list as extracted.
+      const found = await reviewImportAction(candidates).catch(() => ({}));
       setNotes(found);
       const dupes = Object.entries(found).filter(([, n]) => n.duplicateOf).map(([k]) => k);
       if (dupes.length > 0) {

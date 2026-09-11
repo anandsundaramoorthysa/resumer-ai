@@ -107,7 +107,11 @@ function ReviewTool() {
         const job = queue.shift()!;
         const label = STEWARD_SECTIONS.find((s) => s.id === job.section)?.label ?? job.section;
         setRun({ phase: 'running', done, total, current: label });
-        const res = await reviewSectionAction(job.section, job.batch);
+        // A request can fail outright — a dropped connection, a deploy mid-review. That is
+        // a failed batch, not a stuck page: it goes the same way as a model that timed out.
+        const res = await reviewSectionAction(job.section, job.batch).catch(
+          () => ({ ok: true as const, data: { section: job.section, batch: job.batch, batches: 1, suggestions: [], model: 'failed' as const } }),
+        );
         done++;
         if (!res.ok) {
           failed.add(label);
@@ -204,7 +208,10 @@ function ReviewTool() {
                   let failed = 0;
                   for (let i = 0; i < quick.length; i += QUICK_CHUNK) {
                     const chunk = quick.slice(i, i + QUICK_CHUNK);
-                    const res = await applyQuickFixesAction(chunk);
+                    const res = await applyQuickFixesAction(chunk).catch(() => ({
+                      ok: false as const,
+                      message: 'The connection dropped while applying. What was applied is saved; review again for the rest.',
+                    }));
                     if (!res.ok) {
                       setNotice(res.message);
                       break;
@@ -299,14 +306,17 @@ function SuggestionCard({ suggestion: s, onSettled }: { suggestion: Suggestion; 
   const apply = () =>
     start(async () => {
       setError(null);
-      const res = await applySuggestionAction(s, answer);
+      const res = await applySuggestionAction(s, answer).catch(() => ({
+        ok: false as const,
+        message: 'The connection dropped. Try again.',
+      }));
       if (!res.ok) return setError(res.message);
       onSettled(s);
     });
 
   const dismiss = () =>
     start(async () => {
-      const res = await dismissSuggestionAction(s.id);
+      const res = await dismissSuggestionAction(s.id).catch(() => ({ ok: false as const, message: 'The connection dropped. Try again.' }));
       if (!res.ok) return setError(res.message);
       onSettled({ ...s, basis: {} });
     });
@@ -398,7 +408,10 @@ function AddTool() {
     startRead(async () => {
       setMessage(null);
       setResult(null);
-      const res = await extractForProfileAction(text);
+      const res = await extractForProfileAction(text).catch(() => ({
+        ok: false as const,
+        message: 'The connection dropped. Try again.',
+      }));
       if (!res.ok) return setMessage({ ok: false, text: res.message });
       setResult(res.data);
       setSelected(new Set([
@@ -424,7 +437,10 @@ function AddTool() {
           })),
         records: result.records.filter((r) => selected.has(r.key)).map((r) => r.record),
       };
-      const res = await commitFromAssistantAction(payload, text);
+      const res = await commitFromAssistantAction(payload, text).catch(() => ({
+        ok: false as const,
+        message: 'The connection dropped. Check your profile before adding again.',
+      }));
       setMessage({ ok: res.ok, text: res.ok ? (res.message ?? 'Added.') : res.message });
       if (res.ok) {
         setResult(null);

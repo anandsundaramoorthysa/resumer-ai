@@ -288,7 +288,7 @@ function RecordFields({
     startTransition(async () => {
       if (!check) {
         setStage('checking');
-        const c = await checkRecordAction(form.type, values, recordId ?? null);
+        const c = await checkRecordAction(form.type, values, recordId ?? null).catch(() => ({ ok: false as const, message: '' }));
         if (c.ok && (c.data.notes.length > 0 || c.data.rewrites.length > 0)) {
           setCheck(c.data);
           return;

@@ -296,7 +296,17 @@ export async function applySuggestion(userId: string, raw: unknown, answer?: str
         const d = (row?.data ?? {}) as Record<string, unknown>;
         if (!d.scale && !d.outcome && patch.action === undefined) patch.action = patch.text;
       }
-      await patchRecord(userId, s.recordId, patch);
+      try {
+        await patchRecord(userId, s.recordId, patch);
+      } catch (err) {
+        // Re-filing "React.js" as a framework, next to a "React" already filed there, makes
+        // the two one record. That is a merge the user already agreed to by applying it.
+        const onlyCategory = s.recordType === 'skill' && Object.keys(patch).every((k) => k === 'category' || k === 'name');
+        if (!(err instanceof DuplicateRecordError) || !onlyCategory) throw err;
+        await deleteRecord(userId, s.recordId);
+        await audit(userId, s.recordId, 'steward', 'manual', { via: 'profile-steward', kind: 'merge', reason: 'identical after re-filing' });
+        return 'Merged with the same skill already filed there.';
+      }
       break;
     }
     case 'merge':
