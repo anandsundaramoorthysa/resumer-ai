@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { withSentryConfig } from '@sentry/nextjs/config';
 
 const nextConfig: NextConfig = {
   /**
@@ -95,4 +96,18 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/**
+ * Uploads source maps to Sentry during the build, so an error report names the real file
+ * and line rather than a position in minified code. Only when SENTRY_AUTH_TOKEN is set —
+ * on Netlify, never locally — and the maps are deleted after upload, so they are not
+ * served to the public.
+ */
+export default withSentryConfig(nextConfig, {
+  org: 'alone-lav',
+  project: 'resumerai',
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+  widenClientFileUpload: true,
+  telemetry: false,
+  silent: !process.env.SENTRY_AUTH_TOKEN,
+});
