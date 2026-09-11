@@ -68,6 +68,65 @@ suite('skill identity — spellings that are one skill', () => {
   });
 });
 
+suite('skill display — the case a Skills line prints in', () => {
+  // The line that prompted this, from a real generated resume: skill records made from
+  // job-posting keywords kept the posting's prose casing, next to properly cased ones.
+  test('the reported Skills line prints in one consistent case', () => {
+    const line = dedupeSkillNames([
+      'regression', 'Python', 'SQL', 'statistics', 'segmentation', 'Data Science',
+      'classification', 'clustering',
+    ]);
+    assert.deepEqual(line, [
+      'Regression', 'Python', 'SQL', 'Statistics', 'Segmentation', 'Data Science',
+      'Classification', 'Clustering',
+    ]);
+  });
+
+  test('plain lowercase phrases are title-cased, small words after the first are not', () => {
+    assert.equal(canonicalSkillName('exploratory data analysis'), 'Exploratory Data Analysis');
+    assert.equal(canonicalSkillName('design of experiments'), 'Design of Experiments');
+    assert.equal(canonicalSkillName('time-series analysis'), 'Time-Series Analysis');
+    assert.equal(canonicalSkillName('of mice and men'), 'Of Mice and Men');
+  });
+
+  test('names lowercase by their owners convention stay lowercase', () => {
+    for (const name of ['pandas', 'scikit-learn', 'seaborn', 'npm', 'pnpm', 'pytest']) {
+      assert.equal(canonicalSkillName(name), name);
+    }
+    assert.equal(canonicalSkillName('sklearn'), 'scikit-learn');
+    same('sklearn', 'scikit-learn');
+  });
+
+  test('brands with inner capitals and acronyms print their real spelling', () => {
+    assert.equal(canonicalSkillName('jquery'), 'jQuery');
+    assert.equal(canonicalSkillName('ios'), 'iOS');
+    assert.equal(canonicalSkillName('macos'), 'macOS');
+    assert.equal(canonicalSkillName('grpc'), 'gRPC');
+    assert.equal(canonicalSkillName('numpy'), 'NumPy');
+    assert.equal(canonicalSkillName('pytorch'), 'PyTorch');
+    assert.equal(canonicalSkillName('github'), 'GitHub');
+    assert.equal(canonicalSkillName('power bi'), 'Power BI');
+    assert.equal(canonicalSkillName('nlp'), 'NLP');
+    assert.equal(canonicalSkillName('a/b testing'), 'A/B Testing');
+    assert.equal(canonicalSkillName('ci/cd'), 'CI/CD');
+  });
+
+  test('casing the user chose is never overridden', () => {
+    assert.equal(canonicalSkillName('Data science'), 'Data science');
+    assert.equal(canonicalSkillName('eBPF'), 'eBPF');
+  });
+
+  test('identifiers are spelled, not cased', () => {
+    assert.equal(canonicalSkillName('vue3'), 'vue3');
+    assert.equal(canonicalSkillName('d3.js'), 'd3.js');
+  });
+
+  test('casing changes the print, never the identity', () => {
+    same('statistics', 'Statistics');
+    apart('SQL', 'PostgreSQL');
+  });
+});
+
 suite('skill identity — the pairs kept apart on purpose', () => {
   test('Java is not JavaScript, and JS is not Java', () => {
     apart('Java', 'JavaScript');

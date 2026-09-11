@@ -132,7 +132,142 @@ const ALIASES: Record<string, string> = {
   tailwind: 'Tailwind CSS',
   tailwindcss: 'Tailwind CSS',
   'tailwind css': 'Tailwind CSS',
+
+  // ---- Display-only entries. -------------------------------------------------------
+  // Each key below is already its own identity; the entry exists only to fix the case
+  // `titleCasePlain` would otherwise get wrong. Two kinds earn a line here:
+  //
+  //   Names lowercase by their owners' convention. Capitalising them is not tidying, it
+  //   is a misspelling a reader in that field notices: "Pandas", "Scikit-Learn", "Npm".
+  //   Matplotlib and NumPy are deliberately NOT lowercase — their own documentation
+  //   writes them that way, whatever import statements suggest.
+  //
+  //   Acronyms and brands with inner capitals, which a first-letter rule turns into
+  //   "Sql", "Nlp", "Github" and "Pytorch".
+  //
+  // A Skills line built from job-posting keywords printed "regression, Python, SQL,
+  // statistics" — half lowercase, half not. The rule fixes the first half; this list is
+  // what stops the fix from breaking the second.
+  pandas: 'pandas',
+  'scikit learn': 'scikit-learn',
+  sklearn: 'scikit-learn',
+  seaborn: 'seaborn',
+  statsmodels: 'statsmodels',
+  npm: 'npm',
+  pnpm: 'pnpm',
+  pip: 'pip',
+  conda: 'conda',
+  pytest: 'pytest',
+  webpack: 'webpack',
+  jquery: 'jQuery',
+  ios: 'iOS',
+  macos: 'macOS',
+  grpc: 'gRPC',
+  trpc: 'tRPC',
+  spacy: 'spaCy',
+  numpy: 'NumPy',
+  scipy: 'SciPy',
+  matplotlib: 'Matplotlib',
+  pytorch: 'PyTorch',
+  tensorflow: 'TensorFlow',
+  xgboost: 'XGBoost',
+  lightgbm: 'LightGBM',
+  pyspark: 'PySpark',
+  opencv: 'OpenCV',
+  nltk: 'NLTK',
+  fastapi: 'FastAPI',
+  langchain: 'LangChain',
+  huggingface: 'Hugging Face',
+  'hugging face': 'Hugging Face',
+  mysql: 'MySQL',
+  sqlite: 'SQLite',
+  nosql: 'NoSQL',
+  graphql: 'GraphQL',
+  bigquery: 'BigQuery',
+  github: 'GitHub',
+  'github actions': 'GitHub Actions',
+  gitlab: 'GitLab',
+  powershell: 'PowerShell',
+  latex: 'LaTeX',
+  matlab: 'MATLAB',
+  devops: 'DevOps',
+  mlops: 'MLOps',
+  'power bi': 'Power BI',
+  powerbi: 'Power BI',
+  'ms excel': 'MS Excel',
+  'a b testing': 'A/B Testing',
+  'ci cd': 'CI/CD',
+  sql: 'SQL',
+  php: 'PHP',
+  json: 'JSON',
+  xml: 'XML',
+  yaml: 'YAML',
+  api: 'API',
+  'rest api': 'REST API',
+  ai: 'AI',
+  ml: 'ML',
+  nlp: 'NLP',
+  llm: 'LLM',
+  llms: 'LLMs',
+  etl: 'ETL',
+  eda: 'EDA',
+  oop: 'OOP',
+  dbms: 'DBMS',
+  sas: 'SAS',
+  spss: 'SPSS',
+  dax: 'DAX',
+  cuda: 'CUDA',
+  ui: 'UI',
+  ux: 'UX',
 };
+
+/**
+ * Words a title keeps lowercase unless they open it: "Design of Experiments", never
+ * "Design Of Experiments", which reads as a string pushed through a function.
+ */
+const SMALL_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'vs', 'via', 'with',
+]);
+
+/**
+ * Title case for a skill the table does not know — and only for one written entirely in
+ * plain lowercase words.
+ *
+ * The defect: skill records created from job-posting keywords keep the posting's prose
+ * casing, so the Skills line read "regression, Python, SQL, statistics, segmentation,
+ * Data Science" — the section a recruiter reads first, looking machine-assembled.
+ *
+ * The rule, and why each limit is there:
+ *   - Any uppercase letter anywhere means the casing was chosen — "iOS", "eBay",
+ *     "Data science" — and is left exactly as written. Only all-lowercase input is
+ *     treated as uncased.
+ *   - Only letters, spaces, hyphens and apostrophes qualify. A digit, dot, plus, hash or
+ *     slash marks an identifier ("vue3", "d3.js", "c++", "ci/cd"), and identifiers are
+ *     spelled, not cased.
+ *   - Every word is capitalised, hyphen halves included ("Time-Series Analysis"), except
+ *     SMALL_WORDS after the first.
+ *
+ * ponytail: an all-lowercase acronym missing from ALIASES prints as a word ("Etl" had
+ * ETL not been listed). The fix is one table line, not a heuristic that guesses which
+ * three-letter words are acronyms — "git" and "sql" have the same shape.
+ */
+export function titleCasePlain(name: string): string {
+  const s = name.trim();
+  if (!/^[a-z][a-z' -]*$/.test(s)) return s;
+  return s
+    .split(/\s+/)
+    .map((word, wi) =>
+      word
+        .split('-')
+        .map((part, pi) =>
+          (wi > 0 || pi > 0) && SMALL_WORDS.has(part)
+            ? part
+            : part.charAt(0).toUpperCase() + part.slice(1),
+        )
+        .join('-'),
+    )
+    .join(' ');
+}
 
 /**
  * The key two spellings of one skill share. Anything absent from the table is its own
@@ -144,9 +279,12 @@ export function skillIdentity(name: string): string {
   return canonical ? canonical.toLowerCase() : n;
 }
 
-/** The name to print. An unknown skill keeps whatever the user wrote. */
+/**
+ * The name to print. The table's spelling where it has one; otherwise what the user
+ * wrote, title-cased only if they wrote it entirely in lowercase (`titleCasePlain`).
+ */
 export function canonicalSkillName(name: string): string {
-  return ALIASES[normalizeSkill(name)] ?? name.trim();
+  return ALIASES[normalizeSkill(name)] ?? titleCasePlain(name);
 }
 
 /**
@@ -173,7 +311,7 @@ export function skillAliases(name: string): string[] {
  */
 export function mergeSkillNames(a: string, b: string): string {
   const canonical = ALIASES[normalizeSkill(a)] ?? ALIASES[normalizeSkill(b)];
-  return canonical ?? a.trim();
+  return canonical ?? titleCasePlain(a);
 }
 
 /** Collapses a list of skill names to one entry per real skill, order preserved. */
