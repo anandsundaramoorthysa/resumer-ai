@@ -19,3 +19,13 @@ export function userMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.name === 'TimeoutError') return 'That took too long. Try again.';
   return fallback;
 }
+
+/**
+ * For paths whose own code throws sentences — `throw new Error('No portfolio repository
+ * connected.')`. A plain `Error` is one of those; a subclass (a driver's query error, a
+ * ZodError) was written for a developer and gets the fallback instead.
+ */
+export function authoredMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.constructor === Error) return err.message;
+  return userMessage(err, fallback);
+}

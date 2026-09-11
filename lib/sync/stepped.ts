@@ -4,6 +4,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { syncJobs, users } from '@/lib/db/schema';
 import { writeContact } from '@/lib/import/commit';
+import { authoredMessage } from '@/lib/server/user-message';
 import { fetchPortfolioFiles, latestCommitSha, parseRepoRef } from './github';
 import {
   extractFromSlice,
@@ -177,7 +178,10 @@ export async function advanceSyncJob(
   try {
     return await runStep(userId, job, deadlineAt);
   } catch (err) {
-    const message = err instanceof Error ? err.message.slice(0, 400) : String(err);
+    // Stored on the job and shown on the settings page, so it must be a sentence: a
+    // database error here used to put "Failed query: update …" in front of the user.
+    console.error('[sync] step failed for user', userId, err);
+    const message = authoredMessage(err, 'The sync stopped on our side. Try again in a minute.').slice(0, 400);
     await db
       .update(syncJobs)
       .set({ status: 'error', error: message, message: 'Sync failed', updatedAt: new Date() })

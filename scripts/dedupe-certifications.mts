@@ -24,7 +24,7 @@ import postgres from 'postgres';
 // row carries 32 — meaning the next sync would not recognise the merged row and would
 // insert the duplicate again, which is the exact bug this script exists to remove.
 import { hashContent } from '../lib/sync/reconcile';
-import { recordDedupeAudit } from './dedupe-audit';
+import { recordDedupeAudit } from './dedupe-audit.mjs';
 import {
   certificationHashParts,
   certificationIdentity,

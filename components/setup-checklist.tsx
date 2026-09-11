@@ -8,10 +8,12 @@ import { Logo } from './logo';
 export function SetupChecklist({
   database,
   auth,
+  encryption,
   providers,
 }: {
   database: boolean;
   auth: boolean;
+  encryption: boolean;
   providers: string[];
 }) {
   const items = [
@@ -28,9 +30,15 @@ export function SetupChecklist({
       how: 'Create an OAuth App at github.com/settings/developers with callback URL http://localhost:3000/api/auth/callback/github. Generate AUTH_SECRET with `npx auth secret`.',
     },
     {
+      done: encryption,
+      title: 'Encryption key',
+      env: 'TOKEN_ENC_KEY',
+      how: "Every draft's fit check is sealed with it, and stored sign-in tokens are encrypted with it. Generate one with `node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\"`.",
+    },
+    {
       done: providers.length > 0,
       title: 'At least one AI provider',
-      env: 'GOOGLE_GENERATIVE_AI_API_KEY, GROQ_API_KEY, DEEPINFRA_API_KEY, TOGETHER_API_KEY, FIREWORKS_API_KEY',
+      env: 'FIREWORKS_API_KEY, GROQ_API_KEY, TOGETHER_API_KEY, DEEPINFRA_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY',
       how:
         providers.length > 0
           ? `Configured: ${providers.join(', ')}. They are tried in that order, falling back on failure.`

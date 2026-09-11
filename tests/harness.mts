@@ -32,6 +32,12 @@ export function suite(name: string, body: () => void): void {
 
 export function test(name: string, body: () => void): void {
   try {
+    // An async body returns a promise this function never awaits: it printed "ok" before
+    // a single assertion had run, and a failure surfaced later as an unhandled rejection
+    // under whatever suite happened to be current. Four suites were doing it.
+    if (body.constructor.name === 'AsyncFunction') {
+      throw new Error(`${name}: this test is async — use testAsync so its assertions are awaited`);
+    }
     body();
     passCount += 1;
     console.log(`  ok  ${name}`);

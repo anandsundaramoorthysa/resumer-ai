@@ -29,7 +29,6 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: 'Anand Sundaramoorthy', url: 'https://anandsundaramoorthy.com' }],
   creator: 'Anand Sundaramoorthy',
-  alternates: { canonical: '/' },
   openGraph: {
     type: 'website',
     url: SITE_URL,

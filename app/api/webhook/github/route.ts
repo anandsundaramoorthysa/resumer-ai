@@ -13,7 +13,7 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { NextRequest } from 'next/server';
-import { eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { forgetInstallation } from '@/lib/github/app';
@@ -98,7 +98,8 @@ export async function POST(req: NextRequest) {
   const updated = await db
     .update(users)
     .set({ lastSyncedSha: null })
-    .where(eq(users.portfolioRepo, repo))
+    // Case-insensitively: a user who typed "Owner/Repo" never had their cache cleared.
+    .where(sql`lower(${users.portfolioRepo}) = lower(${repo})`)
     .returning({ id: users.id });
 
   return Response.json({ ok: true, invalidated: updated.length });

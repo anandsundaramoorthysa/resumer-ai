@@ -19,7 +19,7 @@
  *
  * Run: npx tsx --tsconfig scripts/tsconfig.json scripts/dedupe-education.mts [--apply]
  */
-import { recordDedupeAudit } from './dedupe-audit';
+import { recordDedupeAudit } from './dedupe-audit.mjs';
 import 'dotenv/config';
 import postgres from 'postgres';
 import { createHash } from 'node:crypto';

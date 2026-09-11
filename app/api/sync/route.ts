@@ -9,6 +9,7 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import { advanceSyncJob, startSyncJob, getSyncJob } from '@/lib/sync/stepped';
+import { authoredMessage } from '@/lib/server/user-message';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -26,10 +27,8 @@ export async function POST(req: NextRequest) {
       : await startSyncJob(userId);
     return Response.json(result);
   } catch (err) {
-    return Response.json(
-      { error: err instanceof Error ? err.message : 'Sync failed.' },
-      { status: 500 },
-    );
+    console.error('[sync] request failed for user', userId, err);
+    return Response.json({ error: authoredMessage(err, 'The sync could not start. Try again in a minute.') }, { status: 500 });
   }
 }
 

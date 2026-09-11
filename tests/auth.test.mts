@@ -23,28 +23,28 @@ import {
   needsInitialPassword,
 } from '../lib/auth/initial-password';
 import { sessionSurvivesReset } from '../lib/auth/session-validity';
-import { suite, test, assert } from './harness.mjs';
+import { suite, suiteAsync, test, testAsync, assert } from './harness.mjs';
 
-suite('password hashing', () => {
-  test('a password verifies against its own hash', async () => {
+suiteAsync('password hashing', async () => {
+  await testAsync('a password verifies against its own hash', async () => {
     const hash = await hashPassword('correct horse battery staple');
     assert(await verifyPassword('correct horse battery staple', hash), 'the right password passes');
   });
 
-  test('a wrong password does not', async () => {
+  await testAsync('a wrong password does not', async () => {
     const hash = await hashPassword('correct horse battery staple');
     assert(!(await verifyPassword('correct horse battery stapl', hash)), 'one character short fails');
     assert(!(await verifyPassword('', hash)), 'and empty fails');
   });
 
-  test('the same password hashes differently every time', async () => {
+  await testAsync('the same password hashes differently every time', async () => {
     const a = await hashPassword('the same password');
     const b = await hashPassword('the same password');
     assert(a !== b, 'salted, so two users with one password do not look alike in a dump');
     assert(await verifyPassword('the same password', b), 'and both still verify');
   });
 
-  test('the hash carries its own parameters', async () => {
+  await testAsync('the hash carries its own parameters', async () => {
     const hash = await hashPassword('anything at all');
     const [scheme, n, r, p] = hash.split('$');
     assert(scheme === 'scrypt', 'named scheme');
@@ -52,13 +52,13 @@ suite('password hashing', () => {
     assert(Number(r) > 0 && Number(p) > 0, 'and the rest of the parameters too');
   });
 
-  test('a malformed stored hash fails rather than throwing', async () => {
+  await testAsync('a malformed stored hash fails rather than throwing', async () => {
     for (const junk of ['', 'not-a-hash', 'scrypt$$$$', 'bcrypt$1$2$3$4$5', 'scrypt$1$1$1$$']) {
       assert(!(await verifyPassword('anything', junk)), `handled: ${JSON.stringify(junk)}`);
     }
   });
 
-  test('unicode normalisation means one password, one hash', async () => {
+  await testAsync('unicode normalisation means one password, one hash', async () => {
     // The same visible password typed on two keyboards: one sends a precomposed e-acute,
     // the other sends "e" followed by a combining accent. Without normalisation these are
     // different byte strings, and the user is locked out of their own account by their
@@ -304,7 +304,7 @@ suite('the first password on a provider-only account', () => {
     // than the mailed link the reset flow would otherwise have demanded.
     const patch = linkedAccountPatch(null);
     assert(
-      needsInitialPassword({ email: OAUTH_ONLY.email, ...patch }),
+      needsInitialPassword({ passwordHash: null, email: OAUTH_ONLY.email, ...patch }),
       'a provider-verified row with no password may set one',
     );
   });

@@ -56,9 +56,10 @@ export function PortfolioForm({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(state ? { jobId: state.jobId } : {}),
         });
-        const json = await res.json();
-        if (!res.ok) {
-          setSyncResult({ ok: false, message: json.error ?? 'Sync failed.' });
+        // A step killed at the host's time limit answers with an HTML page, not JSON.
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json) {
+          setSyncResult({ ok: false, message: json?.error ?? 'That sync step did not finish. Run the sync again — it carries on where it stopped.' });
           return;
         }
         state = json as StepState;
@@ -73,8 +74,8 @@ export function PortfolioForm({
         }
       }
       setSyncResult({ ok: false, message: 'Sync took too many steps and was stopped.' });
-    } catch (err) {
-      setSyncResult({ ok: false, message: (err as Error).message });
+    } catch {
+      setSyncResult({ ok: false, message: 'The connection dropped. Run the sync again — it carries on where it stopped.' });
     } finally {
       setSyncing(false);
       setProgress(null);

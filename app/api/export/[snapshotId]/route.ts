@@ -13,7 +13,7 @@ import { db } from '@/lib/db';
 import { resumeSnapshots } from '@/lib/db/schema';
 import { renderPresentationPdf, renderResumePdf } from '@/lib/render/pdf';
 import { renderResumeDocx } from '@/lib/render/docx';
-import { resumeFileName } from '@/lib/render/filename';
+import { attachmentHeader, resumeFileName } from '@/lib/render/filename';
 import type { ResumeDocument } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -65,7 +65,7 @@ export async function GET(
         format === 'docx'
           ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
           : 'application/pdf',
-      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Content-Disposition': attachmentHeader(fileName),
       'Cache-Control': 'private, no-store',
     },
   });

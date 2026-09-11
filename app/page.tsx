@@ -1,14 +1,19 @@
 import Link from 'next/link';
 import { auth, isAuthConfigured } from '@/auth';
 import { isDatabaseConfigured } from '@/lib/db';
+import { isEncryptionConfigured } from '@/lib/auth/secret-box';
 import { hasAnyProvider, availableProviders } from '@/lib/ai/models';
 import { AppHeader } from '@/components/app-header';
 import { DraftConsole } from '@/components/draft-console';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { getDashboardData } from '@/lib/server/dashboard';
 
+export const metadata = { alternates: { canonical: '/' } };
+
 export default async function HomePage() {
-  const ready = isDatabaseConfigured && isAuthConfigured && hasAnyProvider();
+  // TOKEN_ENC_KEY is part of "ready": the fit check in front of every draft seals its
+  // result with it, so without the key the dashboard would offer a draft that always fails.
+  const ready = isDatabaseConfigured && isAuthConfigured && hasAnyProvider() && isEncryptionConfigured();
 
   if (!ready) {
     return (
@@ -16,6 +21,7 @@ export default async function HomePage() {
         <SetupChecklist
           database={isDatabaseConfigured}
           auth={isAuthConfigured}
+          encryption={isEncryptionConfigured()}
           providers={availableProviders().map((p) => p.label)}
         />
       </Shell>

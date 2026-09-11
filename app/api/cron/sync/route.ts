@@ -19,7 +19,7 @@ import { getRepoAccess } from '@/lib/server/repo-access';
 import { users } from '@/lib/db/schema';
 import { cronAuthorized } from '@/lib/server/cron-auth';
 import { NextRequest } from 'next/server';
-import { eq, isNotNull } from 'drizzle-orm';
+import { eq, isNotNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { latestCommitSha, parseRepoRef } from '@/lib/sync/github';
 
@@ -61,6 +61,9 @@ async function run(req: NextRequest) {
     })
     .from(users)
     .where(isNotNull(users.portfolioRepo))
+    // Oldest first, never-synced before all of them. Unordered with a cap of 25, the same
+    // users were checked every night and everyone past the cap never was.
+    .orderBy(sql`${users.lastSyncedAt} asc nulls first`)
     .limit(MAX_USERS_PER_RUN);
 
   let checked = 0;

@@ -36,6 +36,7 @@ import {
   type EnrichmentSignal,
 } from '../lib/profile/enrichment';
 import type {
+  ExperienceBulletRecord,
   JobRequirement,
   ProfileRecord,
   ResumeDocument,
@@ -59,7 +60,7 @@ function bullet(
   roleId: string,
   text: string,
   parts: { scale?: string; outcome?: string } = {},
-): ProfileRecord {
+): ExperienceBulletRecord {
   return {
     ...base,
     id,
@@ -71,7 +72,7 @@ function bullet(
     outcome: parts.outcome,
     tags: [],
     contentHash: `h-${id}`,
-  } as unknown as ProfileRecord;
+  } as unknown as ExperienceBulletRecord;
 }
 
 function project(id: string, name: string, metrics: string[] = []): ProfileRecord {
@@ -186,7 +187,7 @@ suite('enrichment — questions come from the real signal', () => {
 
   test('a refused rewrite becomes a question quoting the user own bullet', () => {
     const qs = buildEnrichmentQuestions(
-      { ...emptySignal(), rejectedRewrites: [{ recordId: 'b1', text: b.text as string }] },
+      { ...emptySignal(), rejectedRewrites: [{ recordId: 'b1', text: b.text }] },
       records,
       [CURRENT],
     );
@@ -203,7 +204,7 @@ suite('enrichment — questions come from the real signal', () => {
     // that quoted the rejected rewrite would hand the user a number to agree with, and
     // every later grounding check would then verify against a figure a model chose.
     const qs = buildEnrichmentQuestions(
-      { ...emptySignal(), rejectedRewrites: [{ recordId: 'b1', text: b.text as string }] },
+      { ...emptySignal(), rejectedRewrites: [{ recordId: 'b1', text: b.text }] },
       records,
       [CURRENT],
     );
@@ -213,7 +214,7 @@ suite('enrichment — questions come from the real signal', () => {
 
   test('a weak bullet carries the grader own words as the reason', () => {
     const doc = documentFor([
-      { section: 'experience', text: b.text as string, recordId: 'b1' },
+      { section: 'experience', text: b.text, recordId: 'b1' },
     ]);
     const qs = buildEnrichmentQuestions(
       {
@@ -223,7 +224,7 @@ suite('enrichment — questions come from the real signal', () => {
           {
             sectionKey: 'experience',
             itemIndex: 0,
-            text: b.text as string,
+            text: b.text,
             problem: 'names a service but shows no scale and no measurable outcome',
           },
         ],
@@ -309,18 +310,18 @@ suite('enrichment — one question per subject', () => {
 
   test('two signals on the same bullet produce one question at the higher impact', () => {
     const doc = documentFor([
-      { section: 'experience', text: b.text as string, recordId: 'b1' },
+      { section: 'experience', text: b.text, recordId: 'b1' },
     ]);
     const qs = buildEnrichmentQuestions(
       {
         ...emptySignal(),
         document: doc,
-        rejectedRewrites: [{ recordId: 'b1', text: b.text as string }],
+        rejectedRewrites: [{ recordId: 'b1', text: b.text }],
         weakBullets: [
           {
             sectionKey: 'experience',
             itemIndex: 0,
-            text: b.text as string,
+            text: b.text,
             problem: 'no scale, no outcome',
           },
         ],
@@ -364,7 +365,7 @@ suite('enrichment — ordering puts the highest impact first', () => {
     const b = bullet('b1', CURRENT.id, 'Optimized the checkout service.');
     const p = project('p1', 'Tidewater');
     const doc = documentFor([
-      { section: 'experience', text: b.text as string, recordId: 'b1' },
+      { section: 'experience', text: b.text, recordId: 'b1' },
       { section: 'projects', text: 'An internal tool.', recordId: 'p1' },
     ]);
     const qs = buildEnrichmentQuestions(
@@ -372,7 +373,7 @@ suite('enrichment — ordering puts the highest impact first', () => {
         ...emptySignal(),
         document: doc,
         genuineGaps: ['Screaming Frog'],
-        rejectedRewrites: [{ recordId: 'b1', text: b.text as string }],
+        rejectedRewrites: [{ recordId: 'b1', text: b.text }],
         weakBullets: [
           { sectionKey: 'projects', itemIndex: 0, text: 'An internal tool.', problem: 'no result' },
         ],

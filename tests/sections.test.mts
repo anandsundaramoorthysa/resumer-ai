@@ -206,7 +206,7 @@ function section(doc: ResumeDocument, key: SectionKey) {
 
 /* ------------------------------------------------------------ the suites --- */
 
-suite('section orders', () => {
+suiteAsync('section orders', async () => {
   test('every category orders every section', () => {
     for (const [category, profile] of Object.entries(CATEGORY_PROFILES)) {
       const missing = missingFromSectionOrder(profile.sectionOrder);
@@ -574,7 +574,7 @@ report('sections');
 
 /* --------------------------------------------------- bullets by recency ---- */
 
-suite('per-role bullet distribution (AUDIT #8)', () => {
+suiteAsync('per-role bullet distribution (AUDIT #8)', async () => {
   const role = (
     id: string,
     startDate: string,
@@ -705,7 +705,7 @@ suite('per-role bullet distribution (AUDIT #8)', () => {
     assert.equal(distributeBulletsByRecency(orphans, [], 11).length, 11);
   });
 
-  test('the assembled Experience section prints newest first', async () => {
+  await testAsync('the assembled Experience section prints newest first', async () => {
     const current = role('current', '2023-01', 'present');
     const old = role('old', '2019-01', '2020-01');
     const { document } = await assembleResume({
@@ -736,7 +736,7 @@ suite('per-role bullet distribution (AUDIT #8)', () => {
  * after the model work had already been paid for. The error surfaced three layers from
  * its cause as "Cannot read properties of undefined (reading 'replace')".
  */
-suiteAsync('a project with no description', () => {
+suiteAsync('a project with no description', async () => {
   testAsync('still appears, and contributes no empty item', async () => {
     const project = {
       ...base(['docker']),

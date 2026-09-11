@@ -27,3 +27,25 @@ export function resumeFileName(
   const parts = [name, target].filter(Boolean);
   return `${parts.join('_')}.${ext}`;
 }
+
+/**
+ * The Content-Disposition value for a download named `fileName`.
+ *
+ * A header value must be bytes, so `filename="北京_Tech.pdf"` threw inside the Response
+ * constructor and the export returned 500 for any name or company written in Tamil,
+ * Devanagari, Chinese or another non-Latin script — the slug above keeps those letters on
+ * purpose. RFC 6266: an ASCII fallback for old clients, and the real name UTF-8 encoded in
+ * `filename*` for every current browser.
+ */
+export function attachmentHeader(fileName: string): string {
+  // The slug holds only letters, digits, underscores and the extension's dot, so dropping
+  // everything outside printable ASCII is all the fallback needs.
+  const ext = fileName.slice(fileName.lastIndexOf('.'));
+  const base = fileName
+    .slice(0, -ext.length)
+    .normalize('NFKD')
+    .replace(/[^A-Za-z0-9_]/g, '')
+    .replace(/_{2,}/g, '_')
+    .replace(/^_|_$/g, '');
+  return `attachment; filename="${base || 'Resume'}${ext}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}

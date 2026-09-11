@@ -95,7 +95,9 @@ export async function applyQuickFixesAction(
     const id = await userId();
     const applied: string[] = [];
     let failed = 0;
-    for (const s of suggestions.slice(0, 60)) {
+    // Twelve, which is what the page sends (profile-assistant.tsx) and what the timing
+    // work in STEWARD.md §4 found fits one request. Sixty did not.
+    for (const s of suggestions.slice(0, 12)) {
       if (s.kind !== 'fix' || !s.quick || s.origin !== 'rule') {
         failed++;
         continue;

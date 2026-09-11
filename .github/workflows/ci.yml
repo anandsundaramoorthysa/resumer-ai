@@ -35,8 +35,11 @@ jobs:
       # and the project pins an esbuild override that a loose install would resolve away.
       - run: npm ci
 
+      # Tests and scripts too (npm run typecheck runs both projects). CI checked only the
+      # app, and the second project had drifted to 22 errors — in the fixtures the suites
+      # assert against, which is where a wrong type quietly means a test of nothing.
       - name: Types
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
         run: npm run lint

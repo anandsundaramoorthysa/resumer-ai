@@ -44,7 +44,7 @@ for (const r of rows) {
     github_url: r.github_url || links.githubUrl || null,
     portfolio_url: r.portfolio_url || links.portfolioUrl || null,
   };
-  const changed = Object.entries(next).filter(([k, v]) => v !== r[k]);
+  const changed = Object.entries(next).filter(([k, v]) => v !== (r as unknown as Record<string, unknown>)[k]);
   console.log(`\n${r.email} (${r.full_name})`);
   console.log('  before:', JSON.stringify({ linkedin: r.linkedin_url, github: r.github_url, portfolio: r.portfolio_url }));
   if (changed.length === 0) { console.log('  nothing to fill'); continue; }

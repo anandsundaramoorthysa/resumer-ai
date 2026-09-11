@@ -10,7 +10,7 @@ import { scoreKeywordCoverage } from '../lib/quality/keywords';
 import { selfTest } from '../lib/render/selftest';
 import { renderResumeDocx } from '../lib/render/docx';
 import type { JobRequirement, ResumeDocument } from '../lib/types';
-import { suite, test, assert } from './harness.mjs';
+import { suite, suiteAsync, test, testAsync, assert } from './harness.mjs';
 
 function docWith(sections: ResumeDocument['sections'], job?: Partial<JobRequirement>): ResumeDocument {
   return {
@@ -45,7 +45,7 @@ function docWith(sections: ResumeDocument['sections'], job?: Partial<JobRequirem
   };
 }
 
-suite('flag fixes', () => {
+suiteAsync('flag fixes', async () => {
   /* ------------------------------------------------ flag 1: keyword matching -- */
 
   test('keyword coverage no longer counts a substring as a match', () => {
@@ -126,7 +126,7 @@ suite('flag fixes', () => {
 
   /* --------------------------------------------- flag 2: skills region check -- */
 
-  test('a dropped Skills section is caught even when the skill appears elsewhere', async () => {
+  await testAsync('a dropped Skills section is caught even when the skill appears elsewhere', async () => {
     // The exact scenario the old check missed: "React" is gone from Skills but still
     // present in a project line, so a whole-document search found it and passed.
     const broken = docWith([
@@ -163,7 +163,7 @@ suite('flag fixes', () => {
     assert(caught, `a missing Skills section must fail; issues: ${JSON.stringify(result.issues)}`);
   });
 
-  test('an intact Skills section still passes cleanly', async () => {
+  await testAsync('an intact Skills section still passes cleanly', async () => {
     const good = docWith([
       {
         key: 'skills',

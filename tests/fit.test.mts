@@ -37,7 +37,7 @@ import {
   sealAssessment,
 } from '../lib/fit/token';
 import { normalizeForMatch } from '../lib/quality/keywords';
-import type { JobRequirement, ProfileRecord, RoleRecord } from '../lib/types';
+import type { JobRequirement, ProfileRecord, ProjectRecord, RoleRecord } from '../lib/types';
 
 /* ------------------------------------------------------------- fixtures ---- */
 
@@ -171,7 +171,7 @@ suite('what the profile holds — the deterministic facts', () => {
 suite('the digest stays small enough to answer in time, without hiding anything', () => {
   // At full size the digest was 10k characters and the fit call took 18–20s; production
   // has well under that. A large profile is the case that matters.
-  const many: ProfileRecord[] = Array.from({ length: 40 }, (_, i) => ({
+  const many: ProjectRecord[] = Array.from({ length: 40 }, (_, i) => ({
     ...base,
     id: `proj${i}`,
     type: 'project' as const,

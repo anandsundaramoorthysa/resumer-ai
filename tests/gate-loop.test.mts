@@ -39,6 +39,7 @@ const job: JobRequirement = {
 const recordBase = {
   userId: 'u1',
   source: 'manual' as const,
+  reviewState: 'approved' as const,
   flaggedForRemoval: false,
   createdAt: new Date('2024-01-01'),
   updatedAt: new Date('2024-01-01'),
