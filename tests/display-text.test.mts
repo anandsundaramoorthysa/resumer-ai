@@ -9,6 +9,7 @@
 import { assert, suite, test } from './harness.mjs';
 import {
   capitaliseFirst,
+  printable,
   tidyResumeText,
   withoutRepeatedParts,
 } from '@/lib/generate/display-text';
@@ -120,5 +121,13 @@ suite('tidyResumeText — sentences, not lists of names', () => {
 
   test('the input document is not mutated', () => {
     assert.equal(doc.sections[0].items[0].text, 'data scientist who ships.');
+  });
+});
+
+suite('printable — hyphens the PDF font can draw', () => {
+  test('a model\'s non-breaking hyphen prints as a plain one', () => {
+    // Printed as "product focused", read by an ATS as "productfocused".
+    assert.equal(printable('product‑focused, real‐world, end‑to‑end'), 'product-focused, real-world, end-to-end');
+    assert.equal(printable('data­visualization'), 'datavisualization');
   });
 });

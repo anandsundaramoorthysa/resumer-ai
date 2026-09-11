@@ -33,7 +33,7 @@ export function extractNumbers(text: string): string[] {
 export function extractProperNouns(text: string): string[] {
   // Hyphens and dashes split too: "Python-driven" is the name "Python" plus an ordinary
   // word, and checked whole it became "pythondriven" — a name no profile contains.
-  const tokens = text.split(/[\s,;:()[\]"'\-–—]+/).filter(Boolean);
+  const tokens = text.split(/[\s,;:()[\]"'\-‐‑–—]+/).filter(Boolean);
   const out: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const raw = tokens[i].replace(/[.]+$/, '');

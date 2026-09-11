@@ -71,17 +71,32 @@ function escapeRegExp(s: string): string {
  * "Pandas, NumPy". The summary is prose, so it is included despite rendering as a plain
  * line. Group titles and subtitles are names too and are left alone.
  */
+/**
+ * Hyphen look-alikes the PDF font cannot draw, as a plain hyphen.
+ *
+ * Models write "product‑focused" with a non-breaking hyphen (U+2011). Helvetica has
+ * no glyph for it, so the PDF printed "product focused" — and its text layer, which is
+ * what an ATS reads, said "productfocused". Soft hyphens are dropped outright.
+ */
+export function printable(text: string): string {
+  return text.replace(/[‐‑‒−]/g, '-').replace(/­/g, '');
+}
+
 export function tidyResumeText(doc: ResumeDocument): ResumeDocument {
   const tidy = (s: ResumeSection): ResumeSection => {
-    if (rendersAsPlainLine(s.key) && s.key !== 'summary') return s;
+    const sentence = rendersAsPlainLine(s.key) && s.key !== 'summary'
+      ? printable
+      : (t: string) => capitaliseFirst(printable(t));
     return {
       ...s,
-      items: s.items.map((i) => ({ ...i, text: capitaliseFirst(i.text) })),
+      items: s.items.map((i) => ({ ...i, text: sentence(i.text) })),
       ...(s.groups
         ? {
             groups: s.groups.map((g) => ({
               ...g,
-              items: g.items.map((i) => ({ ...i, text: capitaliseFirst(i.text) })),
+              title: printable(g.title),
+              ...(g.subtitle ? { subtitle: printable(g.subtitle) } : {}),
+              items: g.items.map((i) => ({ ...i, text: sentence(i.text) })),
             })),
           }
         : {}),
