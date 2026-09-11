@@ -4,10 +4,13 @@ import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { checkPassword, MIN_PASSWORD_LENGTH } from '@/lib/auth/password-rules';
 import { resetPasswordAction, type AuthResult } from '../sign-in/account-actions';
+import { PasswordInput } from '@/components/password-input';
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  // One toggle for both fields, so what was typed twice can be compared by eye.
+  const [showPasswords, setShowPasswords] = useState(false);
   const [result, setResult] = useState<AuthResult | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -43,25 +46,27 @@ export function ResetPasswordForm({ token }: { token: string }) {
     >
       <label className="block">
         <span className="text-xs font-medium text-muted">New password</span>
-        <input
-          type="password"
+        <PasswordInput
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="new-password"
           className={INPUT}
+          visible={showPasswords}
+          onVisibleChange={setShowPasswords}
         />
       </label>
 
       <label className="mt-3 block">
         <span className="text-xs font-medium text-muted">Type it again</span>
-        <input
-          type="password"
+        <PasswordInput
           required
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           autoComplete="new-password"
           className={INPUT}
+          visible={showPasswords}
+          onVisibleChange={setShowPasswords}
         />
       </label>
 

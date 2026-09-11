@@ -17,6 +17,7 @@ import Link from 'next/link';
 import { checkPassword, MIN_PASSWORD_LENGTH } from '@/lib/auth/password-rules';
 import { signUpAction, resendVerificationAction, type AuthResult } from './account-actions';
 import { passwordSignInAction } from './sign-in-actions';
+import { PasswordInput } from '@/components/password-input';
 
 type Mode = 'sign-in' | 'sign-up';
 
@@ -107,8 +108,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
         </Labelled>
 
         <Labelled label="Password">
-          <input
-            type="password"
+          <PasswordInput
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}

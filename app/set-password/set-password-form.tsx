@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { checkPassword, MIN_PASSWORD_LENGTH } from '@/lib/auth/password-rules';
 import type { AuthResult } from '../sign-in/account-actions';
 import { setInitialPasswordAction } from './actions';
+import { PasswordInput } from '@/components/password-input';
 
 /**
  * Deliberately the same shape and the same rules as the reset form.
@@ -21,6 +22,8 @@ import { setInitialPasswordAction } from './actions';
 export function SetPasswordForm({ email }: { email: string }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  // One toggle for both fields, so what was typed twice can be compared by eye.
+  const [showPasswords, setShowPasswords] = useState(false);
   const [result, setResult] = useState<AuthResult | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -63,25 +66,27 @@ export function SetPasswordForm({ email }: { email: string }) {
 
       <label className="block">
         <span className="text-xs font-medium text-muted">Password</span>
-        <input
-          type="password"
+        <PasswordInput
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="new-password"
           className={INPUT}
+          visible={showPasswords}
+          onVisibleChange={setShowPasswords}
         />
       </label>
 
       <label className="mt-3 block">
         <span className="text-xs font-medium text-muted">Type it again</span>
-        <input
-          type="password"
+        <PasswordInput
           required
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           autoComplete="new-password"
           className={INPUT}
+          visible={showPasswords}
+          onVisibleChange={setShowPasswords}
         />
       </label>
 

@@ -7,6 +7,7 @@
 
 import { useState, useTransition } from 'react';
 import { deleteAccount } from './actions';
+import { PasswordInput } from '@/components/password-input';
 
 export function DeleteAccount({ hasPassword, email }: { hasPassword: boolean; email: string }) {
   const [open, setOpen] = useState(false);
@@ -38,13 +39,22 @@ export function DeleteAccount({ hasPassword, email }: { hasPassword: boolean; em
             <span className="text-xs font-medium text-muted">
               {hasPassword ? 'Type your password to confirm' : `Type ${email} to confirm`}
             </span>
-            <input
-              type={hasPassword ? 'password' : 'text'}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              autoComplete={hasPassword ? 'current-password' : 'off'}
-              className="mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-danger"
-            />
+            {hasPassword ? (
+              <PasswordInput
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                autoComplete="current-password"
+                className="mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-danger"
+              />
+            ) : (
+              <input
+                type="text"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                autoComplete="off"
+                className="mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-danger"
+              />
+            )}
           </label>
           {error ? (
             <p role="alert" className="mt-2 text-xs text-danger">
