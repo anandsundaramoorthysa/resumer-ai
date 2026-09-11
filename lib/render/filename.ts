@@ -44,7 +44,7 @@ export function attachmentHeader(fileName: string): string {
   const base = fileName
     .slice(0, -ext.length)
     .normalize('NFKD')
-    .replace(/[^A-Za-z0-9_]/g, '')
+    .replace(/[^A-Za-z0-9_-]/g, '')
     .replace(/_{2,}/g, '_')
     .replace(/^_|_$/g, '');
   return `attachment; filename="${base || 'Resume'}${ext}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
