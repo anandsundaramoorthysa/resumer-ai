@@ -70,7 +70,8 @@ const nextConfig: NextConfig = {
       // in it — the page rendered fine in a system fallback and nothing failed loudly.
       // Caught by loading the built app in a real browser and reading the console.
       "font-src 'self' data: https://fonts.gstatic.com https://api.fontshare.com https://cdn.fontshare.com",
-      "connect-src 'self'",
+      // Browser error reports go to Sentry's EU ingest (lib/sentry-options.ts).
+      "connect-src 'self' https://*.ingest.de.sentry.io",
     ].join('; ');
 
     return [

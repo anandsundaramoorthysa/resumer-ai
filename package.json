@@ -20,6 +20,7 @@
     "@ai-sdk/togetherai": "^2.0.80",
     "@auth/drizzle-adapter": "^1.11.3",
     "@react-pdf/renderer": "^4.9.0",
+    "@sentry/nextjs": "^10.74.0",
     "ai": "^7.0.93",
     "docx": "^9.7.1",
     "drizzle-orm": "^0.45.2",

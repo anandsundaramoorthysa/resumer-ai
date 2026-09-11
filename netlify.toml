@@ -23,7 +23,9 @@
   #
   # This is what failed ten consecutive deploys with 'exit code 2' and no readable
   # reason: the failure text lives only in the deploy UI, not in the API.
-  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SITE_URL"
+  # NEXT_PUBLIC_SENTRY_DSN is the same case: a Sentry DSN is an address for sending error
+  # reports, public by design, and the browser needs it in its bundle.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SITE_URL,NEXT_PUBLIC_SENTRY_DSN"
 
   # Pinned rather than floating. Next 16 requires Node 20.9+, and "20" resolves to
   # whatever the build image ships that day — a moving target under a framework with a
