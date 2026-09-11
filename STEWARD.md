@@ -104,7 +104,8 @@ A **suggestion** is one proposed change with its reason and a before/after:
 - `lib/steward/rules.ts` (pure) finds what code can prove: duplicate skills by identity,
   acronym-in-parentheses, singular/plural and a short abbreviation table; near-duplicate
   bullets; dates-only bullets; hygiene on existing data; empty stacks, undated
-  certifications, reversed date ranges.
+  certifications. Reversed date ranges are refused at the writer instead
+  (`roleDateProblem` in lib/sync/roles.ts), where a job can also be corrected by hand.
 - `lib/steward/agent.ts` asks the model what code cannot judge: first-person or filler
   wording, weak openers, wrong skill category, wrong record type. One structured call
   per batch.
@@ -137,7 +138,9 @@ A **suggestion** is one proposed change with its reason and a before/after:
 3. **Import review** — after extraction, candidates already in the profile are
    unticked and labelled, and wording fixes are offered per row before commit. The check
    runs after the list is on screen, never in front of it.
-4. **Portfolio sync queue** — "Review with AI" runs the same review over the pending
+4. **Portfolio sync queue** — NOT BUILT. The general review covers pending items instead,
+   and since the production audit the steward reads approved records only. Was: "Review
+   with AI" runs the same review over the pending
    items, so a fix is made before approval rather than after.
 
 ## 4. What the live runs changed
@@ -154,7 +157,9 @@ Measured against the owner's real profile (191 records) on production:
 - **Batches are small** (10–20 records) and **two requests run at once**; three earned
   rate-limit refusals from the shared chain. A batch the providers cannot serve is retried
   once at the end.
-- **Quick fixes apply five per request.** Twenty in one server action exceeded the host's
+- **Quick fixes apply twelve per request** (the page sends twelve and the server accepts
+  twelve; it accepted sixty, which is past the ceiling measured below).
+- **Was: five per request.** Twenty in one server action exceeded the host's
   thirty seconds and returned 502 mid-apply.
 - **Applying invalidates neighbours.** A fix rewrites the record it touches, so any other
   suggestion about that record was judged on words that no longer exist: the page drops

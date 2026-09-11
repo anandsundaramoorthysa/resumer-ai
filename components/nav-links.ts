@@ -26,4 +26,5 @@ export const NAV_LINKS: NavLink[] = [
   { href: '/applications', label: 'Applications' },
   { href: '/activity', label: 'Activity' },
   { href: '/settings/application', label: 'Answers' },
+  { href: '/settings/account', label: 'Account' },
 ];

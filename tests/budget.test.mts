@@ -19,6 +19,7 @@ import {
   draftCallOptions,
   defaultTimeBudgetMs,
 } from '@/lib/ai/budget';
+import { appBudgetState } from '@/lib/ai/daily-budget';
 
 const LIMITS = { maxCalls: 4, maxTokens: 10_000 };
 
@@ -139,6 +140,25 @@ suite('the default draft clock', () => {
 
   test('MAX_DRAFT_SECONDS wins over both', () => {
     assert(defaultTimeBudgetMs({ MAX_DRAFT_SECONDS: '25', VERCEL: '1' }) === 25_000, 'override');
+  });
+});
+
+suite("the whole app's daily allowance", () => {
+  const limits = { maxCalls: 100, maxTokens: 1_000_000 };
+
+  test('inside it, nothing happens', () => {
+    const s = appBudgetState({ calls: 10, tokens: 10_000 }, limits);
+    assert(!s.exhausted && !s.warn, 'quiet');
+  });
+
+  test('either half reaching the ceiling stops the app, not just one user', () => {
+    assert(appBudgetState({ calls: 100, tokens: 0 }, limits).exhausted, 'calls');
+    assert(appBudgetState({ calls: 0, tokens: 1_000_000 }, limits).exhausted, 'tokens');
+  });
+
+  test('80% warns while everything still works', () => {
+    const s = appBudgetState({ calls: 85, tokens: 0 }, limits);
+    assert(s.warn && !s.exhausted, 'warns early enough to act');
   });
 });
 

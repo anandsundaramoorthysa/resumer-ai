@@ -10,7 +10,7 @@ import { scoreKeywordCoverage } from '../lib/quality/keywords';
 import { selfTest } from '../lib/render/selftest';
 import { renderResumeDocx } from '../lib/render/docx';
 import type { JobRequirement, ResumeDocument } from '../lib/types';
-import { suite, suiteAsync, test, testAsync, assert } from './harness.mjs';
+import { suiteAsync, test, testAsync, assert } from './harness.mjs';
 
 function docWith(sections: ResumeDocument['sections'], job?: Partial<JobRequirement>): ResumeDocument {
   return {

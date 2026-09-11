@@ -57,8 +57,19 @@ what's still needed when you load it, so you can do this one piece at a time.
 | `DATABASE_URL` | Everything | Any Postgres. Free project at [neon.tech](https://neon.tech) is quickest. |
 | `AUTH_SECRET` | Sign-in | `npx auth secret` |
 | `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | Sign-in + portfolio sync | [GitHub OAuth App](https://github.com/settings/developers), callback `http://localhost:3000/api/auth/callback/github` |
-| At least one AI key | Generation | Gemini, Groq, DeepInfra, Together, or Fireworks |
+| `TOKEN_ENC_KEY` | Every draft, and stored tokens | `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. The fit check in front of every draft is sealed with it. |
+| At least one AI key | Generation | Fireworks, Groq, Together, DeepInfra, or Gemini |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Google sign-in | Optional. [Google Cloud console](https://console.cloud.google.com/apis/credentials). |
+| `SMTP_USER` / `SMTP_PASS` | Sign-up, password reset, alerts | A Gmail address and a 16-character app password, stored **without spaces**. Without them links are logged, not sent. |
+| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_SLUG` | Reading a private portfolio | Optional but recommended: replaces the `repo` OAuth scope with per-repository `contents: read`. |
+| `CRON_SECRET` | Scheduled jobs, `/api/health` detail | Any long random string. Without it the cron routes refuse every request. |
+| `ALERT_EMAIL` | Failure alerts | Where the hourly draft-failure email goes. |
+| `MAX_DRAFT_SECONDS` / `MAX_ASSESS_SECONDS` / `AI_ATTEMPT_TIMEOUT_MS` | Host time limits | Optional. Defaults suit a 30-second function; see `lib/ai/budget.ts`. |
+| `APP_DAILY_MAX_CALLS` / `APP_DAILY_MAX_TOKENS` | Cost ceiling for everyone together | Optional; defaults 2,000 calls and 20M tokens a day. |
 | `FIRECRAWL_API_KEY` | Optional | Only needed to paste job *links*. Pasting job *text* always works. |
+
+`.env.example` documents the rest, including the tuning variables for the sync and the
+provider chain.
 
 ### 3. Create tables
 
@@ -77,8 +88,9 @@ npm run dev
 ## Verifying it works
 
 ```bash
-npm test                      # 95 assertions: scorers, grounding property tests, known-bad
+npm test                      # 49 suites: scorers, grounding property tests, known-bad
                               # documents, importer chunking and merge
+npm run typecheck             # the app, and the tests and scripts (both run in CI)
 npx tsx scripts/smoke.mts     # 18 checks: scorers, grounding guard, retrieval, sync, DOCX round-trip
 npx tsx scripts/ai-check.mts  # confirms your AI provider chain actually responds
 ```
@@ -120,7 +132,10 @@ scores. Nothing shown is simulated.
 
 Providers are tried in order and fall back on failure or rate-limit:
 
-**Gemini → Groq → DeepInfra → Together AI → Fireworks AI**
+**Fireworks AI → Groq → Together AI → DeepInfra → Gemini**
+
+(`/api/health` with the `x-cron-secret` header reports the live order and the effective
+time limits.)
 
 Only providers with a key present are included, so it works with whatever subset you
 have. Every model ID is overridable by env var — deliberately, because these providers
@@ -131,8 +146,9 @@ Structured output has two paths: native schema mode where the provider supports 
 a JSON-text path with Zod validation where it doesn't. Several open-weight models can't
 do schema-constrained output, and this keeps them usable without weakening validation.
 
-Hard cost caps apply per draft and per day, enforced regardless of whether the score has
-converged — a stuck loop can't quietly run up a bill.
+Hard cost caps apply per draft, per user per day, and for the whole deployment per day,
+enforced regardless of whether the score has converged — a stuck loop can't quietly run
+up a bill, and neither can a stranger signing up.
 
 ---
 
@@ -153,7 +169,7 @@ lib/
   server/     database access, dashboard queries
 scripts/      smoke tests
 tests/        scorer units, grounding property tests, known-bad documents (`npm test`)
-netlify/      scheduled function: daily portfolio-freshness check
+netlify/      scheduled functions: daily portfolio-freshness check, hourly failure alert
 specs/        requirements, design, tasks
 ```
 
@@ -161,21 +177,24 @@ specs/        requirements, design, tasks
 
 ## Deploying
 
-### Use Vercel, not Netlify
+### Either host works, and the difference is the clock
 
-This is a hosting constraint, not a preference. A draft runs job extraction, retrieval,
-up to four scoring iterations, then PDF/DOCX rendering and a round-trip parse — routinely
-30–90 seconds. The draft route declares `maxDuration = 300`.
+This runs in production on Netlify's free plan, where a function is killed at 30
+seconds. That is the whole reason for the time budget in `lib/ai/budget.ts`: the draft
+stops early with the best resume it has rather than being killed with nothing. Set
+`MAX_DRAFT_SECONDS` to your host's real limit minus a margin — read it from your own
+function logs, not from the docs.
 
-| | Vercel | Netlify |
+| | Vercel | Netlify free |
 | --- | --- | --- |
-| Max function duration | 300s (default on Fluid Compute) | 10s sync, 26s paid, 60s streaming |
-| SSE streaming | Works on the Node runtime | Capped at 60s, stops at 10s if the sync limit is hit |
-| Node APIs for PDF/DOCX | Yes | Yes |
+| Max function duration | 300s | 30s, measured |
+| Effect here | all four scoring iterations | two or three, and it says so |
 
-Netlify would time out mid-draft on almost every real resume.
+On Netlify, `netlify.toml` pins Node 22 and the Next.js runtime plugin, and the two
+scheduled functions in `netlify/` need `CRON_SECRET` set. The `maxDuration` exports in
+the routes are Vercel's; Netlify ignores them.
 
-### Steps
+### Steps (Vercel)
 
 1. **Push to GitHub**, then import the repo at [vercel.com/new](https://vercel.com/new).
    Next.js is detected automatically — no build configuration needed.

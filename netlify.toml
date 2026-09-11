@@ -1,13 +1,16 @@
 # Netlify configuration.
 #
-# Read this before deploying here: Netlify caps streaming functions at 60 seconds
-# (10s for non-streaming, 26s on paid plans). A draft runs job extraction, retrieval,
-# up to four scoring iterations, then PDF/DOCX rendering — so the app sets a 50s
-# internal deadline when NETLIFY is present and returns the best resume it has rather
-# than being killed mid-response. Vercel allows 300s and needs no such compromise.
+# Read this before deploying here: this site is on the free plan, and its function log
+# shows drafts killed at exactly 30,000 ms. A draft runs job extraction, retrieval, up to
+# four scoring iterations, then PDF/DOCX rendering, so the app keeps its own clock and
+# returns the best resume it has rather than being killed mid-response.
 #
-# The trade-off is real: on Netlify a difficult draft may stop after 2-3 scoring
-# iterations instead of 4, and report that it did.
+# That clock is 20 seconds, from MAX_DRAFT_SECONDS in the site environment. The default
+# in lib/ai/budget.ts is the same 20 seconds, because NETLIFY is set during the BUILD and
+# not in the function runtime - a check for it never fires where it matters.
+#
+# The trade-off is real: a difficult draft may stop after 2-3 scoring iterations instead
+# of 4, and report that it did.
 
 [build]
   command = "npm run build"

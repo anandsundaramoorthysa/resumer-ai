@@ -1,5 +1,12 @@
 # Personal Resume Engine — Architecture Plan
 
+> **Historical.** This is the plan the project started from, kept for the reasoning behind
+> the decisions. Several things here were never built or were replaced: sign-in is Auth.js
+> with GitHub, Google and passwords rather than Clerk, retrieval is lexical rather than
+> pgvector embeddings, files are rendered on demand rather than stored in blob storage, and
+> a LinkedIn export importer exists after all. `specs/` and `README.md` describe what the
+> app actually does; `STEWARD.md` covers the profile assistant.
+
 **Goal:** One system that stores your complete professional profile once, accepts *any* job description format (formal JD, LinkedIn post text, a forwarded blurb, a job title alone), and generates a role-tailored, ATS-safe resume (PDF + DOCX) — without inventing facts and without you retyping anything per application.
 
 Decisions locked in from our discussion:

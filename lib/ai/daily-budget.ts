@@ -39,6 +39,37 @@ export async function readDailyUsage(userId: string, day = today()): Promise<Bud
 }
 
 /**
+ * What everyone together may spend in a day, across every provider key.
+ *
+ * The per-user ceiling is 400 calls, sign-up is open and a Google account is free, so a
+ * handful of accounts could exhaust the shared provider quotas — or the owner's bill —
+ * without any one of them passing their own limit. This is the ceiling on the whole app.
+ * Both halves are overridable, because the right number depends on who is paying.
+ */
+export const APP_DAILY_LIMITS: BudgetLimits = {
+  maxCalls: Number(process.env.APP_DAILY_MAX_CALLS ?? 2_000),
+  maxTokens: Number(process.env.APP_DAILY_MAX_TOKENS ?? 20_000_000),
+};
+
+/** Everything every user has spent today. One aggregate over one day's rows. */
+export async function readAppUsage(day = today()): Promise<BudgetUsage> {
+  const [row] = await db
+    .select({
+      calls: sql<number>`coalesce(sum(${aiUsageDaily.calls}), 0)::int`,
+      tokens: sql<number>`coalesce(sum(${aiUsageDaily.tokens}), 0)::int`,
+    })
+    .from(aiUsageDaily)
+    .where(eq(aiUsageDaily.day, day));
+  return { calls: row?.calls ?? 0, tokens: row?.tokens ?? 0 };
+}
+
+/** True while the app is inside its shared allowance; logs once it passes 80%. */
+export function appBudgetState(usage: BudgetUsage, limits: BudgetLimits = APP_DAILY_LIMITS) {
+  const share = Math.max(usage.calls / limits.maxCalls, usage.tokens / limits.maxTokens);
+  return { share, exhausted: share >= 1, warn: share >= 0.8 };
+}
+
+/**
  * Throws if this user has already spent their day.
  *
  * Called before a run starts rather than before every provider call: one round trip per
@@ -49,7 +80,19 @@ export async function assertDailyBudget(
   userId: string,
   limits: BudgetLimits = DAILY_BUDGET,
 ): Promise<void> {
-  const usage = await readDailyUsage(userId);
+  const [usage, app] = await Promise.all([readDailyUsage(userId), readAppUsage()]);
+
+  const state = appBudgetState(app);
+  if (state.exhausted) {
+    throw new BudgetExceededError(
+      'daily',
+      "the whole app's AI allowance for today is spent — it resets at midnight UTC",
+    );
+  }
+  if (state.warn) {
+    // Reaches the hourly alert's inbox through Sentry's console capture.
+    console.error(`[budget] the app has used ${Math.round(state.share * 100)}% of today's shared AI allowance`);
+  }
 
   if (usage.calls >= limits.maxCalls) {
     throw new BudgetExceededError('daily', `${usage.calls}/${limits.maxCalls} calls today`);
