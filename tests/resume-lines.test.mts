@@ -5,6 +5,7 @@
 
 import { suite, test, assert } from './harness.mjs';
 import {
+  educationFact,
   educationLine,
   educationYears,
   formatSkillRow,
@@ -14,7 +15,7 @@ import {
 } from '../lib/generate/resume-lines';
 import { lengthVerdict } from '../lib/quality/length';
 import { isGrounded } from '../lib/generate/grounding';
-import { summaryGroundingSource } from '../lib/generate/summary';
+import { groundedSentences, summaryGroundingSource } from '../lib/generate/summary';
 import { canonicalSkillName } from '../lib/skills/identity';
 import type { JobRequirement, ProfileRecord, ResumeDocument } from '../lib/types';
 
@@ -165,6 +166,19 @@ suite('the summary\'s grounding', () => {
     assert.ok(isGrounded('Data Science student seeking a Data Analyst Intern role.', source));
     assert.ok(!isGrounded('Expert in Tableau.', source));
   });
+
+  test('a sentence claiming posting terms the facts lack is dropped; the true ones stay', () => {
+    // The EA summary's closing sentence, verbatim.
+    const source = summaryGroundingSource(facts, { ...job, company: 'Electronic Arts (EA) India' });
+    const terms = ['player behavior', 'monetization', 'Python', 'SQL'];
+    const kept = groundedSentences(
+      'M.Sc. Data Science student skilled in Python and SQL. Ready to deliver data-driven insights on player behavior, engagement, and monetization for EA’s product analytics.',
+      source,
+      terms,
+    );
+    assert.equal(kept, 'M.Sc. Data Science student skilled in Python and SQL.');
+    assert.equal(groundedSentences('Expert in player behavior.', source, terms), null);
+  });
 });
 
 suite('skill name casing', () => {
@@ -197,5 +211,21 @@ suite('two pages when the required sections need them', () => {
 
   test('but optional projects cannot buy the second page', () => {
     assert.equal(lengthVerdict(doc([lines(20, 'experience'), lines(20, 'projects')])), 'long');
+  });
+});
+
+suite('summary facts', () => {
+  const msc = { credential: 'M.Sc. Data Science', institution: 'Loyola College', startDate: '2025-06', endDate: '2027' };
+  const now = new Date('2026-09-11');
+
+  test('a degree that has not ended says so — the summary called it "Recent graduate"', () => {
+    assert.equal(educationFact(msc, now), 'M.Sc. Data Science — Loyola College (2025 – 2027, in progress, not yet completed)');
+  });
+
+  test('a finished degree carries only its years', () => {
+    assert.equal(
+      educationFact({ ...msc, credential: 'B.Sc. Computer Science', startDate: '2022-08', endDate: '2025-04' }, now),
+      'B.Sc. Computer Science — Loyola College (2022 – 2025)',
+    );
   });
 });

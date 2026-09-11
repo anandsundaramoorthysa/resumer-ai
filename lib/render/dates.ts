@@ -39,9 +39,17 @@ export function formatDateRange(
   return `${s} – ${e}`; // en dash
 }
 
-/** Detects numeric date patterns that must never reach a rendered document. */
+/**
+ * Detects numeric date patterns that must never reach a rendered document.
+ *
+ * A date repeats its separator — 07/05/2023, 7-5-23, 12.03.2024 — so the first form
+ * requires the same one twice (`\1`). It used to accept any mix, which read a grade of
+ * "7.5 / 10" as day 7, month 5, year 10: the owner's B.Sc. line failed `spelled-out-dates`
+ * on every EA draft, capping formatting at 10/11 (0.27 of the overall score), and no
+ * revision could clear it because there was no date there to rewrite.
+ */
 export const NUMERIC_DATE_PATTERN =
-  /\b\d{1,2}\s*[\/\-.]\s*\d{1,2}\s*[\/\-.]\s*\d{2,4}\b|\b\d{1,2}\s*\/\s*\d{4}\b/;
+  /\b\d{1,2}\s*([\/\-.])\s*\d{1,2}\s*\1\s*\d{2,4}\b|\b\d{1,2}\s*\/\s*\d{4}\b/;
 
 export function containsNumericDate(text: string): boolean {
   return NUMERIC_DATE_PATTERN.test(text);

@@ -118,6 +118,14 @@ export const CATEGORY_PROFILES: Record<RoleCategory, CategoryProfile> = {
       'sql', 'python', 'etl', 'data warehouse', 'bigquery', 'snowflake', 'dbt', 'airflow',
       'tableau', 'power bi', 'looker', 'pandas', 'spark', 'analytics', 'dashboard',
       'data pipeline', 'reporting', 'statistics', 'visualization',
+      // The analysis half of the category. The list above is data engineering and BI
+      // only, so a data-science profile had no on-domain vocabulary at all: on the EA
+      // analyst posting "Machine Learning", "Time Series" and "Exploratory Data Analysis"
+      // scored the same domain fit as "Tailwind CSS".
+      'data analysis', 'exploratory data analysis', 'data science', 'machine learning',
+      'regression', 'classification', 'clustering', 'time series', 'forecasting',
+      'a/b testing', 'experimentation', 'numpy', 'scikit-learn', 'pyspark', 'r',
+      'matplotlib', 'seaborn', 'excel', 'jupyter',
     ],
   },
   design: {

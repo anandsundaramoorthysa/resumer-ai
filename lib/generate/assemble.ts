@@ -40,6 +40,7 @@ import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
 import { draftSummary } from './summary';
 import {
+  educationFact,
   educationLine,
   educationYears,
   formatSkillRow,
@@ -422,7 +423,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     ...rolesByRecency(roles).map(
       (r) => `${r.title} at ${r.company} (${formatDateRange(r.startDate, r.endDate)})`,
     ),
-    ...education.map((e) => `${e.credential}${e.field ? `, ${e.field}` : ''} — ${e.institution}`),
+    ...education.map((e) => educationFact(e)),
     `Skills: ${skills.map((s) => s.name).join(', ')}`,
     ...trimmedBullets.map((b) => b.text),
     ...projects.map((p) => `${p.name}: ${p.description ?? ''}`),
@@ -457,7 +458,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
         const source = trimmedBullets.find((t) => t.id === b.id);
         if (!source) continue;
         // Verify, don't trust (grounding.ts).
-        const verdict = acceptRewriteOrFallback(b.rewritten, source.text);
+        const verdict = acceptRewriteOrFallback(b.rewritten, source.text, job.atsKeywords);
         rewrites.set(source.id, verdict.text);
         if (verdict.accepted) {
           stats.accepted += 1;

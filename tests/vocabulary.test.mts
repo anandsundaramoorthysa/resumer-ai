@@ -7,7 +7,7 @@
  * profile had no entry for, because the old check also tested keyword.includes(term).
  */
 
-import { holdsKeyword, textHoldsKeyword } from '../lib/quality/vocabulary';
+import { containsPhrase, holdsKeyword, textHoldsKeyword } from '../lib/quality/vocabulary';
 import { suite, test, assert } from './harness.mjs';
 
 suite('vocabulary', () => {
@@ -95,5 +95,11 @@ suite('vocabulary', () => {
     }
     // ...while the stack's own skills still register.
     assert(holdsKeyword(profile, 'HTML'), 'HTML is genuinely held');
+  });
+
+  test('a term is found even when it first appears inside a longer word', () => {
+    assert(containsPhrase('postgresql and sql', 'sql'), 'the second "sql" is a whole word');
+    assert(textHoldsKeyword('Programming Languages: Python, R', 'R'), 'the first "r" is in "programming"');
+    assert(!containsPhrase('postgresql and mysql', 'sql'), 'still never inside a word');
   });
 });

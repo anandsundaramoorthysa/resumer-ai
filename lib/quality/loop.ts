@@ -71,6 +71,8 @@ export interface ScoreBreakdown {
    * reconstructed.
    */
   weakBullets: EvidenceResult['weakBullets'];
+  /** True when the evidence call could not finish, so `overall` is a floor, not a grade. */
+  evidenceUngraded?: boolean;
 }
 
 /**
@@ -84,6 +86,12 @@ export const MIN_MEANINGFUL_GAIN = 0.05;
 
 /** Consecutive iterations that may fail to move the score before the loop gives up. */
 const MAX_STAGNANT_ITERATIONS = 2;
+
+/**
+ * How an ungraded pass announces itself in its critiques — which is also how a later
+ * request recognises a saved result as a floor, since the result is all it is handed.
+ */
+const UNGRADED = 'Evidence was not graded';
 
 /** One scoring pass. No mutation, no revision — just measurement. */
 export async function scoreDocument(
@@ -131,7 +139,7 @@ export async function scoreDocument(
   if (evidenceUngraded) {
     critiques.push({
       subScore: 'evidence',
-      message: `Evidence was not graded: ${evidenceUngraded} It is counted as zero rather than guessed, so the overall score here is a floor, not a verdict.`,
+      message: `${UNGRADED}: ${evidenceUngraded} It is counted as zero rather than guessed, so the overall score here is a floor, not a verdict.`,
     });
   }
 
@@ -208,7 +216,12 @@ export async function scoreDocument(
   const roleTitle = doc.jobRequirement?.roleTitle ?? '';
   const genuineGaps = skills.genuineGaps.filter((g) => !isRoleTitleTerm(g, roleTitle));
 
-  return { result, genuineGaps, weakBullets: evidence.weakBullets };
+  return {
+    result,
+    genuineGaps,
+    weakBullets: evidence.weakBullets,
+    evidenceUngraded: evidenceUngraded !== null,
+  };
 }
 
 /**
@@ -290,7 +303,12 @@ export async function runQualityGate(args: {
   let best: Best | null = resume
     ? {
         doc: args.document,
-        breakdown: { result: resume, genuineGaps: saved?.genuineGaps ?? [], weakBullets: [] },
+        breakdown: {
+          result: resume,
+          genuineGaps: saved?.genuineGaps ?? [],
+          weakBullets: [],
+          evidenceUngraded: resume.critiques.some((c) => c.message.startsWith(UNGRADED)),
+        },
       }
     : null;
   const history: GateOutcome['history'] = saved ? [...saved.history] : [];
@@ -395,11 +413,19 @@ export async function runQualityGate(args: {
       // not revisions. The gain is measured against the previous iteration rather than
       // against the best seen, because a score that dips and recovers is still movement —
       // it is the flat line that says the loop has nothing left to try.
-      if (previousOverall !== null) {
-        const gain = breakdown.result.overall - previousOverall;
-        stagnant = gain >= MIN_MEANINGFUL_GAIN ? 0 : stagnant + 1;
+      //
+      // A pass whose evidence could not be graded is not a measurement, so it neither counts
+      // as a stall nor becomes the line the next pass is measured against. It used to do
+      // both: on the EA draft a provider timeout scored a pass 7.00 against the 7.64 before
+      // it — evidence counted as zero, not graded lower — and that "drop" was the second
+      // stall that ended the loop for good.
+      if (!breakdown.evidenceUngraded) {
+        if (previousOverall !== null) {
+          const gain = breakdown.result.overall - previousOverall;
+          stagnant = gain >= MIN_MEANINGFUL_GAIN ? 0 : stagnant + 1;
+        }
+        previousOverall = breakdown.result.overall;
       }
-      previousOverall = breakdown.result.overall;
 
       if (stagnant >= MAX_STAGNANT_ITERATIONS) {
         return seal(
@@ -440,6 +466,15 @@ export async function runQualityGate(args: {
 
     // A revision that changed nothing cannot produce a different score, so scoring it
     // again buys a model call and a wait in exchange for the number we already have.
+    //
+    // Unless the number in hand is a floor. With evidence ungraded there are no evidence
+    // critiques, so the revision has nothing to act on and changes nothing by
+    // construction — and this used to end the loop for good on a score that was never
+    // measured: the EA draft stopped at "7.0/10 … identical document" with evidence
+    // ungraded on every pass, canContinue false, when grading it once gave 7.7. Scoring
+    // the same document again is the one thing that can still change the answer; the
+    // per-request and total caps above still bound it.
+    if (!revision.changed && breakdown.evidenceUngraded) continue;
     if (!revision.changed) {
       return seal(
         haltForNoProgress(

@@ -14,6 +14,7 @@ import { scoreKeywordCoverage, KEYWORD_GATE_THRESHOLD } from '@/lib/quality/keyw
 import { scoreFormatting } from '@/lib/quality/formatting';
 import { combinedFormattingScore, scoreLength } from '@/lib/quality/length';
 import { scoreSkillsCompleteness, profileVocabulary } from '@/lib/quality/skills';
+import { evidenceLines, GRADE_VALUE, scoreFromGrades } from '@/lib/quality/evidence';
 import type {
   JobRequirement,
   ProfileRecord,
@@ -620,6 +621,47 @@ suite('skills completeness (REQ-5.2, weight 0.40)', () => {
     assert.equal(r.missingButHeld.length, 0);
     assert.equal(r.genuineGaps.length, 4);
     assert.equal(r.score, 1);
+  });
+});
+
+/* -------------------------------------------------------------- evidence ---- */
+
+suite('evidence arithmetic (REQ-5.2, weight 0.30)', () => {
+  test('grades only Experience and Projects lines — never the summary', () => {
+    const lines = evidenceLines(doc());
+    assert.equal(lines.length, 8); // 5 bullets + 3 project lines
+    assert.ok(lines.every((l) => l.sectionKey === 'experience' || l.sectionKey === 'projects'));
+    assert.deepEqual(lines.slice(0, 2).map((l) => l.id), ['L1', 'L2']);
+  });
+
+  test('specific-but-unmeasured lines score above duties and below outcomes', () => {
+    const lines = evidenceLines(doc());
+    const all = (grade: 'strong' | 'partial' | 'weak') =>
+      scoreFromGrades(lines, lines.map((l) => ({ id: l.id, grade, problem: '' }))).score;
+    assert.equal(all('weak'), 0);
+    assert.equal(all('strong'), 1);
+    assert.ok(Math.abs(all('partial') - GRADE_VALUE.partial) < 1e-9);
+    // The bar this weight is chosen against: no outcome anywhere cannot clear 8.5, even
+    // with formatting and skills perfect.
+    assert.ok((0.3 + 0.4 + 0.3 * GRADE_VALUE.partial) * 10 < 8.5);
+  });
+
+  test('an ungraded line counts as weak, and weak lines carry our text, not the model echo', () => {
+    const lines = evidenceLines(doc());
+    const r = scoreFromGrades(lines, [{ id: 'l1', grade: 'strong', problem: '' }]);
+    assert.equal(r.score, 1 / lines.length);
+    assert.equal(r.weakBullets.length, lines.length - 1);
+    assert.equal(r.weakBullets[0].text, lines[1].text);
+    assert.equal(r.weakBullets[0].sectionKey, 'experience');
+  });
+
+  test('a line a revision already failed on is scored but not reported again', () => {
+    const lines = evidenceLines(doc());
+    const grades = lines.map((l) => ({ id: l.id, grade: 'weak' as const, problem: 'no result' }));
+    const r = scoreFromGrades(lines, grades, [lines[0].text]);
+    assert.equal(r.score, 0);
+    assert.ok(!r.weakBullets.some((w) => w.text === lines[0].text));
+    assert.equal(r.weakBullets.length, lines.length - 1);
   });
 });
 
