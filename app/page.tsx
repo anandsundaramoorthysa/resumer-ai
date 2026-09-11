@@ -29,15 +29,14 @@ export default async function HomePage() {
         <div className="mx-auto max-w-lg rounded-2xl border border-line bg-surface p-8 text-center">
           <h1 className="font-display text-3xl">One profile. Every role.</h1>
           <p className="mt-3 text-sm text-muted">
-            Sign in with GitHub to connect your portfolio and start drafting. The same
-            sign-in grants the repo access used to keep your profile current, so there is
-            no separate token to manage.
+            Build one profile — import your resume, connect a GitHub portfolio, or add it
+            by hand — and draft a tailored, ATS-ready resume for any job.
           </p>
           <Link
             href="/sign-in"
             className="mt-6 inline-flex min-h-11 items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
           >
-            Sign in with GitHub
+            Sign in or create account
           </Link>
         </div>
       </Shell>
