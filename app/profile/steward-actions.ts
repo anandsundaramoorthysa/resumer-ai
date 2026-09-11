@@ -47,6 +47,8 @@ function sentence(err: unknown): string {
   if (err instanceof BudgetExceededError && err.scope === 'daily') {
     return 'Today’s AI allowance is used up. Checks that need no AI still run; try the rest tomorrow.';
   }
+  // Too fast, or an account still waiting for approval: each already says what to do.
+  if (err instanceof BudgetExceededError && (err.scope === 'rate' || err.scope === 'approval')) return err.message;
   if (err instanceof Error && WRITER_MESSAGES.test(err.message)) return err.message;
   console.error('[steward-actions]', err);
   return 'That did not work just now. Try again in a moment.';

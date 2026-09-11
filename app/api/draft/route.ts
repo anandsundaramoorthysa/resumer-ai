@@ -22,6 +22,9 @@ import { readJobSubmission, jsonError } from '@/lib/server/job-submission';
 import { eventStream } from '@/lib/server/sse';
 import { AssessmentTokenError, openAssessment } from '@/lib/fit/token';
 
+import { BudgetExceededError } from '@/lib/ai/budget';
+import { userMessage } from '@/lib/server/user-message';
+
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
@@ -142,14 +145,18 @@ export async function POST(req: NextRequest) {
         // or a token fragment arriving in the browser over an SSE frame. So the generic
         // branch is logged where logs are read and answered with one sentence.
         failure = { error: err };
-        if (!(err instanceof PipelineError)) {
+        // A budget refusal is an answer for the user (see the fit-check route), not a crash.
+        if (!(err instanceof PipelineError) && !(err instanceof BudgetExceededError)) {
           console.error('[draft] pipeline failed for user', userId, err);
         }
         send('error', {
           message:
             err instanceof PipelineError
               ? err.message
-              : 'The draft failed unexpectedly. Nothing was saved — try again, and if it keeps happening the server log has the detail.',
+              : userMessage(
+                  err,
+                  'The draft failed unexpectedly. Nothing was saved — try again, and if it keeps happening the server log has the detail.',
+                ),
           kind: err instanceof PipelineError ? err.kind : 'generic',
         });
       }

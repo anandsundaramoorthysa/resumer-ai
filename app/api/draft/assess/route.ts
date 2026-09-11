@@ -23,6 +23,9 @@ import { readJobSubmission, jsonError } from '@/lib/server/job-submission';
 import { eventStream } from '@/lib/server/sse';
 import { sealAssessment } from '@/lib/fit/token';
 
+import { BudgetExceededError } from '@/lib/ai/budget';
+import { userMessage } from '@/lib/server/user-message';
+
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
@@ -73,14 +76,18 @@ export async function POST(req: NextRequest) {
         // Same rule as the draft route: a PipelineError was written for the user, and
         // anything else was written for a developer and is logged rather than streamed.
         failure = { error: err };
-        if (!(err instanceof PipelineError)) {
+        // A budget refusal — the daily limit, the burst limit, an account still waiting
+        // for approval — is an answer written for the user, not a crash. It used to fall
+        // into the generic branch, so someone waiting for approval was told "the fit
+        // check failed unexpectedly, try again", which they would, forever.
+        if (!(err instanceof PipelineError) && !(err instanceof BudgetExceededError)) {
           console.error('[assess] fit check failed for user', userId, err);
         }
         send('error', {
           message:
             err instanceof PipelineError
               ? err.message
-              : 'The fit check failed unexpectedly. Nothing was saved — try again in a minute.',
+              : userMessage(err, 'The fit check failed unexpectedly. Nothing was saved — try again in a minute.'),
           kind: err instanceof PipelineError ? err.kind : 'generic',
         });
       }
