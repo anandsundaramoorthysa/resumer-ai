@@ -153,7 +153,9 @@ export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
       }
     }
 
-    for (const group of section.groups ?? []) {
+    for (const [gi, group] of (section.groups ?? []).entries()) {
+      // A run of one-line entries sits closer, as in the PDF.
+      const inRun = gi > 0 && group.items.length === 0 && section.groups![gi - 1].items.length === 0;
       // Title left, dates right-aligned on the same line.
       const titleRuns: TextRun[] = [body(group.title, { bold: true })];
       if (group.subtitle) titleRuns.push(body(` — ${group.subtitle}`));
@@ -162,7 +164,7 @@ export async function renderResumeDocx(doc: ResumeDocument): Promise<Buffer> {
         new Paragraph({
           children: titleRuns,
           tabStops: [{ type: TabStopType.RIGHT, position: RIGHT_EDGE }],
-          spacing: { before: 120, after: 20 },
+          spacing: { before: inRun ? 40 : 120, after: 20 },
         }),
       );
       for (const item of group.items) {

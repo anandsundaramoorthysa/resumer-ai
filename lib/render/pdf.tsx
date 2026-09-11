@@ -275,11 +275,14 @@ function ResumePdf({ doc }: { doc: ResumeDocument }) {
         <ContactBlock doc={doc} />
 
         {doc.sections.map((section) => (
-          <View key={section.key} wrap={false}>
+          // Sections flow across pages; a whole section kept in one piece pushed a
+          // long Experience to page 2 and left most of page 1 blank. What stays
+          // together is each role with its own bullets, and a heading with what follows.
+          <View key={section.key}>
             {/* The heading is coerced to the allow-list in both modes. Presentation mode
                 relaxes the visual rules, never the vocabulary — a heading a parser can't
                 place is a bad heading whoever is reading it. */}
-            <Text style={headingStyle}>
+            <Text style={headingStyle} minPresenceAhead={48}>
               {coerceHeading(section.key, section.heading).toUpperCase()}
             </Text>
 
@@ -302,8 +305,10 @@ function ResumePdf({ doc }: { doc: ResumeDocument }) {
             )}
 
             {(section.groups ?? []).map((group, gi) => (
-              <View key={gi}>
-                <View style={styles.groupTitleRow}>
+              <View key={gi} wrap={false}>
+                {/* One-line entries in a run (volunteer roles, roles without bullets)
+                    sit closer, so they read as a list rather than as sparse blocks. */}
+                <View style={[styles.groupTitleRow, gi > 0 && group.items.length === 0 && section.groups![gi - 1].items.length === 0 ? { marginTop: 3 } : {}]}>
                   <Text style={styles.groupTitle}>
                     {group.title}
                     {group.subtitle ? (
