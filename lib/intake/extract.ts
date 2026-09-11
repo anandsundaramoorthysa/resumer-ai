@@ -183,7 +183,7 @@ export async function extractJobRequirement(
     requiredSkills: dedupe(data.requiredSkills),
     preferredSkills: dedupe(data.preferredSkills),
     responsibilities: data.responsibilities,
-    atsKeywords: stripAdministrativeKeywords(dedupe(data.atsKeywords), data.company),
+    atsKeywords: stripAdministrativeKeywords(dedupe(data.atsKeywords), data.company, data.roleTitle),
     companyContext: data.companyContext,
     tone: data.tone,
     yearsOfExperienceRequired: data.yearsOfExperienceRequired,
@@ -250,7 +250,11 @@ function normKeyword(s: string): string {
   return s.toLowerCase().replace(/[.,;:!?]+$/, '').replace(/\s+/g, ' ').trim();
 }
 
-export function stripAdministrativeKeywords(keywords: string[], company?: string): string[] {
+export function stripAdministrativeKeywords(
+  keywords: string[],
+  company?: string,
+  roleTitle = '',
+): string[] {
   // The employer's own name is already a column of its own, and no resume is expected to
   // recite it. Word-level containment so "EA" and "Electronic Arts" both go when the
   // company is "Electronic Arts (EA) India", without touching an unrelated keyword that
@@ -268,12 +272,49 @@ export function stripAdministrativeKeywords(keywords: string[], company?: string
     if (ADMIN_TERMS.has(k)) return false;
     if (ADMIN_PATTERNS.some((re) => re.test(k))) return false;
 
+    if (roleTitle && isSomeoneElsesTitle(k, roleTitle)) return false;
+
     if (companyWords.size > 0) {
       const words = k.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
       if (words.length > 0 && words.every((w) => companyWords.has(w))) return false;
     }
     return true;
   });
+}
+
+/**
+ * Job titles that belong to other people.
+ *
+ * A posting describes the team the candidate would join — "you will work alongside
+ * analytics managers and senior analysts" — and both of those came back as ATS keywords
+ * on the real EA posting. A candidate cannot hold someone else's job title, so each one is
+ * a permanent subtraction from a coverage score that is already a pass/fail gate. The
+ * posting's OWN title is the exception: it is the one title a resume is expected to echo.
+ *
+ * Matched on the last word, so "analytics manager" goes and "stakeholder management",
+ * "engineering", "product analytics" and "data science" stay.
+ */
+const PERSON_TITLE_HEADS = new Set([
+  'manager', 'managers', 'analyst', 'analysts', 'engineer', 'engineers', 'scientist',
+  'scientists', 'developer', 'developers', 'designer', 'designers', 'architect',
+  'architects', 'consultant', 'consultants', 'specialist', 'specialists', 'executive',
+  'executives', 'officer', 'officers', 'administrator', 'administrators', 'associate',
+  'associates', 'director', 'directors', 'lead', 'leads', 'head', 'heads', 'intern',
+  'interns', 'trainee', 'trainees', 'recruiter', 'recruiters', 'stakeholder',
+  'stakeholders', 'colleague', 'colleagues', 'teammate', 'teammates', 'mentor', 'mentors',
+]);
+
+export function isSomeoneElsesTitle(keyword: string, roleTitle: string): boolean {
+  const words = normKeyword(keyword).replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+  const head = words[words.length - 1];
+  if (!head || !PERSON_TITLE_HEADS.has(head)) return false;
+  // A single bare title word ("analyst") is ambiguous enough to be the role itself.
+  const role = normKeyword(roleTitle).replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+  if (role.length === 0) return false;
+  // The posting's own title, however much of it the keyword repeats: "Product Analyst
+  // Intern", "Product Analyst" and "analyst" all describe the job being applied for.
+  const isOwn = words.every((w) => role.includes(w)) || role.every((w) => words.includes(w));
+  return !isOwn;
 }
 
 function dedupe(items: string[]): string[] {

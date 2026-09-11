@@ -113,3 +113,30 @@ suite('what a candidate can demonstrate is kept', () => {
     assert.deepEqual(strip(['', '   ', 'SQL']), ['SQL']);
   });
 });
+
+suite("other people's job titles", () => {
+  const ea = (kw: string) => stripAdministrativeKeywords([kw], 'Electronic Arts (EA) India', 'Product Analyst Intern').length === 1;
+
+  test('the team the candidate would work alongside is not a keyword', () => {
+    // Both came back from the real EA posting, which describes mentoring by them.
+    assert(!ea('analytics manager'), 'analytics manager');
+    assert(!ea('senior analyst'), 'senior analyst');
+    assert(!ea('engineering manager'), 'engineering manager');
+  });
+
+  test("the posting's own title stays, in whatever form it appears", () => {
+    assert(ea('Product Analyst Intern'), 'the full title');
+    assert(ea('Product Analyst'), 'part of it');
+    assert(ea('analyst'), 'the bare noun, which is this job');
+  });
+
+  test('skills that merely end in a title-like word are untouched', () => {
+    for (const term of ['stakeholder management', 'data science', 'product analytics', 'engineering', 'leadership']) {
+      assert(ea(term), term);
+    }
+  });
+
+  test('with no role title known, nothing is dropped by this rule', () => {
+    assert(stripAdministrativeKeywords(['analytics manager'], undefined, '').length === 1, 'kept');
+  });
+});

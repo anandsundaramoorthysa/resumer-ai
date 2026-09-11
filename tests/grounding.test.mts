@@ -22,6 +22,7 @@ import {
   acceptRewriteOrFallback,
   extractNumbers,
   extractProperNouns,
+  findScopeInflation,
   findUngroundedTokens,
   isGrounded,
 } from '@/lib/generate/grounding';
@@ -433,3 +434,29 @@ suite('grounding, specific cases', () => {
 });
 
 report('grounding');
+
+suite('a rewrite may not claim more of the work than the source did', () => {
+  const refused = (source: string, candidate: string) => findScopeInflation(candidate, source).length > 0;
+
+  test('dropping the hedge is a fabrication the nouns cannot show', () => {
+    assert(refused('Helped clients build a churn dashboard', 'Built a churn dashboard for clients'), 'helped');
+    assert(refused('Contributed to an open-source parser', 'Maintained an open-source parser'), 'contributed to');
+    assert(refused('Assisted with the migration to Postgres', 'Delivered the migration to Postgres'), 'assisted');
+  });
+
+  test('adding a word of ownership the source never used is refused', () => {
+    assert(refused('Built a churn dashboard for the sales team', 'Led the churn dashboard for the sales team'), 'led');
+    assert(refused('Wrote the ingestion scripts', 'Owned the ingestion pipeline'), 'owned');
+  });
+
+  test('keeping the hedge, or the ownership the source already stated, is fine', () => {
+    assert(!refused('Helped clients build a churn dashboard', 'Helped clients build a churn dashboard in Streamlit'), 'hedge kept');
+    assert(!refused('Led the migration to Postgres', 'Led the migration to PostgreSQL'), 'already led it');
+    assert(!refused('Built a churn dashboard', 'Built a churn dashboard that cut reporting time'), 'ordinary tightening');
+  });
+
+  test('the whole guard refuses it, not just this rule', () => {
+    const r = acceptRewriteOrFallback('Led the rollout of the billing service', 'Built the billing service');
+    assert(!r.accepted && r.text === 'Built the billing service', 'the user own words are printed');
+  });
+});

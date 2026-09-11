@@ -59,8 +59,55 @@ export function extractProperNouns(text: string): string[] {
 }
 
 export interface GroundingViolation {
-  kind: 'number' | 'entity' | 'keyword';
+  kind: 'number' | 'entity' | 'keyword' | 'scope';
   token: string;
+}
+
+/**
+ * Words that say the work was shared, or somebody else's to begin with.
+ *
+ * "Helped clients build a dashboard" is a different claim from "Built a dashboard for
+ * clients", and the second is the one a rewrite reaches for. Numbers and names are
+ * unchanged by that edit, so the checks above see nothing: the fabrication is in the verb.
+ */
+const HEDGES = [
+  'helped', 'assisted', 'supported', 'contributed to', 'participated in', 'collaborated on',
+  'collaborated with', 'shadowed', 'observed', 'was part of', 'were part of', 'part of a team',
+  'under the guidance', 'under guidance', 'learning', 'learned', 'studied', 'explored',
+];
+
+/** Verbs that claim the work was the writer's to direct. */
+const OWNERSHIP = [
+  'led', 'leading', 'owned', 'owning', 'managed', 'managing', 'spearheaded', 'headed',
+  'directed', 'oversaw', 'overseeing', 'supervised', 'founded', 'architected', 'mentored',
+  'coached', 'drove', 'driving', 'established', 'pioneered', 'orchestrated',
+];
+
+const saysAny = (text: string, phrases: readonly string[]): string | null => {
+  for (const phrase of phrases) {
+    if (new RegExp(`(?:^|[^\\p{L}])${phrase.replace(/ /g, '\\s+')}(?![\\p{L}])`, 'iu').test(text)) return phrase;
+  }
+  return null;
+};
+
+/**
+ * Whether the rewrite claims more of the work than the source did — NFR-8 applied to the
+ * verb rather than the nouns.
+ *
+ * Two ways that happens: the source hedged and the rewrite dropped the hedge, or the
+ * rewrite added a word of ownership the source never used. Both are refused, and the
+ * user's own sentence is printed instead.
+ */
+export function findScopeInflation(candidate: string, source: string): GroundingViolation[] {
+  const out: GroundingViolation[] = [];
+
+  const hedged = saysAny(source, HEDGES);
+  if (hedged && !saysAny(candidate, HEDGES)) out.push({ kind: 'scope', token: hedged });
+
+  const claimed = saysAny(candidate, OWNERSHIP);
+  if (claimed && !saysAny(source, OWNERSHIP)) out.push({ kind: 'scope', token: claimed });
+
+  return out;
 }
 
 /** Strips the unit so "40%", "40k" and "40" compare as the same figure. */
@@ -142,6 +189,8 @@ export function findUngroundedTokens(
       }
     }
   }
+
+  violations.push(...findScopeInflation(candidate, source));
 
   return violations;
 }
