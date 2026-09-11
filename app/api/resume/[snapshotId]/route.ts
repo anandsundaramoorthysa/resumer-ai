@@ -16,6 +16,7 @@ import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { profileRecords, resumeSnapshots } from '@/lib/db/schema';
 import type { ResumeDocument } from '@/lib/types';
+import { sentApplicationStatus } from '@/lib/server/profile';
 
 export const runtime = 'nodejs';
 
@@ -125,6 +126,16 @@ export async function PATCH(
   const { snapshotId } = await ctx.params;
   const row = await loadOwned(userId, snapshotId);
   if (!row) return Response.json({ error: 'Not found.' }, { status: 404 });
+
+  // REQ-9.2, as the improve route already enforces: once its application has left draft,
+  // the snapshot is the record of what the recruiter received, and an edit in place would
+  // quietly rewrite it.
+  if (await sentApplicationStatus(userId, snapshotId)) {
+    return Response.json(
+      { error: 'This resume was sent with an application, so it is kept exactly as it was sent.' },
+      { status: 409 },
+    );
+  }
 
   const parsed = EditsSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

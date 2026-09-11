@@ -2,10 +2,11 @@
  * Where GitHub sends the user after they install the app.
  *
  * The redirect carries `installation_id` as a query parameter, which means the browser
- * can put anything there — so it is not trusted. It is looked up against GitHub with the
- * app's own JWT, and only what GitHub says about it is stored. Without that check, one
- * user could claim another's installation by editing a URL, and inherit read access to
- * their repositories.
+ * can put anything there — so it is not trusted. Looking it up with the app's JWT proves
+ * only that it exists; this route used to stop there, and anyone signed in could claim
+ * any installation by editing the URL, reading its private repositories and taking it
+ * from its owner. Now the installation must be on the GitHub account this user signed in
+ * with, and a row already recorded for someone else is never moved.
  *
  * `setup_action` is `install` for a new installation and `update` when someone changes
  * which repositories are selected. Both are recorded the same way; the second is how a
@@ -14,8 +15,8 @@
 
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
-import { getInstallation } from '@/lib/github/app';
-import { recordInstallation } from '@/lib/server/repo-access';
+import { getInstallation, installationOwnedBy } from '@/lib/github/app';
+import { githubAccountIdsFor, recordInstallation } from '@/lib/server/repo-access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -55,13 +56,25 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  await recordInstallation({
+  if (!installationOwnedBy(installation, await githubAccountIdsFor(session.user.id))) {
+    return backToSettings(
+      installation.targetType === 'User'
+        ? `The app was installed on @${installation.accountLogin}, which is not a GitHub account you have signed in with here. Sign in with that GitHub account once, then install again.`
+        : 'Installing on an organisation is not supported yet. Install the app on your personal GitHub account.',
+      false,
+    );
+  }
+
+  const recorded = await recordInstallation({
     id: installation.id,
     userId: session.user.id,
     accountLogin: installation.accountLogin,
     targetType: installation.targetType,
     repositorySelection: installation.repositorySelection,
   });
+  if (!recorded) {
+    return backToSettings('That installation is already connected to another Resumer AI account.', false);
+  }
 
   return backToSettings(installation.accountLogin, true);
 }

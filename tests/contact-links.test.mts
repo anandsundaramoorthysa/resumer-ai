@@ -11,7 +11,7 @@
  * did not write.
  */
 
-import { findContactLinks, mergeContactLinks } from '../lib/import/contact-links';
+import { fillContactGaps, findContactLinks, mergeContactLinks } from '../lib/import/contact-links';
 import { suite, test, assert } from './harness.mjs';
 
 /** The real header, as pdf extraction produced it. */
@@ -149,5 +149,29 @@ suite('merging with what the model found', () => {
   test('no contact at all still yields the scanned links', () => {
     const merged = mergeContactLinks(undefined, { githubUrl: 'https://github.com/found' });
     assert(merged.githubUrl === 'https://github.com/found', 'works from nothing');
+  });
+});
+
+suite('contact details from an extraction fill gaps only', () => {
+  const stored = {
+    fullName: 'Anand S', email: 'a@example.com', phone: '+91 90000 00000', location: 'Chennai',
+    portfolioUrl: null, githubUrl: 'https://github.com/anand', linkedinUrl: null,
+  };
+
+  test('a portfolio that states no name or email keeps the stored ones', () => {
+    const { merged, changed } = fillContactGaps(stored, { portfolioUrl: 'anand.dev' });
+    assert(merged.fullName === 'Anand S' && merged.email === 'a@example.com', 'name and email kept');
+    assert(merged.phone === stored.phone && merged.githubUrl === stored.githubUrl, 'phone and links kept');
+    assert(merged.portfolioUrl === 'anand.dev' && changed, 'the empty field is filled');
+  });
+
+  test('an injected email cannot replace the real one', () => {
+    const { merged, changed } = fillContactGaps(stored, { email: 'attacker@evil.test', fullName: '' });
+    assert(merged.email === 'a@example.com' && !changed, 'nothing changes');
+  });
+
+  test('a first contact block is written whole', () => {
+    const { merged, changed } = fillContactGaps(null, { fullName: 'Jane', email: 'j@x.com' });
+    assert(merged.fullName === 'Jane' && merged.phone === null && changed, 'written');
   });
 });

@@ -4,6 +4,7 @@ import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { resumeSnapshots } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
+import { sentApplicationStatus } from '@/lib/server/profile';
 import { ResumeEditor } from './resume-editor';
 import { ExtrasPanel } from './extras-panel';
 import type { QualityGateResult, ResumeDocument } from '@/lib/types';
@@ -32,6 +33,7 @@ export default async function ResumePage({
     .limit(1);
 
   if (!row) notFound();
+  const sent = await sentApplicationStatus(session.user.id, row.id);
 
   return (
     <div className="min-h-screen min-h-dvh">
@@ -43,6 +45,7 @@ export default async function ResumePage({
           initialDocument={row.document as unknown as ResumeDocument}
           score={row.scoreDetail as unknown as QualityGateResult | null}
           fileName={row.fileName}
+          sent={sent !== null}
         />
         {row.jobRequirement ? <ExtrasPanel snapshotId={row.id} /> : null}
       </main>

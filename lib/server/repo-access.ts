@@ -21,7 +21,7 @@
 import 'server-only';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { githubInstallations } from '@/lib/db/schema';
+import { accounts, githubInstallations } from '@/lib/db/schema';
 import {
   installationToken,
   isGitHubAppConfigured,
@@ -222,29 +222,47 @@ export async function canConnectRepo(
   };
 }
 
-/** Records an installation against a user, replacing any earlier row for the same id. */
+/**
+ * Records an installation against a user, refreshing their earlier row for the same id.
+ *
+ * Returns false, and changes nothing, when the installation is already recorded for a
+ * different user. An upsert that moved it used to be the whole of the attack: whoever
+ * called the install route last took the installation, and the private repositories behind
+ * it, away from its owner.
+ */
 export async function recordInstallation(input: {
   id: number;
   userId: string;
   accountLogin: string;
   targetType: string;
   repositorySelection: string;
-}): Promise<void> {
-  await db
+}): Promise<boolean> {
+  const written = await db
     .insert(githubInstallations)
     .values({ ...input, removedAt: null })
     .onConflictDoUpdate({
       target: githubInstallations.id,
       set: {
-        // Re-installing after a removal, or installing on a second account, must clear
-        // the tombstone rather than leave a row that reads as removed.
-        userId: input.userId,
+        // Re-installing after a removal must clear the tombstone rather than leave a row
+        // that reads as removed.
         accountLogin: input.accountLogin,
         targetType: input.targetType,
         repositorySelection: input.repositorySelection,
         removedAt: null,
       },
-    });
+      where: eq(githubInstallations.userId, input.userId),
+    })
+    .returning({ id: githubInstallations.id });
+  return written.length > 0;
+}
+
+/** The GitHub user ids this person has signed in with — what GitHub's OAuth vouched for. */
+export async function githubAccountIdsFor(userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ id: accounts.providerAccountId })
+    .from(accounts)
+    .where(and(eq(accounts.userId, userId), eq(accounts.provider, 'github')));
+  return rows.map((r) => r.id);
 }
 
 /** Marks an installation gone. Never deletes: the audit trail is worth more than the row. */

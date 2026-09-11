@@ -166,9 +166,31 @@ export async function installationToken(installationId: number): Promise<Install
 
 export interface InstallationInfo {
   id: number;
+  /** GitHub's numeric id for the account installed on — stable across renames, unlike the login. */
+  accountId: number;
   accountLogin: string;
   targetType: string;
   repositorySelection: 'all' | 'selected';
+}
+
+/**
+ * Whether an installation is on a GitHub account this user has proved is theirs.
+ *
+ * GitHub confirming an installation exists says nothing about who is asking: the id is a
+ * plain integer that turns up in settings URLs and redirects, and the app's JWT can look
+ * any of them up. So an installation is accepted only when its account is the GitHub user
+ * this person signed in as — `githubAccountIds` are the `providerAccountId`s of their
+ * GitHub sign-ins, which GitHub's OAuth vouched for.
+ *
+ * ponytail: organisation installations are refused. Proving someone administers an org
+ * needs `read:org` or a user token from the App's own OAuth client, and neither exists
+ * here; add that path when a portfolio in an organisation is actually needed.
+ */
+export function installationOwnedBy(
+  installation: Pick<InstallationInfo, 'accountId' | 'targetType'>,
+  githubAccountIds: string[],
+): boolean {
+  return installation.targetType === 'User' && githubAccountIds.includes(String(installation.accountId));
 }
 
 /**
@@ -196,12 +218,13 @@ export async function getInstallation(installationId: number): Promise<Installat
 
     const body = (await res.json()) as {
       id: number;
-      account: { login: string; type: string };
+      account: { id: number; login: string; type: string };
       repository_selection: 'all' | 'selected';
     };
 
     return {
       id: body.id,
+      accountId: body.account?.id ?? 0,
       accountLogin: body.account?.login ?? '',
       targetType: body.account?.type ?? '',
       repositorySelection: body.repository_selection,

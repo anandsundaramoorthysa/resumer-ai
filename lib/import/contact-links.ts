@@ -204,6 +204,46 @@ export function findContactLinks(text: string): ContactLinks {
   return found;
 }
 
+export interface ContactFields {
+  fullName: string;
+  email: string;
+  phone: string | null;
+  location: string | null;
+  portfolioUrl: string | null;
+  githubUrl: string | null;
+  linkedinUrl: string | null;
+}
+
+/**
+ * The stored contact block with only its empty fields filled from `incoming`, and whether
+ * anything changed.
+ *
+ * Every writer that is not the user typing — a resume import, the portfolio sync — goes
+ * through this. The sync used to upsert whatever the model read from the repository, so a
+ * portfolio that never stated a name wrote '' over it, and a prompt-injected file could put
+ * a stranger's email at the top of every resume. What is stored was typed or approved by
+ * the user; an extraction may add to it, never replace it.
+ */
+export function fillContactGaps(
+  existing: Partial<ContactFields> | null | undefined,
+  incoming: Partial<Record<keyof ContactFields, string | null | undefined>>,
+): { merged: ContactFields; changed: boolean } {
+  const pick = (key: keyof ContactFields) => existing?.[key]?.trim() || incoming[key]?.trim() || null;
+  const merged: ContactFields = {
+    fullName: pick('fullName') ?? '',
+    email: pick('email') ?? '',
+    phone: pick('phone'),
+    location: pick('location'),
+    portfolioUrl: pick('portfolioUrl'),
+    githubUrl: pick('githubUrl'),
+    linkedinUrl: pick('linkedinUrl'),
+  };
+  const changed = (Object.keys(merged) as Array<keyof ContactFields>).some(
+    (key) => (merged[key] || null) !== (existing?.[key]?.trim() || null),
+  );
+  return { merged, changed };
+}
+
 /**
  * Fills only what is missing.
  *

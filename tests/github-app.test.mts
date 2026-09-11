@@ -10,7 +10,13 @@
  */
 
 import { createPublicKey, createVerify, generateKeyPairSync } from 'node:crypto';
-import { appJwt, githubAppConfig, isGitHubAppConfigured, installUrl } from '../lib/github/app';
+import {
+  appJwt,
+  githubAppConfig,
+  installationOwnedBy,
+  isGitHubAppConfigured,
+  installUrl,
+} from '../lib/github/app';
 import { suite, test, assert } from './harness.mjs';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', {
@@ -140,6 +146,22 @@ suite('app jwt', () => {
       }
       assert(threw, 'an unsigned or wrongly-signed JWT is worse than an error');
     });
+  });
+});
+
+suite('who an installation belongs to', () => {
+  test('an installation on the GitHub user this person signed in as is theirs', () => {
+    assert(installationOwnedBy({ accountId: 135801803, targetType: 'User' }, ['135801803']), 'accepted');
+  });
+
+  test("someone else's installation id is refused, however it was obtained", () => {
+    // The attack: sign up, then call the install route with the owner's installation id.
+    assert(!installationOwnedBy({ accountId: 135801803, targetType: 'User' }, ['999']), 'another GitHub user');
+    assert(!installationOwnedBy({ accountId: 135801803, targetType: 'User' }, []), 'no GitHub sign-in at all');
+  });
+
+  test('an organisation is refused, even when its id happens to equal a user id', () => {
+    assert(!installationOwnedBy({ accountId: 42, targetType: 'Organization' }, ['42']), 'refused');
   });
 });
 

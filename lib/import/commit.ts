@@ -21,6 +21,7 @@ import { hashContent } from '@/lib/sync/reconcile';
 import { formFor, hashInput, missingRequired } from '@/lib/profile/forms';
 import type { RecordSource } from '@/lib/types';
 import { tidyRecordData, tidyText } from '@/lib/steward/tidy';
+import { fillContactGaps, type ContactFields } from './contact-links';
 
 const Tags = z.array(z.string().max(64)).max(50).default([]);
 
@@ -266,13 +267,12 @@ async function insertRecord(
 }
 
 /**
- * Contact details fill gaps rather than overwrite. Whatever is already stored was either
- * typed by the user or pulled from their live portfolio; a resume PDF is usually the
- * older of the two, so it should not be able to replace a current phone number.
+ * Contact details fill gaps rather than overwrite (see `fillContactGaps`). Shared with the
+ * portfolio sync. Returns whether anything was written.
  */
-async function writeContact(
+export async function writeContact(
   userId: string,
-  contact: CommitPayload['contact'],
+  contact: Partial<Record<keyof ContactFields, string | null | undefined>> | null | undefined,
   source: RecordSource,
 ): Promise<boolean> {
   if (!contact) return false;
@@ -283,15 +283,8 @@ async function writeContact(
     .where(eq(contactInfo.userId, userId))
     .limit(1);
 
-  const merged = {
-    fullName: existing?.fullName || contact.fullName || '',
-    email: existing?.email || contact.email || '',
-    phone: existing?.phone || contact.phone || null,
-    location: existing?.location || contact.location || null,
-    portfolioUrl: existing?.portfolioUrl || contact.portfolioUrl || null,
-    githubUrl: existing?.githubUrl || contact.githubUrl || null,
-    linkedinUrl: existing?.linkedinUrl || contact.linkedinUrl || null,
-  };
+  const { merged, changed } = fillContactGaps(existing, contact);
+  if (!changed) return false;
 
   await db
     .insert(contactInfo)

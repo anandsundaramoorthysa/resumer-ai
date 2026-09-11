@@ -31,17 +31,21 @@ export function ResumeEditor({
   initialDocument,
   score,
   fileName,
+  sent,
 }: {
   snapshotId: string;
   initialDocument: ResumeDocument;
   score: QualityGateResult | null;
   fileName: string;
+  /** Its application has left draft: this is what was sent, so it is read-only. */
+  sent: boolean;
 }) {
   const [doc, setDoc] = useState<ResumeDocument>(initialDocument);
   const [sources, setSources] = useState<Record<string, SourceInfo>>({});
   const [dirty, setDirty] = useState<Map<string, Edit>>(new Map());
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showTrace, setShowTrace] = useState(true);
 
   useEffect(() => {
@@ -85,6 +89,7 @@ export function ResumeEditor({
   const save = async () => {
     if (dirty.size === 0) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const res = await fetch(`/api/resume/${snapshotId}`, {
         method: 'PATCH',
@@ -96,7 +101,13 @@ export function ResumeEditor({
         setDoc(j.document);
         setDirty(new Map());
         setSaved(true);
+      } else {
+        // A refused save used to look exactly like a save that had not been pressed.
+        const j = await res.json().catch(() => null);
+        setSaveError(j?.error ?? 'Your changes could not be saved. Try again.');
       }
+    } catch {
+      setSaveError('Your changes could not be saved. Check your connection and try again.');
     } finally {
       setSaving(false);
     }
@@ -120,7 +131,7 @@ export function ResumeEditor({
           </h1>
           <p className="mt-1 text-sm text-muted">
             {doc.jobRequirement?.company ? `${doc.jobRequirement.company} · ` : ''}
-            Edit anything before you export.
+            {sent ? 'Sent with an application, so it is kept exactly as it was sent.' : 'Edit anything before you export.'}
           </p>
         </div>
         {score ? (
@@ -167,6 +178,11 @@ export function ResumeEditor({
             </button>
           ) : saved ? (
             <span className="text-xs text-success">Saved</span>
+          ) : null}
+          {saveError ? (
+            <span role="alert" className="text-xs text-danger">
+              {saveError}
+            </span>
           ) : null}
           <a
             href={`/api/export/${snapshotId}?format=pdf`}
@@ -261,6 +277,7 @@ export function ResumeEditor({
                 sourceId={item.sourceRecordId}
                 sources={sources}
                 showTrace={showTrace}
+                readOnly={sent}
                 onChange={(t) => setText(section.key, null, i, t)}
               />
             ))}
@@ -286,6 +303,7 @@ export function ResumeEditor({
                     sources={sources}
                     showTrace={showTrace}
                     bullet
+                    readOnly={sent}
                     onChange={(t) => setText(section.key, gi, i, t)}
                   />
                 ))}
@@ -306,6 +324,7 @@ function Line({
   sources,
   showTrace,
   bullet,
+  readOnly,
   onChange,
 }: {
   text: string;
@@ -313,6 +332,7 @@ function Line({
   sources: Record<string, SourceInfo>;
   showTrace: boolean;
   bullet?: boolean;
+  readOnly?: boolean;
   onChange: (text: string) => void;
 }) {
   const source = sourceId ? sources[sourceId] : null;
@@ -322,7 +342,7 @@ function Line({
       <div className="flex items-start gap-2">
         {bullet ? <span className="mt-1.5 select-none text-muted">•</span> : null}
         <div
-          contentEditable
+          contentEditable={!readOnly}
           suppressContentEditableWarning
           onBlur={(e) => onChange(e.currentTarget.textContent ?? '')}
           className="min-w-0 flex-1 rounded px-1 py-0.5 text-sm outline-none hover:bg-paper focus:bg-paper focus:ring-1 focus:ring-brand"

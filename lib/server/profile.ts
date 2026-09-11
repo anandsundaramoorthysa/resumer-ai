@@ -37,7 +37,7 @@ import { educationIdentity } from '@/lib/sync/education';
 import type { ParseResult } from '@/lib/sync/parse';
 import type { ParsedRecord } from '@/lib/sync/reconcile';
 import { hashContent, reconcile, summarizePlan } from '@/lib/sync/reconcile';
-import { getGithubToken } from '@/lib/server/github-token';
+import { getRepoAccess } from '@/lib/server/repo-access';
 
 export interface LoadedProfile {
   contact: ContactInfo;
@@ -119,11 +119,6 @@ export async function loadProfileForUser(userId: string): Promise<LoadedProfile>
 
 /* ------------------------------------------------------------------ sync ---- */
 
-/** Delegated so the token is decrypted in exactly one place — see github-token.ts. */
-async function githubTokenFor(userId: string): Promise<string | null> {
-  return getGithubToken(userId);
-}
-
 /**
  * Pre-draft sync check — REQ-2.2.
  *
@@ -140,12 +135,15 @@ export function buildSyncStep(userId: string) {
     }
 
     const ref = parseRepoRef(user.portfolioRepo);
-    const token = await githubTokenFor(userId);
-    if (!ref || !token) {
+    // Through getRepoAccess, like the sync itself. This read the OAuth token alone, which
+    // since the GitHub App cannot see a private repository: every fit check for an App user
+    // either 404'd on the SHA or said GitHub was not connected while the sync worked fine.
+    const access = ref ? await getRepoAccess(userId, { owner: ref.owner, name: ref.repo }) : null;
+    if (!ref || !access) {
       return { summary: 'GitHub not connected — using your saved profile.' };
     }
 
-    const sha = await latestCommitSha(ref, token);
+    const sha = await latestCommitSha(ref, access.token);
     if (sha === user.lastSyncedSha) {
       return { summary: 'Already up to date — no changes since your last sync.' };
     }
@@ -245,9 +243,23 @@ export async function applyParsedProfile(
     await db.insert(profileRecords).values(chunk).onConflictDoNothing();
   }
 
+  // An update may not move a record onto a hash another row already holds — a manual copy
+  // reconcile never matches against, or a fact inserted just above. That was a unique
+  // violation mid-write: inserts done, audits and the SHA not, and the next sync planned
+  // the same update and failed the same way, for good. The fact is already stored, so the
+  // update is simply not needed.
+  const heldBy = new Map(existing.map((r) => [r.contentHash, r.id]));
+  for (const rec of plan.toInsert) heldBy.set(rec.contentHash, 'new');
+  const updates = plan.toUpdate.filter(({ id, parsed: rec }) => {
+    const holder = heldBy.get(rec.contentHash);
+    if (holder && holder !== id) return false;
+    heldBy.set(rec.contentHash, id);
+    return true;
+  });
+
   // Updates each target one row by id, so they can't collapse into a single statement
   // — but they can go out concurrently instead of one round trip at a time.
-  for (const chunk of chunked(plan.toUpdate, 20)) {
+  for (const chunk of chunked(updates, 20)) {
     await Promise.all(
       chunk.map(({ id, parsed: rec }) => {
         const { type, tags, contentHash, ...data } = rec as unknown as Record<
@@ -272,6 +284,7 @@ export async function applyParsedProfile(
           .where(
             and(
               eq(profileRecords.id, id),
+              eq(profileRecords.userId, userId),
               eq(profileRecords.source, 'github-sync'),
               // reconcile() never plans an update against a rejected row; this says so
               // in SQL as well, for the same reason the source check is here.
@@ -293,6 +306,7 @@ export async function applyParsedProfile(
             profileRecords.id,
             chunk.map((f) => f.id),
           ),
+          eq(profileRecords.userId, userId),
           eq(profileRecords.source, 'github-sync'),
           // Only an approved record can be flagged as missing — see reconcile().
           eq(profileRecords.reviewState, 'approved'),
@@ -320,7 +334,7 @@ export async function applyParsedProfile(
       .where(eq(users.id, userId));
   }
 
-  return summarizePlan(plan);
+  return summarizePlan({ ...plan, toUpdate: updates });
 }
 
 /**
@@ -521,6 +535,16 @@ export async function persistDraft(
   });
 
   return snapshot.id;
+}
+
+/** The status of this snapshot's application once it has left draft, else null (REQ-9.2). */
+export async function sentApplicationStatus(userId: string, snapshotId: string): Promise<string | null> {
+  const [app] = await db
+    .select({ status: applications.status })
+    .from(applications)
+    .where(and(eq(applications.resumeSnapshotId, snapshotId), eq(applications.userId, userId)))
+    .limit(1);
+  return app && app.status !== 'draft' ? app.status : null;
 }
 
 /**

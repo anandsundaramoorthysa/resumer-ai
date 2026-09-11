@@ -2,7 +2,8 @@ import { getRepoAccess } from '@/lib/server/repo-access';
 import 'server-only';
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { contactInfo, syncJobs, users } from '@/lib/db/schema';
+import { syncJobs, users } from '@/lib/db/schema';
+import { writeContact } from '@/lib/import/commit';
 import { fetchPortfolioFiles, latestCommitSha, parseRepoRef } from './github';
 import {
   extractFromSlice,
@@ -352,32 +353,9 @@ async function runStep(
   const parsed = toRecords(merged);
   const summary = await applyParsedProfile(userId, parsed, job.sha ?? null);
 
-  if (parsed.contact) {
-    await db
-      .insert(contactInfo)
-      .values({
-        userId,
-        fullName: parsed.contact.fullName ?? '',
-        email: parsed.contact.email ?? '',
-        phone: parsed.contact.phone || null,
-        location: parsed.contact.location || null,
-        portfolioUrl: parsed.contact.portfolioUrl || null,
-        githubUrl: parsed.contact.githubUrl || null,
-        linkedinUrl: parsed.contact.linkedinUrl || null,
-      })
-      .onConflictDoUpdate({
-        target: contactInfo.userId,
-        set: {
-          fullName: parsed.contact.fullName ?? '',
-          email: parsed.contact.email ?? '',
-          phone: parsed.contact.phone || null,
-          location: parsed.contact.location || null,
-          portfolioUrl: parsed.contact.portfolioUrl || null,
-          githubUrl: parsed.contact.githubUrl || null,
-          linkedinUrl: parsed.contact.linkedinUrl || null,
-        },
-      });
-  }
+  // Fills gaps only. This was an upsert of whatever the model read, which blanked a stored
+  // name whenever the portfolio did not state one and bypassed the review queue entirely.
+  await writeContact(userId, parsed.contact, 'github-sync');
 
   return finish(
     { status: 'done', step: totalSteps, totalSteps, message: summary, corpus: null },

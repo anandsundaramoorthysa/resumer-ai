@@ -16,7 +16,7 @@
  */
 
 import 'server-only';
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { profileRecords, roles as rolesTable, stewardDismissals } from '@/lib/db/schema';
@@ -52,16 +52,22 @@ import {
 
 /* ---------------------------------------------------------------- loading -- */
 
+/**
+ * The approved profile only. Pending sync proposals are the review queue's to decide: the
+ * steward used to load them too, and applying a move turned an unreviewed claim from a
+ * repository into an approved manual record, while a merge or remove hard-deleted the
+ * proposal and so erased the "no" that stops the next sync proposing it again.
+ */
 export async function loadStewardProfile(userId: string): Promise<StewardProfile> {
   const [rows, roleRows] = await Promise.all([
     db
       .select()
       .from(profileRecords)
-      .where(and(eq(profileRecords.userId, userId), ne(profileRecords.reviewState, 'rejected'))),
+      .where(and(eq(profileRecords.userId, userId), eq(profileRecords.reviewState, 'approved'))),
     db
       .select()
       .from(rolesTable)
-      .where(and(eq(rolesTable.userId, userId), ne(rolesTable.reviewState, 'rejected'))),
+      .where(and(eq(rolesTable.userId, userId), eq(rolesTable.reviewState, 'approved'))),
   ]);
   return {
     records: rows.map((r) => ({
@@ -265,6 +271,9 @@ const roleBasis = (r: { title: string; company: string; startDate: string; endDa
 /** Every record the suggestion was made against still exists, unchanged, and is the user's. */
 async function assertFresh(userId: string, s: Suggestion): Promise<void> {
   const ids = Object.keys(s.basis);
+  // Everything the suggestion would change must be something it was checked against, or a
+  // hand-built suggestion could name a record the basis never covered.
+  if (![s.recordId, ...(s.removeIds ?? [])].every((id) => id in s.basis)) throw new StaleSuggestionError();
   if (s.recordType === 'role') {
     const [role] = await db
       .select()
@@ -299,7 +308,11 @@ export async function applySuggestion(userId: string, raw: unknown, answer?: str
       const patch = Object.fromEntries(Object.entries(s.changes ?? {}).map(([k, v]) => [k, v.to]));
       if (s.recordType === 'experience-bullet' && typeof patch.text === 'string') {
         // A reworded bullet's action is its new text, unless the user split it into parts.
-        const [row] = await db.select({ data: profileRecords.data }).from(profileRecords).where(eq(profileRecords.id, s.recordId)).limit(1);
+        const [row] = await db
+          .select({ data: profileRecords.data })
+          .from(profileRecords)
+          .where(and(eq(profileRecords.id, s.recordId), eq(profileRecords.userId, userId)))
+          .limit(1);
         const d = (row?.data ?? {}) as Record<string, unknown>;
         if (!d.scale && !d.outcome && patch.action === undefined) patch.action = patch.text;
       }
