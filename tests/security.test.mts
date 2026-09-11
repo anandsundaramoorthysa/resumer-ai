@@ -53,7 +53,7 @@ suite('rate-limit bucket keys', () => {
  * anything — both of which leave `rateLimit` returning "allowed" forever.
  */
 suite('every action has a ceiling', () => {
-  const ACTIONS: AuthAction[] = ['sign-in', 'sign-up', 'reset-request', 'verify', 'set-password'];
+  const ACTIONS: AuthAction[] = ['sign-in', 'sign-up', 'reset-request', 'verify', 'set-password', 'ai'];
 
   test('no action can be added without a limit', () => {
     for (const action of ACTIONS) {
@@ -77,9 +77,22 @@ suite('every action has a ceiling', () => {
     assert(limit.ip.max >= limit.subject.max, 'one machine may hold more than one session');
   });
 
+  test('the AI burst limit stops a loop and never a person', () => {
+    // It is the one ceiling the owner's account still has, so it has to exist; it is also
+    // hit during ordinary work (one request per import chunk, one per review batch), so it
+    // has to be generous. A loop reaches sixty in seconds; a person does not in ten minutes.
+    const limit = LIMITS.ai;
+    assert(limit.subject.windowMs <= 15 * 60_000, 'measured over minutes, not hours');
+    assert(limit.subject.max >= 40, `a long import still fits, got ${limit.subject.max}`);
+    assert(limit.subject.max <= 100, `and a bot is still stopped, got ${limit.subject.max}`);
+    assert(limit.ip.max >= limit.subject.max, 'one machine may hold more than one session');
+  });
+
   test('nothing is looser than sign-in, which is the only one guessing pays off against', () => {
     for (const action of ACTIONS) {
-      if (action === 'sign-in') continue;
+      // Not a credential: nothing is guessed by starting a draft, so it is bounded by the
+      // burst test above instead.
+      if (action === 'sign-in' || action === 'ai') continue;
       const perHour = (LIMITS[action].subject.max * 60 * 60_000) / LIMITS[action].subject.windowMs;
       const signInPerHour =
         (LIMITS['sign-in'].subject.max * 60 * 60_000) / LIMITS['sign-in'].subject.windowMs;

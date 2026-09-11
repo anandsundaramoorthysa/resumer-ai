@@ -21,6 +21,7 @@ import { DRAFT_TIME_BUDGET_MS, RENDER_RESERVE_MS } from '@/lib/ai/budget';
 import { DEFAULT_ATTEMPT_TIMEOUT_MS } from '@/lib/ai/chain';
 import { ASSESS_TIME_BUDGET_MS } from '@/lib/pipeline/run';
 import { cronAuthorized } from '@/lib/server/cron-auth';
+import { ownerUserIds } from '@/lib/ai/daily-budget';
 import type { NextRequest } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -89,6 +90,10 @@ export async function GET(req: NextRequest) {
       githubOAuthScope: isGitHubAppConfigured()
         ? 'read:user user:email read:org'
         : 'read:user user:email read:org repo',
+    },
+    budget: {
+      // How many accounts sit outside the shared daily pool — a count, never the addresses.
+      ownerAccounts: (await ownerUserIds()).length,
     },
     mail: {
       configured: isMailConfigured(),

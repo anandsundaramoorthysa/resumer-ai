@@ -18,10 +18,11 @@
  */
 
 import 'server-only';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { aiUsageDaily } from '@/lib/db/schema';
+import { aiUsageDaily, users } from '@/lib/db/schema';
 import { BudgetExceededError, DAILY_BUDGET, type BudgetLimits, type BudgetUsage } from './budget';
+import { callerIp, rateLimit } from '@/lib/auth/rate-limit';
 
 /** UTC, so the window does not move with the user's timezone or the server's. */
 export function today(): string {
@@ -51,15 +52,66 @@ export const APP_DAILY_LIMITS: BudgetLimits = {
   maxTokens: Number(process.env.APP_DAILY_MAX_TOKENS ?? 20_000_000),
 };
 
-/** Everything every user has spent today. One aggregate over one day's rows. */
-export async function readAppUsage(day = today()): Promise<BudgetUsage> {
+/**
+ * The site owner's addresses, from OWNER_EMAILS (comma-separated). Pure, so it is tested.
+ *
+ * Sign-up is open, and everyone spends the same provider keys. The shared ceiling above
+ * protects the bill, but on its own it would also lock the owner out for the rest of the
+ * day once strangers had used it up. So the owner's accounts sit outside it: their usage
+ * does not count toward the shared pool, and the pool running dry never refuses them.
+ * Their own per-account limit still applies — a stuck loop is a stuck loop, whoever
+ * started it.
+ */
+export function ownerEmails(env: Record<string, string | undefined> = process.env): Set<string> {
+  return new Set(
+    (env.OWNER_EMAILS ?? '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.includes('@')),
+  );
+}
+
+/** Owner account ids, looked up by address and cached briefly per instance. */
+let ownerIdCache: { at: number; ids: string[] } | null = null;
+const OWNER_CACHE_MS = 5 * 60_000;
+
+export async function ownerUserIds(): Promise<string[]> {
+  if (ownerIdCache && Date.now() - ownerIdCache.at < OWNER_CACHE_MS) return ownerIdCache.ids;
+  const emails = [...ownerEmails()];
+  let ids: string[] = [];
+  if (emails.length > 0) {
+    try {
+      const rows = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(sql`lower(${users.email}) in (${sql.join(emails.map((e) => sql`${e}`), sql`, `)})`);
+      ids = rows.map((r) => r.id);
+    } catch (err) {
+      // Fails closed toward the shared pool: an owner not recognised is treated like
+      // anyone else, which can only ever be stricter, never looser.
+      console.warn('[budget] could not look up the owner accounts:', err instanceof Error ? err.message : err);
+    }
+  }
+  ownerIdCache = { at: Date.now(), ids };
+  return ids;
+}
+
+/**
+ * What everyone except the owner has spent today — the shared pool. One aggregate over one
+ * day's rows.
+ */
+export async function readAppUsage(day = today(), excludeUserIds: string[] = []): Promise<BudgetUsage> {
   const [row] = await db
     .select({
       calls: sql<number>`coalesce(sum(${aiUsageDaily.calls}), 0)::int`,
       tokens: sql<number>`coalesce(sum(${aiUsageDaily.tokens}), 0)::int`,
     })
     .from(aiUsageDaily)
-    .where(eq(aiUsageDaily.day, day));
+    .where(
+      excludeUserIds.length > 0
+        ? and(eq(aiUsageDaily.day, day), notInArray(aiUsageDaily.userId, excludeUserIds))
+        : eq(aiUsageDaily.day, day),
+    );
   return { calls: row?.calls ?? 0, tokens: row?.tokens ?? 0 };
 }
 
@@ -68,6 +120,12 @@ export function appBudgetState(usage: BudgetUsage, limits: BudgetLimits = APP_DA
   const share = Math.max(usage.calls / limits.maxCalls, usage.tokens / limits.maxTokens);
   return { share, exhausted: share >= 1, warn: share >= 0.8 };
 }
+
+/**
+ * Where the owner's unlimited usage starts to look like somebody else's. A heavy day of
+ * drafting and profile work is well under a hundred calls; this is ten times that.
+ */
+export const OWNER_ALERT_CALLS = Number(process.env.OWNER_ALERT_CALLS ?? 1_000);
 
 /**
  * Throws if this user has already spent their day.
@@ -80,8 +138,30 @@ export async function assertDailyBudget(
   userId: string,
   limits: BudgetLimits = DAILY_BUDGET,
 ): Promise<void> {
-  const [usage, app] = await Promise.all([readDailyUsage(userId), readAppUsage()]);
+  // First, and for everyone: how fast. No quota below binds the owner, so this is what
+  // stops a bot on a stolen session or a script looping a route — see LIMITS.ai.
+  const ip = await callerIp().catch(() => null);
+  const burst = await rateLimit('ai', userId, ip);
+  if (!burst.allowed) {
+    console.error('[budget] AI burst limit hit for user', userId, ip ? '(with an IP)' : '');
+    throw new BudgetExceededError('rate', 'more than the limit in ten minutes');
+  }
 
+  const owners = await ownerUserIds();
+  const isOwner = owners.includes(userId);
+  const [usage, app] = await Promise.all([readDailyUsage(userId), readAppUsage(today(), owners)]);
+
+  if (isOwner) {
+    // No daily quota for the owner, by their decision. What remains: the burst limit
+    // above, the per-run budget every draft carries, and this — so an account that has
+    // been taken over is noticed within the hour rather than at the end of the month.
+    if (usage.calls >= OWNER_ALERT_CALLS) {
+      console.error(`[budget] the owner account has made ${usage.calls} AI calls today — if that was not you, reset your password to sign out every session`);
+    }
+    return;
+  }
+
+  // The shared pool governs everyone but the owner (see `ownerEmails`).
   const state = appBudgetState(app);
   if (state.exhausted) {
     throw new BudgetExceededError(
@@ -91,7 +171,7 @@ export async function assertDailyBudget(
   }
   if (state.warn) {
     // Reaches the hourly alert's inbox through Sentry's console capture.
-    console.error(`[budget] the app has used ${Math.round(state.share * 100)}% of today's shared AI allowance`);
+    console.error(`[budget] other users have used ${Math.round(state.share * 100)}% of today's shared AI allowance`);
   }
 
   if (usage.calls >= limits.maxCalls) {

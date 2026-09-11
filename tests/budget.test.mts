@@ -20,7 +20,7 @@ import {
   defaultTimeBudgetMs,
   GRADING_RESERVE_MS,
 } from '@/lib/ai/budget';
-import { appBudgetState } from '@/lib/ai/daily-budget';
+import { appBudgetState, ownerEmails } from '@/lib/ai/daily-budget';
 
 const LIMITS = { maxCalls: 4, maxTokens: 10_000 };
 
@@ -177,6 +177,22 @@ suiteAsync('a stage can hold time back for the stages after it', async () => {
 
   test('the grading reserve is real time, not a token', () => {
     assert(GRADING_RESERVE_MS >= 4_000, `got ${GRADING_RESERVE_MS}`);
+  });
+});
+
+suite('who the shared pool does not govern', () => {
+  test('the owner is named by address, case and spacing ignored', () => {
+    const owners = ownerEmails({ OWNER_EMAILS: ' Sanand03072005@Gmail.com ' });
+    assert(owners.has('sanand03072005@gmail.com') && owners.size === 1, JSON.stringify([...owners]));
+  });
+
+  test('with nothing set, nobody is exempt — the pool governs everyone', () => {
+    assert(ownerEmails({}).size === 0, 'empty');
+    assert(ownerEmails({ OWNER_EMAILS: ' , not-an-address ' }).size === 0, 'junk is not an owner');
+  });
+
+  test('several owners can be listed', () => {
+    assert(ownerEmails({ OWNER_EMAILS: 'a@x.com,b@y.com' }).size === 2, 'two');
   });
 });
 

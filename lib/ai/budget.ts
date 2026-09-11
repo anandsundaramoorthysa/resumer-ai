@@ -17,11 +17,13 @@ import type { CallOptions } from './chain';
 
 export class BudgetExceededError extends Error {
   constructor(
-    public readonly scope: 'draft' | 'daily' | 'time',
+    public readonly scope: 'draft' | 'daily' | 'time' | 'rate',
     public readonly detail: string,
   ) {
     super(
-      scope === 'time'
+      scope === 'rate'
+        ? `Too many AI requests in a short time (${detail}). Wait a few minutes and try again.`
+        : scope === 'time'
         ? `Ran out of time for this draft (${detail}). Stopped and kept the best version so far.`
         : scope === 'draft'
           ? `Per-draft AI budget exhausted (${detail}). Stopped before spending more.`

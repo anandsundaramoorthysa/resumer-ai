@@ -17,7 +17,7 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { authAttempts } from '@/lib/db/schema';
 
-export type AuthAction = 'sign-in' | 'sign-up' | 'reset-request' | 'verify' | 'set-password';
+export type AuthAction = 'sign-in' | 'sign-up' | 'reset-request' | 'verify' | 'set-password' | 'ai';
 
 interface Limit {
   max: number;
@@ -62,6 +62,17 @@ export const LIMITS: Record<AuthAction, { subject: Limit; ip: Limit }> = {
   'reset-request': { subject: { max: 3, windowMs: 60 * 60_000 }, ip: { max: 10, windowMs: 60 * 60_000 } },
   verify: { subject: { max: 10, windowMs: 60 * 60_000 }, ip: { max: 40, windowMs: 60 * 60_000 } },
   'set-password': { subject: { max: 10, windowMs: 60 * 60_000 }, ip: { max: 20, windowMs: 60 * 60_000 } },
+  /*
+   * Starting anything that spends AI — a fit check, a draft, an improvement pass, an import
+   * chunk, a steward batch — per account and per connection, owner included.
+   *
+   * This is the limit that still binds when no daily quota does. The owner has none (see
+   * lib/ai/daily-budget.ts), and a bot holding a stolen session, or a script looping a
+   * route, would otherwise spend without end. Sixty in ten minutes is several times what
+   * a person does even while importing a long resume (one request per chunk) or running
+   * the profile review (one per batch); a loop reaches it in seconds.
+   */
+  ai: { subject: { max: 60, windowMs: 10 * 60_000 }, ip: { max: 120, windowMs: 10 * 60_000 } },
 };
 
 /**
