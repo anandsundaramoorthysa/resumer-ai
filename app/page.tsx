@@ -121,6 +121,7 @@ export default async function HomePage() {
           suffix={data.averageScore ? '/ 10' : undefined}
           accent={data.averageScore ? 'brand' : undefined}
           small={!data.averageScore}
+          caption={data.averageScore ? (data.averageRole ?? undefined) : undefined}
         />
         <Stat label="Applications tracked" value={String(data.applicationCount)} />
         <Stat
@@ -182,12 +183,15 @@ function Stat({
   suffix,
   accent,
   small,
+  caption,
 }: {
   label: string;
   value: string;
   suffix?: string;
   accent?: 'brand' | 'gold';
   small?: boolean;
+  /** What the value is scoped to, when it is not the whole history. */
+  caption?: string;
 }) {
   const color =
     accent === 'brand' ? 'text-brand-dark' : accent === 'gold' ? 'text-gold' : '';
@@ -202,6 +206,7 @@ function Stat({
         {value}
         {suffix ? <span className="text-sm text-muted"> {suffix}</span> : null}
       </dd>
+      {caption ? <p className="mt-1 truncate text-xs text-muted" title={caption}>{caption}</p> : null}
     </div>
   );
 }

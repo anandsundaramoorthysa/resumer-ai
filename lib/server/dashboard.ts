@@ -1,12 +1,15 @@
 import 'server-only';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { applications, profileRecords, users } from '@/lib/db/schema';
 
 export interface DashboardData {
   draftCount: number;
   applicationCount: number;
+  /** Average score for the newest role only — see getDashboardData. */
   averageScore: number | null;
+  /** "Title · Company" of the role that average is for. */
+  averageRole: string | null;
   lastSyncedLabel: string;
   portfolioRepo: string | null;
   recordCount: number;
@@ -36,26 +39,13 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     .where(eq(profileRecords.userId, userId));
 
   /*
-   * The three tiles are about the whole history, so they are counted in the database.
-   *
-   * They used to be derived from the list below, which is capped for the "Recent drafts"
-   * table — so "Resumes drafted" could never read higher than the cap however many
-   * resumes existed, "Average ATS score" silently averaged only the newest few while
-   * being labelled an average, and "Applications tracked" counted only the ones inside
-   * that same window. Nothing looked wrong, because a tile showing 8 when the answer is
-   * 20 is not obviously a lie, and until drafting worked at all nobody had enough
-   * history to notice. Counting where the rows are keeps the cap a fact about the table
-   * and not about the numbers.
-   *
-   * `avg` is cast to float8 rather than left as numeric: postgres.js returns a numeric
-   * as a string to avoid precision loss, and `String / 10` would have rendered "6.2" as
-   * NaN on the tile.
+   * The counts are lifetime totals, counted in the database — they used to be derived
+   * from the capped list below, so "Resumes drafted" could never read past the cap.
    */
   const [totals] = await db
     .select({
       drafts: sql<number>`count(*)::int`,
       sent: sql<number>`count(*) filter (where ${applications.status} <> 'draft')::int`,
-      averageScore: sql<number | null>`avg(${applications.score})::float8`,
     })
     .from(applications)
     .where(eq(applications.userId, userId));
@@ -68,10 +58,31 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     .orderBy(desc(applications.createdAt))
     .limit(RECENT_DRAFTS_SHOWN);
 
+  /*
+   * The average is for ONE role: the newest. A lifetime average mixes a data-analyst
+   * resume with an SEO one, and the number describes neither. Matched on title and
+   * company, case-insensitively. Cast to float8 because postgres.js returns a numeric as
+   * a string, which would render as NaN on the tile.
+   */
+  const latest = apps[0];
+  const [roleAverage] = latest
+    ? await db
+        .select({ avg: sql<number | null>`avg(${applications.score})::float8` })
+        .from(applications)
+        .where(
+          and(
+            eq(applications.userId, userId),
+            sql`lower(${applications.roleTitle}) = lower(${latest.roleTitle})`,
+            sql`lower(${applications.company}) = lower(${latest.company})`,
+          ),
+        )
+    : [];
+
   return {
     draftCount: totals?.drafts ?? 0,
     applicationCount: totals?.sent ?? 0,
-    averageScore: totals?.averageScore ?? null,
+    averageScore: roleAverage?.avg ?? null,
+    averageRole: latest ? [latest.roleTitle, latest.company].filter(Boolean).join(' · ') : null,
     lastSyncedLabel: relativeTime(user?.lastSyncedAt ?? null),
     portfolioRepo: user?.portfolioRepo ?? null,
     recordCount: recordStats?.total ?? 0,
