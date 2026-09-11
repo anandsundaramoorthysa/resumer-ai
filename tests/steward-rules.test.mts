@@ -61,6 +61,11 @@ suite('steward rules — what kind of skill it is', () => {
     assert.equal(filed('Search Engine Optimization (SEO)', 'soft-skill')[0].changes?.category.to, 'method');
   });
 
+  test("a certain re-filing is a quick fix; a guess from the shape of the name is not", () => {
+    assert.equal(filed('Machine Learning', 'framework')[0].quick, true);
+    assert.equal(filed('Zephyr Payments API', 'tool')[0].quick, false);
+  });
+
   test('a real soft skill filed as technical is re-filed', () => {
     assert.equal(filed('Public Speaking', 'tool')[0].changes?.category.to, 'soft-skill');
   });
@@ -68,7 +73,7 @@ suite('steward rules — what kind of skill it is', () => {
   test('anything already right, or not recognised, is left alone', () => {
     assert.equal(filed('Machine Learning', 'method').length, 0);
     assert.equal(filed('Docker', 'tool').length, 0);
-    assert.equal(filed('Blockchain', 'framework').length, 0);
+    assert.equal(filed('Tally ERP', 'tool').length, 0);
     assert.equal(filed('Gemini API', 'platform').length, 0);
   });
 });
@@ -106,7 +111,7 @@ suite('steward rules — hygiene and asks', () => {
         skill('segmentation'),
       ],
       roles: [role],
-    }).filter((x) => x.kind === 'fix' && x.quick);
+    }).filter((x) => x.kind === 'fix' && x.quick && !x.changes?.category);
     assert.deepEqual(s.map((x) => x.title), ['Drop the description that repeats the title', 'Fix spacing and symbols', 'Write as “Segmentation”']);
   });
 

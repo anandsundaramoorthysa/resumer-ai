@@ -14,6 +14,7 @@ import { certificationHashParts, dedupeCertifications } from './certifications';
 import { z } from 'zod';
 import type { ParsedRecord } from './reconcile';
 import { hashContent } from './reconcile';
+import { classifySkill } from '../skills/categories';
 import { generateStructured } from '../ai/chain';
 import type { DraftBudget } from '../ai/budget';
 import type { RepoFile } from './github';
@@ -426,6 +427,12 @@ export function mergeExtractions(parts: Array<Partial<ExtractedProfile>>): Extra
   return merged;
 }
 
+/** The classifier's answer when it is certain; nothing otherwise. */
+function certainCategory(name: string): string | null {
+  const hit = classifySkill(name);
+  return hit && hit.confidence === 'high' ? hit.category : null;
+}
+
 export function toRecords(data: ExtractedProfile): ParseResult {
   const records: ParsedRecord[] = [];
 
@@ -433,7 +440,10 @@ export function toRecords(data: ExtractedProfile): ParseResult {
     records.push({
       type: 'skill',
       name: s.name,
-      category: s.category,
+      // What the extractor called it, unless the classifier is certain it is something
+      // else: a model reading a repo is guessing at a category in passing, and
+      // lib/skills/categories.ts has a dictionary for exactly this question.
+      category: certainCategory(s.name) ?? s.category,
       tags: [s.name.toLowerCase(), s.category],
       contentHash: hashContent(['skill', s.name, s.category]),
       source: 'github-sync',

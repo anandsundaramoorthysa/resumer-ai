@@ -50,6 +50,7 @@ import {
   type QuestionKind,
 } from '@/lib/profile/enrichment';
 import { createSkill, setProjectMetrics, updateBullet } from '@/lib/profile/records';
+import { suggestedSkillCategory } from '@/lib/skills/categories';
 
 export interface QueuedQuestion {
   id: string;
@@ -349,7 +350,7 @@ export async function answerEnrichmentQuestion(
   if (!text) throw new Error('Say where you used it.');
   const recordId = await createSkill(userId, {
     name: question.topic,
-    category: 'tool',
+    category: suggestedSkillCategory(question.topic) ?? 'tool',
     evidence: text,
   });
   await settle(userId, questionId, 'answered', text, recordId);

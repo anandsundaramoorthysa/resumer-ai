@@ -584,3 +584,21 @@ export const stewardDismissals = pgTable(
   },
   (t) => [primaryKey({ columns: [t.userId, t.suggestionId] })],
 );
+
+/**
+ * What kind of thing a skill name is — the shared answer, cached once for everyone.
+ *
+ * The dictionary and shape rules in lib/skills/categories.ts place the skills the world
+ * shares; this holds what a model was asked about the rest (lib/skills/classify-ai.ts).
+ * A skill name is professional vocabulary rather than anything about a person, so the row
+ * carries no user id and nothing links it back to who listed it — which is also what makes
+ * it worth caching: a name is asked about once, ever, not once per user who has it.
+ */
+export const skillCategoryCache = pgTable('skill_category', {
+  /** The skill identity (lib/skills/identity.ts), so every spelling shares one row. */
+  nameKey: text('name_key').primaryKey(),
+  category: text('category').notNull(),
+  /** ai — the deterministic layers never write here; they need no cache. */
+  source: text('source').notNull().default('ai'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});

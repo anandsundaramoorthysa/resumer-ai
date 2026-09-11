@@ -38,10 +38,12 @@ import { CommitPayloadSchema, commitImport } from '@/lib/import/commit';
 import { proposeChanges } from '@/lib/steward/agent';
 import { WEAK_OPENERS, labelOf, ruleSuggestions, skillKeys, words } from '@/lib/steward/rules';
 import { tidyRecordData } from '@/lib/steward/tidy';
-import { SKILL_CATEGORY_LABELS, suggestedSkillCategory } from '@/lib/skills/categories';
+import { SKILL_CATEGORY_LABELS, classifySkill, skillCategoryKey, suggestedSkillCategory } from '@/lib/skills/categories';
+import { classifyUnknownSkills } from '@/lib/skills/classify-ai';
 import { verifyProposals } from '@/lib/steward/verify';
 import {
   sectionOf,
+  suggestionId,
   type StewardProfile,
   type StewardRecord,
   type StewardSection,
@@ -154,6 +156,42 @@ export async function reviewSection(
   // The rules cover the whole section at once, so they ride on the first batch only.
   const suggestions: Suggestion[] = batch === 0 ? [...rules] : [];
   let model: ReviewPage['model'] = 'none';
+
+  // Skills the deterministic layers cannot place: asked once, cached for everyone
+  // (lib/skills/classify-ai.ts), and only on the section's first request.
+  if (section === 'skills' && batch === 0) {
+    const unplaced = profile.records.filter((r) => r.type === 'skill' && !classifySkill(String(r.data.name ?? '')));
+    if (unplaced.length > 0) {
+      const budget = new DraftBudget(DRAFT_BUDGET, REVIEW_TIME_BUDGET_MS, 1_000);
+      try {
+        await assertDailyBudget(userId);
+        const found = await classifyUnknownSkills(unplaced.map((r) => String(r.data.name ?? '')), budget);
+        for (const record of unplaced) {
+          const answer = found.get(skillCategoryKey(String(record.data.name ?? '')));
+          if (!answer || answer === record.data.category) continue;
+          const draft = {
+            kind: 'fix' as const,
+            section: 'skills' as const,
+            recordId: record.id,
+            recordType: 'skill',
+            label: labelOf(record),
+            title: `File under ${SKILL_CATEGORY_LABELS[answer]}`,
+            reason: `Nothing in the built-in list knows "${String(record.data.name)}", so it was classified for you.`,
+            origin: 'ai' as const,
+            quick: false,
+            changes: { category: { from: record.data.category ?? '', to: answer } },
+            basis: { [record.id]: record.contentHash },
+          };
+          suggestions.push({ ...draft, id: suggestionId(draft) });
+        }
+        model = 'ok';
+      } catch (err) {
+        console.warn('[steward] skill classification skipped:', err instanceof Error ? err.message.slice(0, 200) : err);
+      } finally {
+        await recordDailyUsage(userId, budget.snapshot());
+      }
+    }
+  }
 
   const slice = candidates.slice(batch * size, (batch + 1) * size);
   if (slice.length > 0) {

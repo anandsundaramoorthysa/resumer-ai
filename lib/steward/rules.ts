@@ -9,7 +9,7 @@
 
 import { describeRecord, formFor } from '../profile/forms';
 import { canonicalSkillName, skillIdentity } from '../skills/identity';
-import { SKILL_CATEGORY_LABELS, suggestedSkillCategory } from '../skills/categories';
+import { ACRONYMS, SKILL_CATEGORY_LABELS, classifySkill } from '../skills/categories';
 import { tidyRecordData, tidyText } from './tidy';
 import {
   sectionOf,
@@ -102,27 +102,6 @@ function hygiene(record: StewardRecord): Draft | null {
 
 /* -------------------------------------------------------- duplicate skills -- */
 
-/**
- * Short forms that name exactly one discipline. Deliberately small: an entry here merges
- * records, so only abbreviations with a single established meaning in a resume belong.
- */
-const ABBREVIATIONS: Record<string, string> = {
-  ml: 'machine learning',
-  ai: 'artificial intelligence',
-  nlp: 'natural language processing',
-  llm: 'large language model',
-  dl: 'deep learning',
-  cv: 'computer vision',
-  seo: 'search engine optimization',
-  cms: 'content management system',
-  ocr: 'optical character recognition',
-  cnn: 'convolutional neural network',
-  rag: 'retrieval augmented generation',
-  eda: 'exploratory data analysis',
-  oop: 'object oriented programming',
-  dsa: 'data structures and algorithm',
-};
-
 /** "databases" → "database"; leaves "analysis", "class", "status" alone. */
 function singular(word: string): string {
   if (word.length > 3 && word.endsWith('s') && !/(ss|us|is)$/.test(word)) return word.slice(0, -1);
@@ -139,7 +118,7 @@ export function skillKeys(name: string): string[] {
     const w = words(s).map(singular).join(' ');
     if (!w) return;
     keys.add(w);
-    if (ABBREVIATIONS[w]) keys.add(ABBREVIATIONS[w]);
+    if (ACRONYMS[w]) keys.add(ACRONYMS[w]);
   };
   add(name);
   // "Natural Language Processing (NLP)" is both of its halves.
@@ -215,8 +194,9 @@ function skillCategories(skills: StewardRecord[]): Draft[] {
   const out: Draft[] = [];
   for (const skill of skills) {
     const name = String(skill.data.name ?? '');
-    const want = suggestedSkillCategory(name);
-    if (!want || want === skill.data.category) continue;
+    const hit = classifySkill(name);
+    if (!hit || hit.category === skill.data.category) continue;
+    const want = hit.category;
     out.push({
       kind: 'fix',
       section: 'skills',
@@ -229,7 +209,9 @@ function skillCategories(skills: StewardRecord[]): Draft[] {
           ? `"${name}" is something you know how to do, not a library or a tool.`
           : `"${name}" is an interpersonal skill rather than a technical one.`,
       origin: 'rule',
-      quick: false,
+      // A named match is certain and changes no fact, so it can go with the other quick
+      // fixes; a guess from the shape of the name is shown on its own.
+      quick: hit.confidence === 'high',
       changes: { category: { from: skill.data.category ?? '', to: want } },
       basis: { [skill.id]: skill.contentHash },
     });

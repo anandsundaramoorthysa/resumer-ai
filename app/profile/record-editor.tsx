@@ -25,6 +25,7 @@ import { deleteProfileRecord, saveRecord, type Result } from './record-actions';
 import { checkRecordAction } from './steward-actions';
 import { SaveCheckPanel } from './save-check';
 import type { SaveCheck } from '@/lib/server/steward';
+import { suggestedSkillCategory } from '@/lib/skills/categories';
 
 /**
  * Where a fact came from, said plainly. "synced" for everything that was not typed by
@@ -263,6 +264,21 @@ function RecordFields({
   // The steward's say before the first Save (lib/server/steward.ts#checkCandidate). Once
   // shown, the next Save saves; the check never blocks a save, and never runs twice.
   const [check, setCheck] = useState<SaveCheck | null>(null);
+  // Once the person picks a category themselves, typing the name no longer changes it.
+  const [categoryChosen, setCategoryChosen] = useState(Boolean(recordId));
+
+  /** A field change, with the skill's category following its name until chosen. */
+  const change = (field: string, value: string) => {
+    if (form.type === 'skill' && field === 'category') setCategoryChosen(true);
+    setValues((v) => {
+      const next = { ...v, [field]: value };
+      if (form.type === 'skill' && field === 'name' && !categoryChosen) {
+        const guess = suggestedSkillCategory(value);
+        if (guess) next.category = guess;
+      }
+      return next;
+    });
+  };
 
   // The same registry check the server runs, so the button explains itself before a
   // round trip rather than after one.
@@ -293,7 +309,7 @@ function RecordFields({
           key={field.name}
           field={field}
           value={values[field.name] ?? ''}
-          onChange={(v) => setValues({ ...values, [field.name]: v })}
+          onChange={(v) => change(field.name, v)}
         />
       ))}
 

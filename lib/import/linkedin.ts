@@ -20,6 +20,7 @@
  * is the missing evidence.
  */
 
+import { suggestedSkillCategory } from '@/lib/skills/categories';
 import { parseCsv, pick, type CsvRow } from './csv';
 import { hashContent } from '@/lib/sync/reconcile';
 import { deriveTags } from '@/lib/sync/tags';
@@ -295,10 +296,11 @@ export function buildLinkedInPreview(files: Map<string, string>): LinkedInPrevie
   for (const r of rows('skills')) {
     const name = pick(r, 'Name');
     if (!name) continue;
-    // The export does not say what kind of skill it is, and guessing would put "Team
-    // leadership" among the programming languages. 'tool' is the neutral bucket the
-    // renderer groups last; the user can change it on the profile page.
-    records.push(candidate('skill', { name, category: 'tool' }, ['skill', name, 'tool']));
+    // The export does not say what kind of skill it is. The classifier answers for most
+    // names (lib/skills/categories.ts); 'tool' stays the neutral bucket for the rest,
+    // and the profile page can change either.
+    const category = suggestedSkillCategory(name) ?? 'tool';
+    records.push(candidate('skill', { name, category }, ['skill', name, category]));
   }
 
   for (const r of rows('education')) {
