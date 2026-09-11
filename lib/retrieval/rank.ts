@@ -28,6 +28,8 @@ export interface RankedRecord {
   score: number;
   keywordScore: number;
   matchedKeywords: string[];
+  /** 0..1 — see `domainFit`. Orders records the posting's keywords cannot tell apart. */
+  domainFit: number;
 }
 
 /** How much on-domain vocabulary a record needs before it's eligible at all. */
@@ -286,10 +288,17 @@ function rankAtFloor(
       score: keywordScore * (0.7 + 0.3 * fit), // domain fit nudges ordering too
       keywordScore,
       matchedKeywords: matched,
+      domainFit: fit,
     });
   }
 
-  ranked.sort((a, b) => b.score - a.score);
+  // Domain fit breaks ties, because the nudge above multiplies by keyword overlap and so
+  // vanishes exactly where it is needed: every record the posting names nothing from
+  // scores 0 and kept the order the database returned it in. On the EA analyst posting
+  // that was 76 of 95 skills, and the 24-skill cap filled Skills with React, Next.js,
+  // Tailwind CSS and Express.js while Machine Learning, Exploratory Data Analysis and Time
+  // Series — on a data resume — were left off.
+  ranked.sort((a, b) => b.score - a.score || b.domainFit - a.domainFit);
   return { ranked, excluded };
 }
 
