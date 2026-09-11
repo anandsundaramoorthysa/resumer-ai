@@ -52,7 +52,8 @@ Actions:
 - recategorize: skills only, and only when the current category is clearly wrong — if two categories are both defensible, leave it. "value" is one of language, framework, tool, platform, soft-skill.
   - language: programming, query or markup languages (Python, SQL, HTML).
   - framework: frameworks and libraries (React, Flask, scikit-learn, PyTorch, XGBoost, LightGBM).
-  - tool: software tools, and methods or disciplines such as Machine Learning, Statistics, Data Analysis, Prompt Engineering.
+  - tool: software tools you operate (Git, Docker, Jira, VS Code).
+  - method: techniques, disciplines and practices — Machine Learning, Statistics, Data Analysis, Prompt Engineering, SEO, Web Development.
   - platform: cloud services, runtimes, databases, APIs and hosted products (AWS, Node.js, PostgreSQL, Firebase, Gemini API).
   - soft-skill: interpersonal and business skills only (Communication, Public Speaking, People Management). Web Development or SEO are not soft skills.
 - merge: skills only. Two records that are the same skill under different names. "recordId" is the one to remove, "otherId" the one to keep — keep the clearer, fuller name. Do not merge related-but-different skills (Git and GitHub, Java and JavaScript, Vector Search and Vector Databases).

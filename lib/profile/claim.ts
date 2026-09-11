@@ -132,7 +132,7 @@ Rules, in order of importance:
 - Write in their voice, not a recruiter's. Do not embellish, and do not add adjectives they did not use.
 
 Record types and what each is for:
-- skill: a tool, language, method or discipline. "name" is the skill; "category" is one of language, framework, tool, platform, soft-skill.
+- skill: a tool, language, method or discipline. "name" is the skill; "category" is one of language, framework, tool, platform, method (a technique or discipline such as Machine Learning or SEO), soft-skill.
 - project: something they built or ran. "name", "description", "stack", "impactMetrics", "links".
 - certification: "name" and "issuer". education: "institution", "credential", "field".
 - publication / writing: "title", "venue", "url". award: "title", "issuer". achievement: "title", "description".

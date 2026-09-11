@@ -1,5 +1,7 @@
 'use server';
 
+import type { SkillCategory } from '@/lib/skills/categories';
+
 import { revalidatePath } from 'next/cache';
 import { auth } from '@/auth';
 import {
@@ -91,7 +93,7 @@ export async function addSkill(name: string, category: string): Promise<Result> 
     async () => {
       await createSkill(userId, {
         name,
-        category: category as 'language' | 'framework' | 'tool' | 'platform' | 'soft-skill',
+        category: category as SkillCategory,
       });
     },
     'Skill added.',

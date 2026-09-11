@@ -40,7 +40,7 @@ const ResumeExtractionSchema = z.object({
   skills: z.array(
     z.object({
       name: z.string(),
-      category: z.enum(['language', 'framework', 'tool', 'platform', 'soft-skill']),
+      category: z.enum(['language', 'framework', 'tool', 'platform', 'method', 'soft-skill']),
     }),
   ),
   projects: z.array(

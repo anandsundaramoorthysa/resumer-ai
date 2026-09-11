@@ -11,6 +11,7 @@
  */
 
 import { findUngroundedTokens } from '../generate/grounding';
+import { SKILL_CATEGORIES as CATEGORIES, SKILL_CATEGORY_LABELS } from '../skills/categories';
 import { formFor } from '../profile/forms';
 import { labelOf, words } from './rules';
 import { tidyText } from './tidy';
@@ -33,15 +34,9 @@ export interface AgentProposal {
   reason: string;
 }
 
-export const SKILL_CATEGORIES = ['language', 'framework', 'tool', 'platform', 'soft-skill'] as const;
+export { SKILL_CATEGORIES } from '../skills/categories';
 
-const CATEGORY_LABELS: Record<string, string> = {
-  language: 'languages',
-  framework: 'frameworks',
-  tool: 'tools',
-  platform: 'platforms',
-  'soft-skill': 'soft skills',
-};
+
 
 /**
  * Which fields a rewrite may touch, per type.
@@ -211,14 +206,14 @@ export function verifyProposals(
       }
     } else if (p.action === 'recategorize') {
       if (record.type !== 'skill') { refuse(p, 'only skills have categories'); continue; }
-      if (!(SKILL_CATEGORIES as readonly string[]).includes(p.value) || p.value === record.data.category) {
+      if (!(CATEGORIES as readonly string[]).includes(p.value) || p.value === record.data.category) {
         refuse(p, 'category not valid or unchanged');
         continue;
       }
       draft = {
         ...base,
         kind: 'fix',
-        title: `File under ${CATEGORY_LABELS[p.value]}`,
+        title: `File under ${SKILL_CATEGORY_LABELS[p.value as keyof typeof SKILL_CATEGORY_LABELS]}`,
         changes: { category: { from: record.data.category ?? '', to: p.value } },
       };
     } else if (p.action === 'merge') {

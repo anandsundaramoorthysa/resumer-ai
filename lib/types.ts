@@ -42,10 +42,12 @@ export interface ProfileRecordBase {
   updatedAt: Date;
 }
 
+import type { SkillCategory } from './skills/categories';
+
 export interface SkillRecord extends ProfileRecordBase {
   type: 'skill';
   name: string;
-  category: 'language' | 'framework' | 'tool' | 'platform' | 'soft-skill';
+  category: SkillCategory;
   proficiency?: 'familiar' | 'proficient' | 'expert';
   yearsOfExperience?: number;
   lastUsed?: Date;

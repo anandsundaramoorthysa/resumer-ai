@@ -49,7 +49,7 @@ export const BulletInput = z.object({
 
 export const SkillInput = z.object({
   name: nonEmpty.max(80),
-  category: z.enum(['language', 'framework', 'tool', 'platform', 'soft-skill']),
+  category: z.enum(['language', 'framework', 'tool', 'platform', 'method', 'soft-skill']),
   /**
    * Where the user says they used this — set only by the enrichment queue, which will
    * not add a skill without it (lib/server/enrichment.ts).

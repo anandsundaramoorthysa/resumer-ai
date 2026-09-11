@@ -49,6 +49,30 @@ suite('steward rules — duplicate skills', () => {
   });
 });
 
+suite('steward rules — what kind of skill it is', () => {
+  const filed = (name: string, category: string) =>
+    ruleSuggestions({ records: [rec('skill', { name, category })], roles: [] }).filter((x) => x.kind === 'fix' && x.changes?.category);
+
+  test('a technique filed as a library is re-filed as a method', () => {
+    const [s] = filed('Machine Learning', 'framework');
+    assert.equal(s.title, 'File under methods and disciplines');
+    assert.equal(s.changes?.category.to, 'method');
+    assert.equal(filed('Statistics', 'tool')[0].changes?.category.to, 'method');
+    assert.equal(filed('Search Engine Optimization (SEO)', 'soft-skill')[0].changes?.category.to, 'method');
+  });
+
+  test('a real soft skill filed as technical is re-filed', () => {
+    assert.equal(filed('Public Speaking', 'tool')[0].changes?.category.to, 'soft-skill');
+  });
+
+  test('anything already right, or not recognised, is left alone', () => {
+    assert.equal(filed('Machine Learning', 'method').length, 0);
+    assert.equal(filed('Docker', 'tool').length, 0);
+    assert.equal(filed('Blockchain', 'framework').length, 0);
+    assert.equal(filed('Gemini API', 'platform').length, 0);
+  });
+});
+
 suite('steward rules — bullets', () => {
   test('a bullet that only repeats the role dates is proposed for removal', () => {
     assert.ok(isDatesOnly('Freelanced through March 2026.', role));
@@ -82,9 +106,8 @@ suite('steward rules — hygiene and asks', () => {
         skill('segmentation'),
       ],
       roles: [role],
-    }).filter((x) => x.kind === 'fix');
+    }).filter((x) => x.kind === 'fix' && x.quick);
     assert.deepEqual(s.map((x) => x.title), ['Drop the description that repeats the title', 'Fix spacing and symbols', 'Write as “Segmentation”']);
-    assert.ok(s.every((x) => x.quick));
   });
 
   test('missing stack, certificate date and role bullets become questions', () => {

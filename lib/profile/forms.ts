@@ -73,7 +73,7 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
         name: 'category',
         label: 'Kind',
         kind: 'select',
-        options: ['language', 'framework', 'tool', 'platform', 'soft-skill'],
+        options: ['language', 'framework', 'tool', 'platform', 'method', 'soft-skill'],
       },
     ],
     identityFields: ['name', 'category'],

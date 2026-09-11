@@ -75,6 +75,12 @@ suite('skill rows', () => {
     assert.equal(groupSkills(['Blockchain'])[0].label, 'Other');
   });
 
+  test('a method no name rule places gets the Methods row, not Other', () => {
+    assert.equal(groupSkills(['Design of Experiments'], () => 'method')[0].label, 'Methods and Practices');
+    // A method the name rules already place stays where it was.
+    assert.equal(groupSkills(['Machine Learning'], () => 'method')[0].label, 'AI and ML');
+  });
+
   test('a row survives formatting and parsing unchanged', () => {
     const r = { label: 'Databases', names: ['MongoDB', 'MySQL'] };
     assert.equal(formatSkillRow(r), 'Databases: MongoDB, MySQL');

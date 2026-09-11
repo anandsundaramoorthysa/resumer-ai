@@ -9,6 +9,7 @@
 
 import { describeRecord, formFor } from '../profile/forms';
 import { canonicalSkillName, skillIdentity } from '../skills/identity';
+import { SKILL_CATEGORY_LABELS, suggestedSkillCategory } from '../skills/categories';
 import { tidyRecordData, tidyText } from './tidy';
 import {
   sectionOf,
@@ -202,6 +203,40 @@ function duplicateSkills(skills: StewardRecord[]): Draft[] {
   return out;
 }
 
+/**
+ * A skill filed as something it is not.
+ *
+ * Every parser had five categories and no home for a technique, so Machine Learning was a
+ * "framework", Statistics a "tool", and Web Development and SEO "soft skills". The table
+ * in ../skills/categories.ts answers only where the answer is not in doubt, so a skill it
+ * does not recognise is never questioned.
+ */
+function skillCategories(skills: StewardRecord[]): Draft[] {
+  const out: Draft[] = [];
+  for (const skill of skills) {
+    const name = String(skill.data.name ?? '');
+    const want = suggestedSkillCategory(name);
+    if (!want || want === skill.data.category) continue;
+    out.push({
+      kind: 'fix',
+      section: 'skills',
+      recordId: skill.id,
+      recordType: 'skill',
+      label: labelOf(skill),
+      title: `File under ${SKILL_CATEGORY_LABELS[want]}`,
+      reason:
+        want === 'method'
+          ? `"${name}" is something you know how to do, not a library or a tool.`
+          : `"${name}" is an interpersonal skill rather than a technical one.`,
+      origin: 'rule',
+      quick: false,
+      changes: { category: { from: skill.data.category ?? '', to: want } },
+      basis: { [skill.id]: skill.contentHash },
+    });
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------- bullets -- */
 
 const STOPWORDS = new Set([
@@ -381,6 +416,7 @@ export function ruleSuggestions(
   const drafts: Draft[] = [
     ...live.map(hygiene).filter((d): d is Draft => d !== null),
     ...duplicateSkills(live.filter((r) => r.type === 'skill')),
+    ...skillCategories(live.filter((r) => r.type === 'skill')),
     ...bulletRules(live.filter((r) => r.type === 'experience-bullet'), profile.roles),
     ...asks({ records: live, roles: profile.roles.filter((r) => r.reviewState !== 'rejected') }),
   ];

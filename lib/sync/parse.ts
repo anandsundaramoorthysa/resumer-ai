@@ -51,7 +51,7 @@ export const ExtractionSchema = z.object({
     .array(
       z.object({
         name: z.string().max(120),
-        category: z.enum(['language', 'framework', 'tool', 'platform', 'soft-skill']),
+        category: z.enum(['language', 'framework', 'tool', 'platform', 'method', 'soft-skill']),
       }),
     )
     .max(200),

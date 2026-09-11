@@ -35,6 +35,7 @@ const ROW_ORDER = [
   'Web',
   'AI and ML',
   'Software and Tools',
+  'Methods and Practices',
   'Marketing and SEO',
   'Soft Skills',
   'Other',
@@ -66,7 +67,9 @@ export function groupSkills(
           ? 'Soft Skills'
           : category === 'language'
             ? 'Programming Languages'
-            : 'Other';
+            : category === 'method'
+              ? 'Methods and Practices'
+              : 'Other';
     }
     rows.set(label, [...(rows.get(label) ?? []), name.trim()]);
   }

@@ -38,6 +38,7 @@ import { CommitPayloadSchema, commitImport } from '@/lib/import/commit';
 import { proposeChanges } from '@/lib/steward/agent';
 import { WEAK_OPENERS, labelOf, ruleSuggestions, skillKeys, words } from '@/lib/steward/rules';
 import { tidyRecordData } from '@/lib/steward/tidy';
+import { SKILL_CATEGORY_LABELS, suggestedSkillCategory } from '@/lib/skills/categories';
 import { verifyProposals } from '@/lib/steward/verify';
 import {
   sectionOf,
@@ -377,6 +378,10 @@ export async function checkCandidate(
     if (type === 'skill' && raw.name !== data.name) notes.push(`It will be saved as “${String(data.name)}”, the usual spelling.`);
 
     if (type === 'skill') {
+      const want = suggestedSkillCategory(String(data.name ?? ''));
+      if (want && want !== data.category) {
+        notes.push(`${String(data.name)} is usually filed under ${SKILL_CATEGORY_LABELS[want]}; you chose ${String(data.category)}.`);
+      }
       const keys = new Set(skillKeys(String(data.name ?? '')));
       const same = others.filter((r) => r.type === 'skill' && skillKeys(String(r.data.name ?? '')).some((k) => keys.has(k)));
       if (same.length > 0) notes.push(`You already have ${same.map((r) => `“${String(r.data.name)}”`).join(', ')} — this would list the same skill twice.`);
