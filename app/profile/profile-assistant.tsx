@@ -154,7 +154,7 @@ function ReviewTool() {
           >
             Review my profile
           </button>
-          <span className="text-xs text-muted">About a minute. Uses a little of today’s AI allowance.</span>
+          <span className="text-xs text-muted">A minute or two. Uses a little of today’s AI allowance.</span>
         </div>
       ) : null}
 
@@ -184,11 +184,24 @@ function ReviewTool() {
               disabled={bulkPending}
               onClick={() =>
                 startBulk(async () => {
-                  const res = await applyQuickFixesAction(quick);
-                  if (!res.ok) return setNotice(res.message);
-                  const applied = new Set(res.data.applied);
-                  setSuggestions((list) => list.filter((s) => !applied.has(s.id)));
-                  setNotice(`Applied ${res.data.applied.length} quick fix${res.data.applied.length === 1 ? '' : 'es'}${res.data.failed ? `; ${res.data.failed} could not be applied — review again` : ''}.`);
+                  // A few per request: one request for forty of them is a long write that
+                  // the host cuts off at thirty seconds, which is a 502 mid-apply.
+                  let done = 0;
+                  let failed = 0;
+                  for (let i = 0; i < quick.length; i += QUICK_CHUNK) {
+                    const chunk = quick.slice(i, i + QUICK_CHUNK);
+                    const res = await applyQuickFixesAction(chunk);
+                    if (!res.ok) {
+                      setNotice(res.message);
+                      break;
+                    }
+                    const applied = new Set(res.data.applied);
+                    done += res.data.applied.length;
+                    failed += res.data.failed;
+                    setSuggestions((list) => list.filter((x) => !applied.has(x.id)));
+                    setNotice(`Applying quick fixes… ${done} of ${quick.length}`);
+                  }
+                  setNotice(`Applied ${done} quick fix${done === 1 ? '' : 'es'}${failed ? `; ${failed} could not be applied — review again` : ''}.`);
                 })
               }
               className="min-h-11 rounded-lg border border-brand px-4 text-sm font-semibold text-brand-dark hover:bg-brand-tint disabled:opacity-50"
@@ -231,6 +244,9 @@ function dedupe(list: Suggestion[]): Suggestion[] {
   const seen = new Set<string>();
   return list.filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
 }
+
+/** Quick fixes per request. Each is a read, a write and an audit row. */
+const QUICK_CHUNK = 5;
 
 const KIND_ORDER: Record<Suggestion['kind'], number> = { merge: 0, remove: 1, move: 2, fix: 3, ask: 4 };
 function order(list: Suggestion[]): Suggestion[] {
