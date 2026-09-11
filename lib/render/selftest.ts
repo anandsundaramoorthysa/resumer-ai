@@ -13,6 +13,7 @@
 import mammoth from 'mammoth';
 import { ensureDOMMatrix } from './dommatrix';
 import type { ResumeDocument } from '../types';
+import { parseSkillRow } from '../generate/resume-lines';
 
 export interface SelfTestIssue {
   severity: 'fail' | 'warn';
@@ -259,9 +260,11 @@ export async function selfTest(
         detail: `The "${skills!.heading}" heading did not survive parsing, so the highest-weighted keyword zone is gone.`,
       });
     } else {
-      const wanted = skillsText
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
+      // Skills print as "Label: a, b" rows, and the DOCX sets a tab after the colon, so
+      // the names are read from the rows — the label is never a skill to look for.
+      const wanted = skills!.items
+        .flatMap((i) => parseSkillRow(i.text).names)
+        .map((s) => s.toLowerCase())
         .filter(Boolean)
         .slice(0, 5);
       const regionLower = region.toLowerCase();

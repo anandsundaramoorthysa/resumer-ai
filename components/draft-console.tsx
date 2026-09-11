@@ -326,20 +326,28 @@ export function DraftConsole() {
     }
 
     const box: { token?: string; fit?: FitReport } = {};
-    try {
-      const outcome = await postStream('/api/draft/assess', init, (name, payload) => {
-        if (name === 'stage') onStage(payload);
-        else if (name === 'assessed') {
-          const p = payload as { token: string; fit: FitReport };
-          box.token = p.token;
-          box.fit = p.fit;
-        } else if (name === 'error') {
-          setError((payload as { message?: string }).message ?? 'The fit check failed.');
-        }
-      });
-      if (outcome === 'cut') setError(CUT_MESSAGE);
-    } catch (err) {
-      if ((err as Error).name !== 'AbortError') setError((err as Error).message);
+    // One silent retry when the connection drops before the verdict arrives. The fit
+    // check writes nothing, so running it again is safe — and a reset mid-stream at the
+    // host's edge was seen in end-to-end runs, surfacing as a bare "network error".
+    for (let attempt = 1; attempt <= 2 && !box.token; attempt++) {
+      if (attempt > 1) setEvents([]);
+      try {
+        const outcome = await postStream('/api/draft/assess', init, (name, payload) => {
+          if (name === 'stage') onStage(payload);
+          else if (name === 'assessed') {
+            const p = payload as { token: string; fit: FitReport };
+            box.token = p.token;
+            box.fit = p.fit;
+          } else if (name === 'error') {
+            setError((payload as { message?: string }).message ?? 'The fit check failed.');
+          }
+        });
+        if (outcome !== 'cut') break;
+        if (attempt === 2) setError(CUT_MESSAGE);
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') break;
+        if (attempt === 2) setError('The connection dropped during the fit check. Please try again.');
+      }
     }
 
     if (!box.token || !box.fit) {

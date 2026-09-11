@@ -170,3 +170,12 @@ suite('hash consistency with the sync', () => {
     assert(parts.join('|') === 'award|Hackathon winner', `got ${parts.join('|')}`);
   });
 });
+
+suite('education summary line', () => {
+  test('shows the grade, and the field only when the degree does not already say it', () => {
+    assert.equal(
+      describeRecord('education', { credential: 'B.Sc. Computer Science', field: 'Computer Science', grade: '7.5 / 10', institution: 'Loyola College' }),
+      'B.Sc. Computer Science · 7.5 / 10 · Loyola College',
+    );
+  });
+});

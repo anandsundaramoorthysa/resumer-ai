@@ -13,6 +13,7 @@
 import { certificationHashParts } from '../sync/certifications';
 import type { ProfileRecord } from '../types';
 import { educationHashParts } from '../sync/education';
+import { withoutRepeatedParts } from '../generate/display-text';
 
 export type FieldKind = 'text' | 'textarea' | 'list' | 'select';
 
@@ -120,7 +121,7 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
         field: str(d, 'field') || undefined,
       }),
     describe: (d) =>
-      joined([str(d, 'credential'), str(d, 'field'), str(d, 'institution')]),
+      joined(withoutRepeatedParts([str(d, 'credential'), str(d, 'field'), str(d, 'grade'), str(d, 'institution')])),
   },
 
   certification: {

@@ -233,6 +233,18 @@ await (async () => {
       .includes('skills'));
   });
 
+  await testAsync('labelled skill rows pass the DOCX check', async () => {
+    // Failed on every live DOCX: the tab after "Programming Languages:" meant the label
+    // plus first skill, read as one skill, was never found.
+    const doc = goodDoc();
+    doc.sections[0].items = [
+      { text: 'Programming Languages: Python, TypeScript', sourceRecordId: null },
+      { text: 'Databases: SQL, PostgreSQL', sourceRecordId: null },
+    ];
+    const result = await selfTest(await renderResumeDocx(doc), 'docx', doc);
+    assert.deepEqual(failures(result), []);
+  });
+
   await testAsync('catches a skills section that did not survive rendering', async () => {
     const doc = goodDoc();
     // Deliberately uses skills that DO appear elsewhere in the document. The check used
