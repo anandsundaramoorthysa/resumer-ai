@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { auth } from '@/auth';
 import { CommitPayloadSchema, commitImport } from '@/lib/import/commit';
+import { reviewImportCandidates, type ImportNote } from '@/lib/server/steward';
 
 export interface ImportActionResult {
   ok: boolean;
@@ -48,5 +49,24 @@ export async function commitImportAction(
       ok: false,
       message: `Could not save: ${err instanceof Error ? err.message.slice(0, 200) : 'unknown error'}`,
     };
+  }
+}
+
+/**
+ * What the steward says about an import before it is committed — STEWARD.md.
+ *
+ * Advice only, and never fatal: an import whose check cannot run is still an import.
+ */
+export async function reviewImportAction(
+  candidates: Array<{ key: string; type: string; record: Record<string, unknown> }>,
+): Promise<Record<string, ImportNote>> {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId || !Array.isArray(candidates) || candidates.length === 0) return {};
+  try {
+    return await reviewImportCandidates(userId, candidates.slice(0, 200));
+  } catch (err) {
+    console.error('[import] steward review failed:', err);
+    return {};
   }
 }

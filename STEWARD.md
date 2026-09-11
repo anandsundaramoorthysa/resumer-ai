@@ -135,11 +135,33 @@ A **suggestion** is one proposed change with its reason and a before/after:
    "Use this" per item, and Save or "Save as typed". If the model is slow or down, it
    saves as typed — the agent never blocks a save.
 3. **Import review** — after extraction, candidates already in the profile are
-   unticked and labelled, and wording fixes are offered per row before commit.
+   unticked and labelled, and wording fixes are offered per row before commit. The check
+   runs after the list is on screen, never in front of it.
 4. **Portfolio sync queue** — "Review with AI" runs the same review over the pending
    items, so a fix is made before approval rather than after.
 
-## 4. Test plan
+## 4. What the live runs changed
+
+Measured against the owner's real profile (191 records) on production:
+
+- **Skills are rule-only.** Asked about a hundred skills the model mostly proposed moving
+  one between categories a resume barely distinguishes, at five model calls per review.
+  The rules already merge and spell them. Dropping it shortened the review and removed the
+  noisiest suggestions.
+- **12 s per provider attempt, not the whole budget.** Given all 22 s, a slow Fireworks
+  spent it alone and the four providers behind it were never asked, so a section came back
+  "the AI part could not run". Groq answers the same call in about two.
+- **Batches are small** (10–20 records) and **two requests run at once**; three earned
+  rate-limit refusals from the shared chain. A batch the providers cannot serve is retried
+  once at the end.
+- **Quick fixes apply five per request.** Twenty in one server action exceeded the host's
+  thirty seconds and returned 502 mid-apply.
+- **Applying invalidates neighbours.** A fix rewrites the record it touches, so any other
+  suggestion about that record was judged on words that no longer exist: the page drops
+  them and says so, rather than offering a button whose only outcome is a refusal.
+- A whole review of that profile: about 135 seconds, ~46 suggestions.
+
+## 5. Test plan
 
 - Unit: tidy, every rule (fixtures taken from the real profile's defects), the verifier
   (an invented figure, an invented company, an off-enum category, a stale apply),

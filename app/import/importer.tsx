@@ -15,7 +15,8 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { commitImportAction, type ImportActionResult } from './actions';
+import { commitImportAction, reviewImportAction, type ImportActionResult } from './actions';
+import type { ImportNote } from '@/lib/server/steward';
 
 interface Candidate {
   key: string;
@@ -93,6 +94,9 @@ export function Importer() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [useContact, setUseContact] = useState(true);
   const [result, setResult] = useState<ImportActionResult | null>(null);
+  /** What the steward found about these candidates, keyed by candidate (STEWARD.md). */
+  const [notes, setNotes] = useState<Record<string, ImportNote>>({});
+  const [checking, setChecking] = useState(false);
   const [source, setSource] = useState<ImportSource>('resume');
   const [saving, startSaving] = useTransition();
 
@@ -208,6 +212,7 @@ export function Importer() {
       setSelected(allKeys);
       setUseContact(Boolean(data.contact));
       setPhase('review');
+      void check(data);
 
       const notes: string[] = [];
       if (unread > 0) {
@@ -228,6 +233,52 @@ export function Importer() {
       setError((err as Error).message);
       setPhase('choose');
     }
+  };
+
+  /**
+   * The steward's pass over what was extracted, after the list is on screen.
+   *
+   * Not before: the list is the point of the review step, and holding it back for a model
+   * call would trade the thing the user asked for against advice about it. Duplicates
+   * arrive ticked and are unticked when the answer comes.
+   */
+  const check = async (data: Preview) => {
+    const candidates = [
+      ...data.records.map((c) => ({ key: c.key, type: c.type, record: c.record })),
+      ...data.roles.flatMap((r) => r.bullets.map((b) => ({ key: b.key, type: b.type, record: b.record }))),
+    ];
+    if (candidates.length === 0) return;
+    setChecking(true);
+    try {
+      const found = await reviewImportAction(candidates);
+      setNotes(found);
+      const dupes = Object.entries(found).filter(([, n]) => n.duplicateOf).map(([k]) => k);
+      if (dupes.length > 0) {
+        setSelected((prev) => {
+          const next = new Set(prev);
+          for (const k of dupes) next.delete(k);
+          return next;
+        });
+      }
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  /** Takes the steward's wording for one candidate, in place, before anything is saved. */
+  const takeRewrite = (key: string) => {
+    const note = notes[key];
+    if (!note?.rewrite || !preview) return;
+    const apply = (c: Candidate): Candidate =>
+      c.key === key
+        ? { ...c, label: note.rewrite!.field === 'text' ? note.rewrite!.to : c.label, record: { ...c.record, [note.rewrite!.field]: note.rewrite!.to } }
+        : c;
+    setPreview({
+      ...preview,
+      records: preview.records.map(apply),
+      roles: preview.roles.map((r) => ({ ...r, bullets: r.bullets.map(apply) })),
+    });
+    setNotes({ ...notes, [key]: { ...note, rewrite: undefined } });
   };
 
   const toggle = (key: string) =>
@@ -468,6 +519,11 @@ export function Importer() {
               Untick anything that is wrong or out of date. Nothing is saved until you
               press the button.
             </p>
+            {checking ? (
+              <p className="mt-1 text-xs text-muted" role="status">
+                Checking these against your profile…
+              </p>
+            ) : null}
           </div>
           <div className="flex gap-2">
             <button
@@ -548,6 +604,8 @@ export function Importer() {
                     candidate={b}
                     checked={selected.has(b.key)}
                     onToggle={() => toggle(b.key)}
+                    note={notes[b.key]}
+                    onUseRewrite={() => takeRewrite(b.key)}
                   />
                 ))}
               </ul>
@@ -603,6 +661,8 @@ export function Importer() {
                     checked={selected.has(c.key)}
                     onToggle={() => toggle(c.key)}
                     divided={!tagLike}
+                    note={notes[c.key]}
+                    onUseRewrite={() => takeRewrite(c.key)}
                   />
                 ))}
               </ul>
@@ -657,6 +717,8 @@ function CandidateRow({
   candidate,
   checked,
   onToggle,
+  note,
+  onUseRewrite,
   /**
    * Whether to draw the dashed rule under the row. Off in the columned groups, where a
    * per-row underline no longer marks the end of anything — see the caller.
@@ -666,6 +728,8 @@ function CandidateRow({
   candidate: Candidate;
   checked: boolean;
   onToggle: () => void;
+  note?: ImportNote;
+  onUseRewrite?: () => void;
   divided?: boolean;
 }) {
   return (
@@ -685,6 +749,28 @@ function CandidateRow({
           {candidate.label}
           {candidate.detail ? (
             <span className="mt-0.5 block text-xs text-muted">{candidate.detail}</span>
+          ) : null}
+          {note?.duplicateOf ? (
+            <span className="mt-0.5 block text-xs text-warning">
+              Already in your profile as {note.duplicateOf} — unticked
+            </span>
+          ) : null}
+          {note?.rewrite ? (
+            <span className="mt-1 block rounded bg-brand-tint/40 px-2 py-1.5 text-xs">
+              <span className="block font-semibold">Suggested wording</span>
+              <span className="mt-0.5 block">{note.rewrite.to}</span>
+              <span className="mt-0.5 block text-muted">{note.rewrite.reason}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  onUseRewrite?.();
+                }}
+                className="mt-1 min-h-11 rounded-lg border border-brand px-3 text-xs font-semibold text-brand-dark hover:bg-brand-tint"
+              >
+                Use this wording
+              </button>
+            </span>
           ) : null}
         </span>
       </label>

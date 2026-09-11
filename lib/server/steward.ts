@@ -487,3 +487,104 @@ export async function commitFromAssistant(userId: string, payload: unknown, prom
   });
   return summary.message;
 }
+
+/* --------------------------------------------------------- import review -- */
+
+export interface ImportNote {
+  /** What the profile already holds that this candidate repeats. */
+  duplicateOf?: string;
+  rewrite?: { field: string; to: string; reason: string };
+}
+
+/** Prose candidates the model is worth asking about, most valuable first. */
+const IMPORT_PROSE: Record<string, string> = {
+  'experience-bullet': 'text',
+  project: 'description',
+  summary: 'text',
+  achievement: 'description',
+  award: 'description',
+};
+
+/** How many import candidates one model call covers. One call: the importer has 30 s too. */
+const IMPORT_MODEL_LIMIT = 12;
+
+/**
+ * The steward between an import and the profile — STEWARD.md §3, "where it sits" 3.
+ *
+ * Says which candidates the profile already holds, so they arrive unticked instead of
+ * becoming a second copy of a career, and offers better wording for the lines that need
+ * it. Nothing is written here: the importer still commits what the user ticks.
+ */
+export async function reviewImportCandidates(
+  userId: string,
+  candidates: Array<{ key: string; type: string; record: Record<string, unknown> }>,
+): Promise<Record<string, ImportNote>> {
+  const profile = await loadStewardProfile(userId);
+  const notes: Record<string, ImportNote> = {};
+
+  const bulletTexts = profile.records
+    .filter((r) => r.type === 'experience-bullet')
+    .map((r) => String(r.data.text ?? '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').trim());
+
+  for (const c of candidates) {
+    const data = tidyRecordData(c.type, c.record);
+    if (c.type === 'skill') {
+      const keys = new Set(skillKeys(String(data.name ?? '')));
+      const hit = profile.records.find((r) => r.type === 'skill' && skillKeys(String(r.data.name ?? '')).some((k) => keys.has(k)));
+      if (hit) notes[c.key] = { duplicateOf: String(hit.data.name) };
+      continue;
+    }
+    if (c.type === 'experience-bullet') {
+      const text = String(data.text ?? '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').trim();
+      if (text && bulletTexts.includes(text)) notes[c.key] = { duplicateOf: 'a bullet already in your profile' };
+      continue;
+    }
+    const form = formFor(c.type);
+    if (!form) continue;
+    const fields = Object.fromEntries(
+      form.fields.map((f) => [f.name, data[f.name]]).filter(([, v]) => v !== undefined && v !== ''),
+    );
+    const hash = hashContent(hashInput(form, fields));
+    const hit = profile.records.find((r) => r.contentHash === hash);
+    if (hit) notes[c.key] = { duplicateOf: labelOf(hit) };
+  }
+
+  // Wording, for the lines that show a reason to ask.
+  const prose = candidates
+    .filter((c) => {
+      const field = IMPORT_PROSE[c.type];
+      return field && !notes[c.key]?.duplicateOf && wordingNeedsReview(String(c.record[field] ?? ''));
+    })
+    .slice(0, IMPORT_MODEL_LIMIT);
+
+  if (prose.length > 0) {
+    const records: StewardRecord[] = prose.map((c) => ({
+      id: c.key,
+      type: c.type,
+      source: 'ai-import',
+      reviewState: 'approved',
+      contentHash: 'candidate',
+      data: tidyRecordData(c.type, c.record),
+    }));
+    const budget = new DraftBudget(DRAFT_BUDGET, REVIEW_TIME_BUDGET_MS, 1_000);
+    try {
+      await assertDailyBudget(userId);
+      const section = records[0].type === 'experience-bullet' ? 'experience' : 'projects';
+      const { proposals } = await proposeChanges({ section, records, roles: profile.roles, budget });
+      const { suggestions } = verifyProposals(proposals, records, profile.roles);
+      for (const s of suggestions) {
+        for (const [field, change] of Object.entries(s.changes ?? {})) {
+          if (typeof change.to === 'string' && IMPORT_PROSE[s.recordType] === field) {
+            notes[s.recordId] = { ...notes[s.recordId], rewrite: { field, to: change.to, reason: s.reason } };
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[steward] import review skipped the model:', err instanceof Error ? err.message.slice(0, 200) : err);
+    } finally {
+      await recordDailyUsage(userId, budget.snapshot());
+    }
+  }
+
+  return notes;
+}
