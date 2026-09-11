@@ -43,7 +43,11 @@ export function extractProperNouns(text: string): string[] {
     if (!n || n.length < 2) continue;
     if (STOPWORDS.has(n)) continue;
     // Skip the first word of the sentence unless it's clearly a tech token.
-    if (i === 0 && !hasTechShape && !/[A-Z]{2,}/.test(raw)) continue;
+    // A capital that only marks the start of a sentence is not a name. The first word was
+    // always exempt; every sentence start is now, because a multi-sentence summary had
+    // "Proven …" and "Ready …" refused as entities the profile never mentioned.
+    const sentenceStart = i === 0 || /[.!?]$/.test(tokens[i - 1]);
+    if (sentenceStart && !hasTechShape && !/[A-Z]{2,}/.test(raw)) continue;
     out.push(n);
   }
   return out;

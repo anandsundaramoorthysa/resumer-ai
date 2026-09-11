@@ -284,7 +284,27 @@ export function skillIdentity(name: string): string {
  * wrote, title-cased only if they wrote it entirely in lowercase (`titleCasePlain`).
  */
 export function canonicalSkillName(name: string): string {
-  return ALIASES[normalizeSkill(name)] ?? titleCasePlain(name);
+  const known = ALIASES[normalizeSkill(name)];
+  if (known) return known;
+  const trimmed = name.trim();
+  const plain = titleCasePlain(trimmed);
+  if (plain !== trimmed) return plain;
+
+  // A name that is already partly capitalised gets its lowercase words brought into
+  // line: "Prompt engineering" printed beside "Random Forest" read as a mistake. Only
+  // all-lowercase words change — acronyms, versions and "C++" are left as written — and a
+  // word lowercase by convention ("pandas") keeps the table's spelling. Whole aliases are
+  // NOT looked up per word: "RAG" expands to "Retrieval-Augmented Generation (RAG)".
+  return trimmed
+    .split(/\s+/)
+    .map((word, i) => {
+      if (!/^[a-z][a-z'-]*$/.test(word)) return word;
+      if (i > 0 && SMALL_WORDS.has(word)) return word;
+      const table = ALIASES[normalizeSkill(word)];
+      if (table && table.toLowerCase() === word) return table;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
 }
 
 /**

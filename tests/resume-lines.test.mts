@@ -13,6 +13,8 @@ import {
   topByRelevance,
 } from '../lib/generate/resume-lines';
 import { lengthVerdict } from '../lib/quality/length';
+import { isGrounded } from '../lib/generate/grounding';
+import { canonicalSkillName } from '../lib/skills/identity';
 import type { JobRequirement, ProfileRecord, ResumeDocument } from '../lib/types';
 
 const job: JobRequirement = {
@@ -118,6 +120,37 @@ suite('picking the top three', () => {
       3,
     );
     assert.deepEqual(picked.map((c) => c.id), ['d', 'b', 'c']);
+  });
+});
+
+suite('the summary\'s grounding', () => {
+  const facts = 'M.Sc. Data Science student. Skills: Python, SQL. Freelancer at Self-employed.';
+
+  test('a capital that only starts a sentence is not an invented name', () => {
+    // The live refusal: "Proven" and "Ready" rejected as entities the profile never named.
+    assert.ok(isGrounded('Data Science student skilled in Python and SQL. Proven at freelance work. Ready to learn.', facts));
+  });
+
+  test('a real name mid-sentence is still checked', () => {
+    assert.ok(!isGrounded('Data Science student who interned at Google.', facts));
+  });
+
+  test('an acronym at a sentence start is still checked', () => {
+    assert.ok(!isGrounded('Skilled in Python. AWS certified.', facts));
+  });
+});
+
+suite('skill name casing', () => {
+  test('lowercase words in a partly capitalised name are brought into line', () => {
+    assert.equal(canonicalSkillName('Prompt engineering'), 'Prompt Engineering');
+    assert.equal(canonicalSkillName('Vector search'), 'Vector Search');
+    assert.equal(canonicalSkillName('RAG pipelines'), 'RAG Pipelines');
+  });
+
+  test('acronyms, versions and small words are left alone', () => {
+    assert.equal(canonicalSkillName('C++ programming'), 'C++ Programming');
+    assert.equal(canonicalSkillName('Design of experiments'), 'Design of Experiments');
+    assert.equal(canonicalSkillName('Random Forest'), 'Random Forest');
   });
 });
 

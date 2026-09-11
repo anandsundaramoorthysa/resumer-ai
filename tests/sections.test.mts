@@ -139,7 +139,9 @@ function fullProfile(): ProfileRecord[] {
       field: 'Computer Science',
       endDate: '2021',
     },
-    { ...base(), type: 'certification', name: 'AWS Cloud Practitioner', issuer: 'AWS' },
+    // Tagged so it matches the fixture job: certificates and blog posts print only when
+    // they match the posting.
+    { ...base(['typescript']), type: 'certification', name: 'AWS Cloud Practitioner', issuer: 'AWS' },
     {
       ...base(),
       type: 'publication',
@@ -150,7 +152,7 @@ function fullProfile(): ProfileRecord[] {
       status: 'published',
     },
     {
-      ...base(),
+      ...base(['react']),
       type: 'writing',
       title: 'Why Your ATS Drops Your Resume',
       venue: 'Medium',

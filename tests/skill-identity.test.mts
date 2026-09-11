@@ -111,8 +111,10 @@ suite('skill display — the case a Skills line prints in', () => {
     assert.equal(canonicalSkillName('ci/cd'), 'CI/CD');
   });
 
-  test('casing the user chose is never overridden', () => {
-    assert.equal(canonicalSkillName('Data science'), 'Data science');
+  test('a word\'s own casing is kept; lowercase words beside capitals are aligned', () => {
+    // The owner's complaint: "Prompt engineering" beside "Random Forest" read as
+    // inconsistent. A word carrying its own capitals ("eBPF") is never touched.
+    assert.equal(canonicalSkillName('Data science'), 'Data Science');
     assert.equal(canonicalSkillName('eBPF'), 'eBPF');
   });
 

@@ -385,7 +385,14 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     .sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? ''));
   // Only the three most relevant — a list of 27 certificates is noise, three good ones
   // are evidence.
-  const certifications = topByRelevance(all.filter((r) => r.type === 'certification'), job, 3);
+  // Only ones that MATCH the job — a Hindi proficiency certificate filled the third slot
+  // on a data-analyst resume because nothing else matched. Fewer than three is fine.
+  const matching = (r: ProfileRecord) => !job || relevanceScore(r, job) > 0;
+  const certifications = topByRelevance(
+    all.filter((r) => r.type === 'certification' && matching(r)),
+    job,
+    3,
+  );
   // Printed in every resume under "Campus and Community Activities".
   const achievements = all.filter((r) => r.type === 'achievement');
   const summaries = records.filter((r): r is SummaryRecord => r.type === 'summary');
@@ -394,7 +401,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     (r): r is PublicationRecord => r.type === 'publication' && relevanceScore(r, job) > 0,
   );
   const articles = topByRelevance(
-    all.filter((r): r is WritingRecord => r.type === 'writing'),
+    all.filter((r): r is WritingRecord => r.type === 'writing' && matching(r)),
     job,
     3,
   );
@@ -628,7 +635,11 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
       heading: coerceHeading('achievements', 'Campus and Community Activities'),
       items: achievements.map((a) => {
         const rec = a as Extract<ProfileRecord, { type: 'achievement' }>;
-        return { text: `${rec.title}${rec.description ? ` — ${rec.description}` : ''}`, sourceRecordId: rec.id };
+        // Imported achievements often repeat the title as the description; print it once.
+        const adds =
+          rec.description &&
+          rec.description.trim().toLowerCase() !== rec.title.trim().toLowerCase();
+        return { text: `${rec.title}${adds ? ` — ${rec.description}` : ''}`, sourceRecordId: rec.id };
       }),
     };
   }

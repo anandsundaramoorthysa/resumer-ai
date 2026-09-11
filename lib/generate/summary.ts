@@ -12,7 +12,7 @@
 import { z } from 'zod';
 import { generateStructured } from '../ai/chain';
 import { draftCallOptions, type DraftBudget } from '../ai/budget';
-import { isGrounded } from './grounding';
+import { findUngroundedTokens } from './grounding';
 import type { JobRequirement } from '../types';
 
 const MAX_WORDS = 75;
@@ -46,10 +46,20 @@ ${args.facts}`,
       options: draftCallOptions(args.budget, { temperature: 0.3 }),
     });
     const text = data.summary.replace(/\s+/g, ' ').trim();
-    if (!text || text.split(' ').length > MAX_WORDS) return null;
-    return isGrounded(text, args.facts) ? text : null;
-  } catch {
-    // A missing summary is not a failed resume.
+    if (!text || text.split(' ').length > MAX_WORDS) {
+      console.warn('[summary] dropped: empty or too long —', text.split(' ').length, 'words');
+      return null;
+    }
+    const violations = findUngroundedTokens(text, args.facts);
+    if (violations.length > 0) {
+      // Logged, because a missing summary is otherwise silent: the resume simply has none.
+      console.warn('[summary] dropped by grounding:', violations.map((v) => v.token).join(', '));
+      return null;
+    }
+    return text;
+  } catch (err) {
+    // A missing summary is not a failed resume — but it is worth knowing why.
+    console.warn('[summary] call failed:', err instanceof Error ? `${err.name}: ${err.message}` : err);
     return null;
   }
 }
