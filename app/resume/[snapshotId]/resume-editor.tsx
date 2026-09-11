@@ -295,7 +295,7 @@ export function ResumeEditor({
         ))}
       </article>
 
-      <p className="mt-3 text-center font-mono text-xs text-muted">{fileName}</p>
+      <p className="mt-3 text-center font-mono text-xs text-muted [overflow-wrap:anywhere]">{fileName}</p>
     </div>
   );
 }

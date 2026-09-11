@@ -146,6 +146,13 @@ suite('the summary\'s grounding', () => {
     assert.ok(!isGrounded('Delivers Kafka-driven pipelines.', facts));
   });
 
+  test('a possessive with a curly apostrophe is the name it belongs to', () => {
+    // Refused in production as "eas".
+    const source = summaryGroundingSource(facts, { ...job, company: 'Electronic Arts (EA) India' });
+    assert.ok(isGrounded('Ready to support EA’s product analytics.', source));
+    assert.ok(isGrounded("Ready to support EA's product analytics.", source));
+  });
+
   test('the target role may be named; the posting\'s skills may not be claimed', () => {
     const source = summaryGroundingSource(facts, job);
     // Refused in production as "Analyst".
