@@ -561,3 +561,26 @@ export const aiProviderCooldown = pgTable('ai_provider_cooldown', {
   reason: text('reason').notNull(), // quota | overload | slow
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+/**
+ * Suggestions the owner dismissed — lib/server/steward.ts.
+ *
+ * Keyed by the suggestion's fingerprint, which folds in the content hash of every record
+ * it concerns (lib/steward/types.ts). So a dismissal is remembered exactly as long as the
+ * record stays as it was: edit the record and the steward may judge it again, which is
+ * the point — the old "no" was about the old words.
+ *
+ * Without this, every review re-proposed what the owner had already declined, and a
+ * reviewer that nags gets ignored, which is worse than no reviewer.
+ */
+export const stewardDismissals = pgTable(
+  'steward_dismissal',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    suggestionId: text('suggestion_id').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.suggestionId] })],
+);

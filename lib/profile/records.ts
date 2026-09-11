@@ -403,3 +403,64 @@ export async function updateTypedRecord(
 
   await audit(userId, recordId, 'update', 'manual', { type: form.type });
 }
+
+/**
+ * Sets some fields of one record and leaves the rest as stored — the steward's writer.
+ *
+ * Not `updateTypedRecord`: that rebuilds a record from its form, which drops any field
+ * the form does not show (a skill's `evidence`, which the enrichment queue stored and
+ * nothing else can restore). A steward fix changes one field and must keep everything
+ * else. Same validation, same tidying, same hash recipe, same promotion to `manual`.
+ *
+ * A value of '' or [] removes the field. Bullets are handled here too, because their hash
+ * recipe is their own: role and text.
+ */
+export async function patchRecord(
+  userId: string,
+  recordId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const [existing] = await db
+    .select({ type: profileRecords.type, data: profileRecords.data })
+    .from(profileRecords)
+    .where(and(eq(profileRecords.id, recordId), eq(profileRecords.userId, userId)))
+    .limit(1);
+  if (!existing) throw new Error('That entry no longer exists.');
+
+  const merged: Record<string, unknown> = { ...(existing.data as Record<string, unknown>) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === '' || (Array.isArray(value) && value.length === 0)) delete merged[key];
+    else merged[key] = value;
+  }
+
+  let data: Record<string, unknown>;
+  let contentHash: string;
+  let tags: string[];
+  if (existing.type === 'experience-bullet') {
+    data = tidyRecordData('experience-bullet', merged);
+    const text = String(data.text ?? '');
+    if (!text) throw new Error('A bullet cannot be empty.');
+    contentHash = hashContent(['experience-bullet', String(data.roleId ?? ''), text]);
+    tags = deriveTags(text);
+  } else {
+    const form = formFor(existing.type);
+    if (!form) throw new Error(`${existing.type} cannot be edited here.`);
+    data = tidyRecordData(form.type, merged);
+    const missing = missingRequired(form, data);
+    if (missing.length > 0) throw new Error(`${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} required.`);
+    enforceLimits(form, data);
+    contentHash = hashContent(hashInput(form, data));
+    tags = deriveTags(tagSource(form, data));
+  }
+
+  try {
+    await db
+      .update(profileRecords)
+      .set({ data, contentHash, tags, source: 'manual', flaggedForRemoval: false, updatedAt: new Date() })
+      .where(and(eq(profileRecords.id, recordId), eq(profileRecords.userId, userId)));
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new DuplicateRecordError();
+    throw err;
+  }
+  await audit(userId, recordId, 'update', 'manual', { type: existing.type, fields: Object.keys(patch) });
+}
