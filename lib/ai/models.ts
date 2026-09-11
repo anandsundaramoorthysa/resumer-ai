@@ -18,11 +18,20 @@
  * slowest or deadest providers and never reached the two that answer in seconds.
  *
  *   provider    path A (native structured)      path B (JSON as text)
- *   Fireworks   OK    3.6s                      OK    3.7s
- *   Groq        rejects our schema, 0.1s        OK    1.9s
- *   Together    unsupported, 5.1s wasted        OK    15.4s
+ *   Groq        rejects our schema, 0.1s        OK    0.3-1.9s
+ *   Fireworks   OK    1.4-3.6s                  OK    1.2-3.7s
+ *   Together    unsupported, 5.1s wasted        OK    4.2-15.4s
  *   DeepInfra   OK   30.4s                      "Model busy"
  *   Gemini      hangs to the attempt cap        quota exhausted, 0.9s
+ *
+ * Re-measured 2026-09-11, on a whole draft rather than one call, and the order changed
+ * again: Groq first. Asking the text path first costs nothing — Groq answers it in a
+ * fraction of the time Fireworks needs for either path — and on the owner's profile
+ * against the EA posting it moved assembly from 8.0s to 3.5s, which bought a second
+ * scoring iteration inside the same 20 seconds:
+ *
+ *   fireworks first   assembled 7.5-8.0s   total 15.0s   score 6.50-6.90   1 iteration
+ *   groq first        assembled 3.4-3.6s   total 11.9s   score 7.64-7.72   2 iterations
  */
 
 export type ProviderId = 'google' | 'groq' | 'deepinfra' | 'togetherai' | 'fireworks';
@@ -55,6 +64,28 @@ export interface ProviderConfig {
  */
 export const PROVIDER_CHAIN: ProviderConfig[] = [
   {
+    id: 'groq',
+    label: 'Groq',
+    envKey: 'GROQ_API_KEY',
+    model: process.env.GROQ_MODEL ?? 'openai/gpt-oss-120b',
+    fastModel: process.env.GROQ_FAST_MODEL ?? 'openai/gpt-oss-20b',
+    /*
+     * Groq requires `required` to name every key in `properties`. Zod omits optional
+     * fields from `required`, and JobSchema has three, so every native structured call
+     * to Groq fails with "invalid JSON schema for response_format" — permanently, for
+     * every schema in this app that has an optional field.
+     *
+     * The fix is NOT to make the schemas all-required: that changes what every provider
+     * is asked for, to satisfy one. Nor can it be a Zod transform — the AI SDK converts
+     * with `io: "input"`, where a preprocess emits `{}` and a transform cannot be
+     * represented at all (the reasoning is spelled out on JobSchema in
+     * lib/intake/extract.ts). So the honest answer is that Groq does not support this
+     * schema shape, and the chain should ask it the way it can answer: 1.9s on the text
+     * path, the fastest working call of any provider here.
+     */
+    structuredOutput: false,
+  },
+  {
     id: 'fireworks',
     label: 'Fireworks AI',
     envKey: 'FIREWORKS_API_KEY',
@@ -76,28 +107,6 @@ export const PROVIDER_CHAIN: ProviderConfig[] = [
     fastModel:
       process.env.FIREWORKS_FAST_MODEL ?? 'accounts/fireworks/models/gpt-oss-120b',
     structuredOutput: true,
-  },
-  {
-    id: 'groq',
-    label: 'Groq',
-    envKey: 'GROQ_API_KEY',
-    model: process.env.GROQ_MODEL ?? 'openai/gpt-oss-120b',
-    fastModel: process.env.GROQ_FAST_MODEL ?? 'openai/gpt-oss-20b',
-    /*
-     * Groq requires `required` to name every key in `properties`. Zod omits optional
-     * fields from `required`, and JobSchema has three, so every native structured call
-     * to Groq fails with "invalid JSON schema for response_format" — permanently, for
-     * every schema in this app that has an optional field.
-     *
-     * The fix is NOT to make the schemas all-required: that changes what every provider
-     * is asked for, to satisfy one. Nor can it be a Zod transform — the AI SDK converts
-     * with `io: "input"`, where a preprocess emits `{}` and a transform cannot be
-     * represented at all (the reasoning is spelled out on JobSchema in
-     * lib/intake/extract.ts). So the honest answer is that Groq does not support this
-     * schema shape, and the chain should ask it the way it can answer: 1.9s on the text
-     * path, the fastest working call of any provider here.
-     */
-    structuredOutput: false,
   },
   {
     id: 'togetherai',

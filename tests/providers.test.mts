@@ -46,9 +46,15 @@ const ids = (list: { id: ProviderId }[]) => list.map((p) => p.id);
 
 suite('routing order', () => {
   test('the fastest measured working provider is asked first', () => {
-    // Fireworks: the only provider measured to serve native structured output inside a
-    // draft's budget (3.6s). It was last in the original order.
-    assert.equal(PROVIDER_CHAIN[0].id, 'fireworks');
+    // Groq, re-measured 2026-09-11 over whole drafts rather than single calls: it cannot
+    // serve our schemas natively, and answers the text path so much faster than Fireworks
+    // serves either that assembly fell from 8.0s to 3.5s and a second scoring iteration
+    // fitted inside the same 20 seconds (6.50-6.90 -> 7.64-7.72 on the owner's profile).
+    assert.equal(PROVIDER_CHAIN[0].id, 'groq');
+  });
+
+  test('the provider that can serve a schema natively is right behind it', () => {
+    assert.equal(PROVIDER_CHAIN[1].id, 'fireworks');
   });
 
   test('the quota-exhausted provider is asked last, not first', () => {
@@ -108,8 +114,8 @@ suite('only configured providers are routed to', () => {
   test('with every key set, the full measured order is used', () => {
     withEnv(allKeys, () => {
       assert.deepEqual(ids(availableProviders()), [
-        'fireworks',
         'groq',
+        'fireworks',
         'togetherai',
         'deepinfra',
         'google',
@@ -129,8 +135,8 @@ suite('AI_PROVIDER_ORDER — re-routing without a deploy', () => {
     withEnv({ ...allKeys, AI_PROVIDER_ORDER: 'google' }, () => {
       assert.deepEqual(ids(availableProviders()), [
         'google',
-        'fireworks',
         'groq',
+        'fireworks',
         'togetherai',
         'deepinfra',
       ]);

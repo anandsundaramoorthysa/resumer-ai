@@ -26,9 +26,17 @@ const TONE: Record<ApplicationStatus, string> = {
 export function StatusSelect({
   id,
   status,
+  label,
 }: {
   id: string;
   status: ApplicationStatus;
+  /**
+   * Which application this is. The page renders every row twice — a card list for phones
+   * and a table above `sm` — so without it two controls carry the identical label
+   * "Application status", and neither a screen reader nor a test can tell which row it is
+   * on. (A browser test reaching for the first one found the hidden phone copy.)
+   */
+  label: string;
 }) {
   const [pending, startTransition] = useTransition();
 
@@ -42,7 +50,7 @@ export function StatusSelect({
         )
       }
       className={`min-h-11 rounded-full border bg-surface px-2.5 py-1 text-xs font-semibold outline-none disabled:opacity-50 ${TONE[status]}`}
-      aria-label="Application status"
+      aria-label={`Status for ${label}`}
     >
       {OPTIONS.map((o) => (
         <option key={o.value} value={o.value}>

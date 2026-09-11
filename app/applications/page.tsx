@@ -116,7 +116,7 @@ export default async function ApplicationsPage() {
                     <span className="rounded-full bg-brand-tint px-2.5 py-1 text-xs font-semibold text-brand-dark">
                       {r.category}
                     </span>
-                    <StatusSelect id={r.id} status={r.status as ApplicationStatus} />
+                    <StatusSelect id={r.id} status={r.status as ApplicationStatus} label={r.roleTitle} />
                   </div>
 
                   <div className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-2">
@@ -176,7 +176,7 @@ export default async function ApplicationsPage() {
                         {r.score?.toFixed(1) ?? '—'}
                       </td>
                       <td className="px-4 py-3">
-                        <StatusSelect id={r.id} status={r.status as ApplicationStatus} />
+                        <StatusSelect id={r.id} status={r.status as ApplicationStatus} label={r.roleTitle} />
                       </td>
                       <td className="px-4 py-3 text-muted">
                         {r.createdAt.toLocaleDateString()}
