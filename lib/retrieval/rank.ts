@@ -209,13 +209,51 @@ export function rankRecords(
   // floor — the relaxation would never fire on exactly the profile that needs it.
   const filterable = (r: ProfileRecord) => !FLOOR_EXEMPT_TYPES.has(r.type);
   const target = viabilityTarget(records.filter(filterable).length);
+  const held = countByType(records);
 
   for (const floor of [requested, requested / 2, requested / 4, 0]) {
     const attempt = rankAtFloor(records, job, floor);
     const viable = attempt.ranked.filter((r) => filterable(r.record)).length;
-    if (viable >= target || floor === 0) return attempt;
+    if ((viable >= target && keepsEveryCoreType(attempt.ranked, held)) || floor === 0) return attempt;
   }
   return rankAtFloor(records, job, 0);
+}
+
+/**
+ * The fewest of each core type a floor may leave, when the profile holds any.
+ *
+ * Counting survivors across all types let a floor pass with every experience bullet
+ * removed: on a posting read as five keywords, two skills, six projects and two
+ * certifications made "twelve survivors", the floor held, and the resume went out with
+ * its roles and no line under any of them. Observed twice, on the owner's own profile
+ * ("Selected 0 bullets, 4 projects, 7 skills"). A resume needs some of each; a slightly
+ * off-target bullet is recoverable, an Experience section of bare titles is not.
+ */
+const CORE_MINIMUM: Partial<Record<ProfileRecord['type'], number>> = {
+  'experience-bullet': 4,
+  skill: 6,
+  project: 2,
+};
+
+function countByType(records: ProfileRecord[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const r of records) if (!r.flaggedForRemoval) out.set(r.type, (out.get(r.type) ?? 0) + 1);
+  return out;
+}
+
+/**
+ * Whether each core type the profile holds in quantity keeps its minimum.
+ *
+ * Only in quantity: a profile with one bullet, about something unrelated to the role, may
+ * lose it — that is the floor doing its job. A profile with thirteen losing all thirteen is
+ * the floor failing, and that is what this refuses.
+ */
+export function keepsEveryCoreType(ranked: RankedRecord[], held: Map<string, number>): boolean {
+  const kept = countByType(ranked.map((r) => r.record));
+  for (const [type, minimum] of Object.entries(CORE_MINIMUM)) {
+    if ((held.get(type) ?? 0) >= minimum! && (kept.get(type) ?? 0) < minimum!) return false;
+  }
+  return true;
 }
 
 function rankAtFloor(

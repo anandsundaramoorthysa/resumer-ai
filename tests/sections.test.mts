@@ -538,6 +538,21 @@ suite('relevance floor exemptions', () => {
     );
   });
 
+  test('a floor that would remove every bullet from a profile full of them relaxes', () => {
+    // Observed on the owner’s profile: a posting read as five keywords let twelve
+    // on-domain skills make the floor "viable" while all thirteen bullets fell under it,
+    // and the resume went out with bare job titles.
+    const bullets: ProfileRecord[] = Array.from({ length: 6 }, (_, i) => ({
+      ...offDomain,
+      id: `bullet-${i}`,
+      contentHash: `bullet-${i}`,
+      text: `Migrated service ${i + 1} to Kubernetes`,
+    }));
+    const { ranked } = rankRecords([...seoSkills(), ...bullets], seoJob);
+    const kept = ranked.filter((r) => r.record.type === 'experience-bullet').length;
+    assert(kept >= 4, `only ${kept} of 6 bullets survived the floor`);
+  });
+
   test('exempt records do not count toward floor relaxation', () => {
     // Twelve languages look like twelve survivors, which is exactly the count the
     // relaxation treats as a viable resume. If they counted, the floor would never
