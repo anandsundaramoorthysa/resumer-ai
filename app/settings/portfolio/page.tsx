@@ -1,6 +1,5 @@
-import { redirect } from 'next/navigation';
 import { and, eq, sql } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { requireApprovedUser } from '@/lib/server/approval';
 import { db } from '@/lib/db';
 import { profileRecords, roles as rolesTable, users } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
@@ -16,8 +15,7 @@ export default async function PortfolioSettingsPage({
   searchParams: Promise<{ installed?: string; installError?: string }>;
 }) {
   const { installed, installError } = await searchParams;
-  const session = await auth();
-  if (!session?.user?.id) redirect('/sign-in');
+  const session = await requireApprovedUser();
   const userId = session.user.id;
 
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);

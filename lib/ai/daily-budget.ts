@@ -149,6 +149,15 @@ export async function assertDailyBudget(
 
   const owners = await ownerUserIds();
   const isOwner = owners.includes(userId);
+
+  // An account the owner has not approved spends nothing. This is the lock behind every
+  // page's redirect to /pending (lib/server/approval.ts), for a request that skips pages.
+  if (!isOwner) {
+    const [account] = await db.select({ approval: users.approval }).from(users).where(eq(users.id, userId)).limit(1);
+    if (account?.approval !== 'approved') {
+      throw new BudgetExceededError('approval', account?.approval === 'denied' ? 'not approved' : 'pending');
+    }
+  }
   const [usage, app] = await Promise.all([readDailyUsage(userId), readAppUsage(today(), owners)]);
 
   if (isOwner) {

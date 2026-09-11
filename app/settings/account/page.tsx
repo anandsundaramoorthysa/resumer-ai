@@ -5,6 +5,8 @@ import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
 import { DeleteAccount } from './delete-account';
+import Link from 'next/link';
+import { isOwnerSession } from '@/lib/server/approval';
 
 export const metadata = { title: 'Your account' };
 export const dynamic = 'force-dynamic';
@@ -30,6 +32,21 @@ export default async function AccountPage() {
           answers belong to you: take a copy whenever you like, and close the account when you are
           done with it.
         </p>
+
+        {(await isOwnerSession(session)) ? (
+          <section className="mt-7 rounded-xl border border-brand bg-brand-tint/40 p-5">
+            <h2 className="font-display text-lg">New accounts</h2>
+            <p className="mt-1.5 max-w-prose text-sm text-muted">
+              You are the site owner. Everyone who signs up waits for you to approve or deny them.
+            </p>
+            <Link
+              href="/admin/approvals"
+              className="mt-3 inline-flex min-h-11 items-center rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+            >
+              Review new accounts
+            </Link>
+          </section>
+        ) : null}
 
         <section className="mt-7 rounded-xl border border-line bg-surface p-5">
           <h2 className="font-display text-lg">Download your data</h2>

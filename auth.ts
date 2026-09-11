@@ -47,6 +47,7 @@ import { sessionSurvivesReset } from '@/lib/auth/session-validity';
 import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
 import { encryptIfPossible } from '@/lib/auth/secret-box';
 import { isGitHubAppConfigured } from '@/lib/github/app';
+import { notifyOwnerOfSignup } from '@/lib/server/signup-notice';
 
 const githubConfigured =
   Boolean(process.env.AUTH_GITHUB_ID) && Boolean(process.env.AUTH_GITHUB_SECRET);
@@ -124,8 +125,14 @@ const credentialsProvider = Credentials({
 function normalizingAdapter(base: Adapter): Adapter {
   return {
     ...base,
-    createUser: (user) =>
-      base.createUser!({ ...user, email: user.email ? normalizeEmail(user.email) : user.email }),
+    // Only Google and GitHub sign-ups arrive here (a password sign-up inserts its own row),
+    // and both providers have verified the address — so this is the moment to tell the
+    // owner there is someone to approve. See lib/server/approval.ts.
+    createUser: async (user) => {
+      const created = await base.createUser!({ ...user, email: user.email ? normalizeEmail(user.email) : user.email });
+      await notifyOwnerOfSignup(created, 'Google or GitHub');
+      return created;
+    },
     getUserByEmail: (email) => base.getUserByEmail!(normalizeEmail(email)),
     updateUser: (user) =>
       base.updateUser!({ ...user, email: user.email ? normalizeEmail(user.email) : user.email }),

@@ -1,6 +1,5 @@
-import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { requireApprovedUser } from '@/lib/server/approval';
 import { db } from '@/lib/db';
 import { applicationFormFields } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
@@ -12,8 +11,7 @@ export const metadata = { title: 'Application answers' };
 export const dynamic = 'force-dynamic';
 
 export default async function ApplicationFieldsPage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/sign-in');
+  const session = await requireApprovedUser();
 
   const [row] = await db
     .select()

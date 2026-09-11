@@ -1,6 +1,5 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
-import { auth } from '@/auth';
+import { requireApprovedUser } from '@/lib/server/approval';
 import { AppHeader } from '@/components/app-header';
 import { getActivity } from '@/lib/server/activity';
 import { effectiveRunStatus } from '@/lib/server/draft-run';
@@ -31,8 +30,7 @@ const HALT_WORDS: Record<string, string> = {
 };
 
 export default async function ActivityPage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/sign-in');
+  const session = await requireApprovedUser();
 
   const { runs, summary, usage, dailyLimit, changes } = await getActivity(session.user.id);
   // The stored error detail is for the operator (lib/db/schema.ts says so): it can carry a

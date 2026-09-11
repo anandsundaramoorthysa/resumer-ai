@@ -196,4 +196,13 @@ suite('who the shared pool does not govern', () => {
   });
 });
 
+suite('what an account without approval is told', () => {
+  test('waiting and refused are different sentences', () => {
+    const waiting = new BudgetExceededError('approval', 'pending').message;
+    const refused = new BudgetExceededError('approval', 'not approved').message;
+    assert(/waiting/i.test(waiting) && !/waiting/i.test(refused), `${waiting} | ${refused}`);
+    assert(/did not approve/i.test(refused), refused);
+  });
+});
+
 report('budget');

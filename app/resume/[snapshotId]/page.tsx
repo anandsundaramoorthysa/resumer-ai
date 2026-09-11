@@ -1,6 +1,6 @@
-import { redirect, notFound } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { requireApprovedUser } from '@/lib/server/approval';
 import { db } from '@/lib/db';
 import { resumeSnapshots } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
@@ -17,8 +17,7 @@ export default async function ResumePage({
 }: {
   params: Promise<{ snapshotId: string }>;
 }) {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/sign-in');
+  const session = await requireApprovedUser();
 
   const { snapshotId } = await params;
   const [row] = await db

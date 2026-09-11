@@ -1,5 +1,4 @@
-import { redirect } from 'next/navigation';
-import { auth } from '@/auth';
+import { requireApprovedUser } from '@/lib/server/approval';
 import { AppHeader } from '@/components/app-header';
 import { Importer } from './importer';
 
@@ -7,8 +6,7 @@ export const metadata = { title: 'Import an existing resume' };
 export const dynamic = 'force-dynamic';
 
 export default async function ImportPage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/sign-in');
+  await requireApprovedUser();
 
   return (
     <div className="min-h-screen min-h-dvh">

@@ -28,6 +28,7 @@ import {
   sendVerificationEmail,
 } from '@/lib/auth/mail';
 import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
+import { notifyOwnerOfSignup } from '@/lib/server/signup-notice';
 
 export interface AuthResult {
   ok: boolean;
@@ -181,13 +182,24 @@ export async function verifyEmailAction(token: string): Promise<AuthResult> {
     .update(users)
     .set({ emailVerified: new Date() })
     .where(eq(users.email, spent.identifier!))
-    .returning({ id: users.id });
+    .returning({ id: users.id, email: users.email, name: users.name, approval: users.approval });
 
   if (updated.length === 0) {
     return { ok: false, message: 'That link belongs to an account that no longer exists.' };
   }
 
   await clearAttempts('sign-in', spent.identifier!);
+
+  // A password sign-up reaches the owner only once its address is proved: before that it
+  // could be anyone typing anything, and a bot that never confirms never becomes mail.
+  if (updated[0].approval === 'pending') {
+    await notifyOwnerOfSignup(updated[0], 'Email and password');
+    return {
+      ok: true,
+      message:
+        'Your email is confirmed. The site owner approves new accounts, and you will get an email as soon as yours is ready.',
+    };
+  }
   return { ok: true, message: 'Your email is confirmed. You can sign in now.' };
 }
 

@@ -7,6 +7,8 @@ import { AppHeader } from '@/components/app-header';
 import { DraftConsole } from '@/components/draft-console';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { getDashboardData } from '@/lib/server/dashboard';
+import { approvalFor } from '@/lib/server/approval';
+import { redirect } from 'next/navigation';
 
 export const metadata = { alternates: { canonical: '/' } };
 
@@ -48,6 +50,9 @@ export default async function HomePage() {
       </Shell>
     );
   }
+
+  // Signed in is not the same as let in: a new account waits for the owner's approval.
+  if ((await approvalFor(session.user.id)) !== 'approved') redirect('/pending');
 
   const data = await getDashboardData(session.user.id);
   const firstName = (session.user.name ?? 'there').split(' ')[0];

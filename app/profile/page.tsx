@@ -1,7 +1,6 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { requireApprovedUser } from '@/lib/server/approval';
 import { db } from '@/lib/db';
 import { profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
@@ -52,8 +51,7 @@ function labelFor(type: string): string {
 }
 
 export default async function ProfilePage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/sign-in');
+  const session = await requireApprovedUser();
   const userId = session.user.id;
 
   const records = await db

@@ -17,11 +17,15 @@ import type { CallOptions } from './chain';
 
 export class BudgetExceededError extends Error {
   constructor(
-    public readonly scope: 'draft' | 'daily' | 'time' | 'rate',
+    public readonly scope: 'draft' | 'daily' | 'time' | 'rate' | 'approval',
     public readonly detail: string,
   ) {
     super(
-      scope === 'rate'
+      scope === 'approval'
+        ? detail === 'not approved'
+          ? 'The site owner did not approve this account, so it cannot use the AI features.'
+          : 'Your account is waiting for the site owner to approve it. You will get an email when it is ready.'
+        : scope === 'rate'
         ? `Too many AI requests in a short time (${detail}). Wait a few minutes and try again.`
         : scope === 'time'
         ? `Ran out of time for this draft (${detail}). Stopped and kept the best version so far.`

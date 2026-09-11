@@ -52,6 +52,16 @@ export const users = pgTable('user', {
   lastSyncedSha: text('last_synced_sha'),
   lastSyncedAt: timestamp('last_synced_at'),
   portfolioRepo: text('portfolio_repo'), // "owner/name"
+  /**
+   * pending | approved | denied — whether the owner has let this account use the app.
+   *
+   * Sign-up is open, and every account spends the owner's AI keys, so a new account waits
+   * for the owner's decision (lib/server/approval.ts). Defaults to `pending` for every row
+   * written from now on; the migration that added it marked the accounts that already
+   * existed `approved`. The owner's own accounts are approved whatever this says.
+   */
+  approval: text('approval').notNull().default('pending'),
+  approvalDecidedAt: timestamp('approval_decided_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

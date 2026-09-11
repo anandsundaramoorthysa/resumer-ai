@@ -1,7 +1,6 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { desc, eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { requireApprovedUser } from '@/lib/server/approval';
 import { db } from '@/lib/db';
 import { applications } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
@@ -12,8 +11,7 @@ export const metadata = { title: 'Applications' };
 export const dynamic = 'force-dynamic';
 
 export default async function ApplicationsPage() {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/sign-in');
+  const session = await requireApprovedUser();
 
   const rows = await db
     .select()
