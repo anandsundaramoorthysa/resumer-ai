@@ -1,5 +1,19 @@
 # Resumer AI — production audit
 
+> **Status: fixed and deployed, 2026-09-11.** Every High, Medium and Low finding below was
+> addressed in four commits (`Audit phase 0`–`phase 4`) except these, each deliberate and
+> explained in the commit that skipped it:
+>
+> - **L6** (hash parts joined with no separator) — fixing it re-keys every stored row and
+>   every sync proposal, for a collision nobody has hit.
+> - **M14's second half** — sign-up stays open with no invite list; the new app-wide daily
+>   AI cap is what makes that affordable. The owner can change the policy.
+> - **H5's "reject an empty start date at every writer"** — enforced for the new job editor
+>   only. A resume import that cannot read a date still files the job, where the review
+>   step and the editor can fix it, rather than dropping the job entirely.
+>
+> The findings are kept as written, as the record of what was wrong.
+
 Audited 2026-09-11 against `main` (HEAD moved from 25e6f2a to e912a94 during the audit, because another developer was committing steward and skills work). Read-only: nothing in the repository was changed apart from this file.
 
 **How it was checked.** I read AGENTS.md, README, PLAN, STEWARD and specs/AUDIT.md, then every API route, every server action, the three profile writers, the sync, import, steward and AI-chain modules, and the schema. I ran `npx tsc --noEmit`, `npm run lint`, `npm test`, `npx tsc -p scripts/tsconfig.json` and `npm run build`. I fetched signed-out pages and `/api/health` from https://resumeraiapp.netlify.app with curl. I ran two small Node checks to confirm behaviour (the filename header and the filename slug). The Playwright MCP server did not connect, so I did no real-browser or 390 px rendering. The UX findings come from reading the markup.
