@@ -7,7 +7,9 @@
  * that misses is only discovered by finding a password in a row.
  */
 
+import { BudgetExceededError } from '../lib/ai/budget';
 import {
+  isApprovalRefusal,
   effectiveRunStatus,
   errorKindFor,
   redactErrorDetail,
@@ -135,5 +137,16 @@ suite('a run the platform killed', () => {
   test('completed rows keep what they recorded', () => {
     assert.ok(effectiveRunStatus({ status: 'failed', startedAt: ago(9e6) }, now) === 'failed');
     assert.ok(effectiveRunStatus({ status: 'success', startedAt: ago(9e6) }, now) === 'success');
+  });
+});
+
+suite('what is not a failed draft', () => {
+  test('an account waiting for approval being refused is the system working', () => {
+    assert.ok(isApprovalRefusal(new BudgetExceededError('approval', 'pending')));
+  });
+
+  test('running out of the daily allowance still counts as a failure worth seeing', () => {
+    assert.ok(!isApprovalRefusal(new BudgetExceededError('daily', '400/400 calls today')));
+    assert.ok(!isApprovalRefusal(new Error('provider down')));
   });
 });

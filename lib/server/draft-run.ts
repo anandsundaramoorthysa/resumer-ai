@@ -17,6 +17,7 @@ import { db } from '@/lib/db';
 import { draftRuns } from '@/lib/db/schema';
 import type { DraftRunTrace } from '@/lib/pipeline/run';
 import type { PipelineEvent } from '@/lib/types';
+import type { BudgetExceededError } from '@/lib/ai/budget';
 
 /**
  * How many runs a user keeps.
@@ -137,6 +138,17 @@ export async function startDraftRun(userId: string, startedAt: Date): Promise<st
   }
 }
 
+/** Whether this error is an account being refused for want of approval — not a failure. */
+export function isApprovalRefusal(error: unknown): boolean {
+  // By name and scope rather than instanceof: a bundler or a test runner can load the
+  // class twice, and then instanceof quietly answers false for the real thing.
+  return (
+    error instanceof Error &&
+    error.name === 'BudgetExceededError' &&
+    (error as Partial<BudgetExceededError>).scope === 'approval'
+  );
+}
+
 /** Removes a `running` row for an attempt that turned out not to be worth recording. */
 export async function discardDraftRun(userId: string, runId: string | null): Promise<void> {
   if (!runId) return;
@@ -166,6 +178,14 @@ export interface RecordDraftRunInput {
  * written is not reported as a failure because the tidying afterwards went wrong.
  */
 export async function recordDraftRun(input: RecordDraftRunInput): Promise<void> {
+  // An account still waiting for the owner's approval was refused before anything ran.
+  // That is not a failed draft, and recording it as one put it in the owner's hourly
+  // failure email and on the Activity page as a red row — for the system working.
+  if (isApprovalRefusal(input.error)) {
+    await discardDraftRun(input.userId, input.runId ?? null);
+    return;
+  }
+
   const { trace } = input;
   const failed = input.error !== undefined || Boolean(input.errorKind);
 
