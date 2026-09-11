@@ -58,6 +58,11 @@ export function normalizeCompany(company: string): string {
 
 const ROLE_DATE = /^\d{4}(-(0[1-9]|1[0-2]))?$/;
 
+/** A year, or a year and month — the shape every stored role date has. */
+export function isRoleDate(value: string): boolean {
+  return ROLE_DATE.test(value);
+}
+
 /**
  * Why a job's dates cannot be saved, or null when they can. `startDate` and `endDate` are
  * already tidied (lib/steward/tidy.ts), so "Sep 2023" has become "2023-09".

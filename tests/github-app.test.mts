@@ -160,7 +160,8 @@ suite('who an installation belongs to', () => {
     assert(!installationOwnedBy({ accountId: 135801803, targetType: 'User' }, []), 'no GitHub sign-in at all');
   });
 
-  test('an organisation is refused, even when its id happens to equal a user id', () => {
+  test('an organisation is not a personal account, whatever its id happens to be', () => {
+    // Memberships are checked separately, below; a matching *user* id proves nothing here.
     assert(!installationOwnedBy({ accountId: 42, targetType: 'Organization' }, ['42']), 'refused');
   });
 });
@@ -181,5 +182,23 @@ suite('install link', () => {
     withEnv({ GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: privateKey }, () =>
       assert(installUrl() === null, 'the panel says what is missing instead of linking nowhere'),
     );
+  });
+});
+
+suite('an installation on an organisation', () => {
+  const org = { accountId: 9001, targetType: 'Organization' };
+
+  test('a member of that organisation may claim it', () => {
+    assert(installationOwnedBy(org, ['135801803'], ['9001']), 'accepted');
+  });
+
+  test('someone who is not a member may not, however they found the id', () => {
+    assert(!installationOwnedBy(org, ['135801803'], ['4242']), 'another org');
+    assert(!installationOwnedBy(org, ['135801803'], []), 'membership unknown');
+  });
+
+  test('a personal installation is still judged on the account, not on memberships', () => {
+    assert(!installationOwnedBy({ accountId: 9001, targetType: 'User' }, ['1'], ['9001']), 'not theirs');
+    assert(installationOwnedBy({ accountId: 9001, targetType: 'User' }, ['9001'], []), 'theirs');
   });
 });

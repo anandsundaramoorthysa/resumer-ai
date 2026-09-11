@@ -15,8 +15,9 @@
 
 import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
-import { getInstallation, installationOwnedBy } from '@/lib/github/app';
+import { getInstallation, installationOwnedBy, organizationIdsFor } from '@/lib/github/app';
 import { githubAccountIdsFor, recordInstallation } from '@/lib/server/repo-access';
+import { getGithubToken } from '@/lib/server/github-token';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,11 +57,16 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (!installationOwnedBy(installation, await githubAccountIdsFor(session.user.id))) {
+  // For an organisation, membership is the claim — and it can only be read with the
+  // user's own token, so it is fetched only in that case.
+  const token = installation.targetType === 'Organization' ? await getGithubToken(session.user.id) : null;
+  const organizationIds = token ? await organizationIdsFor(token) : [];
+
+  if (!installationOwnedBy(installation, await githubAccountIdsFor(session.user.id), organizationIds)) {
     return backToSettings(
       installation.targetType === 'User'
         ? `The app was installed on @${installation.accountLogin}, which is not a GitHub account you have signed in with here. Sign in with that GitHub account once, then install again.`
-        : 'Installing on an organisation is not supported yet. Install the app on your personal GitHub account.',
+        : `Could not confirm that you belong to @${installation.accountLogin}. Sign in with GitHub again to re-grant access — the check needs permission to read your organisation memberships — then install once more.`,
       false,
     );
   }

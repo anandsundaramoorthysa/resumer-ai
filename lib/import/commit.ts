@@ -20,9 +20,9 @@ import { audit } from '@/lib/server/profile';
 import { bulletHash, hashContent } from '@/lib/sync/reconcile';
 import { formFor, hashInput, missingRequired, tagSource } from '@/lib/profile/forms';
 import { deriveTags } from '@/lib/sync/tags';
-import { roleIdentity } from '@/lib/sync/roles';
+import { isRoleDate, roleDateProblem, roleIdentity } from '@/lib/sync/roles';
 import type { RecordSource } from '@/lib/types';
-import { tidyRecordData, tidyText } from '@/lib/steward/tidy';
+import { tidyDate, tidyRecordData, tidyText } from '@/lib/steward/tidy';
 import { fillContactGaps, type ContactFields } from './contact-links';
 
 const Tags = z.array(z.string().max(64)).max(50).default([]);
@@ -120,7 +120,47 @@ export interface CommitSummary {
   contactUpdated: boolean;
   /** Selected entries that carried no usable content and were skipped. */
   unreadable: number;
+  /** Jobs skipped because the file gave no usable start date — see `datedRoles`. */
+  undated: number;
   message: string;
+}
+
+interface IncomingRole {
+  title: string;
+  company: string;
+  startDate: string;
+  endDate: string;
+  bullets: Array<{ text: string; action: string; scale?: string; outcome?: string; tags: string[] }>;
+}
+
+/**
+ * The jobs that can be written, with their dates tidied — and a count of those that
+ * cannot.
+ *
+ * A job with no start date printed as "(no start)" on the profile and broke the date
+ * arithmetic every ATS does (specs/AUDIT.md #4). The extractor is told to return an empty
+ * string rather than guess when an excerpt does not state the dates, so this is a real
+ * case, not a malformed payload. It is refused here and reported, because the job editor
+ * on /profile can now add it properly in ten seconds — which is better than a job on the
+ * profile that no resume can date. Pure, so the rule is tested without a database.
+ */
+export function datedRoles(incoming: IncomingRole[]): { roles: IncomingRole[]; undated: number } {
+  const roles: IncomingRole[] = [];
+  let undated = 0;
+  for (const role of incoming) {
+    const startDate = tidyDate(role.startDate);
+    const endDate = tidyDate(role.endDate || 'present');
+    // An end date nobody can read is "still there", which is what an undated tail usually
+    // means. A date that reads fine but lands before the start is a contradiction — one
+    // of the two is wrong and nothing here can tell which — so that job is left out too.
+    const usableEnd = endDate === 'present' || isRoleDate(endDate) ? endDate : 'present';
+    if (roleDateProblem(startDate, usableEnd) !== null) {
+      undated += 1;
+      continue;
+    }
+    roles.push({ ...role, startDate, endDate: usableEnd });
+  }
+  return { roles, undated };
 }
 
 /**
@@ -171,18 +211,20 @@ export async function commitImport(
   // statements for a 60-record resume at a quarter of a second each, past the 30-second
   // function limit, leaving some rows written and no summary. The sync measured the same
   // shape at 34s for 150 records before it was batched (lib/server/profile.ts).
-  const roles = payload.roles.map((raw) => ({
-    ...raw,
-    title: tidyText(raw.title),
-    company: tidyText(raw.company),
-    bullets: raw.bullets.map((b) => ({
-      ...b,
-      text: tidyText(b.text),
-      action: tidyText(b.action),
-      scale: b.scale && tidyText(b.scale),
-      outcome: b.outcome && tidyText(b.outcome),
+  const { roles, undated } = datedRoles(
+    payload.roles.map((raw) => ({
+      ...raw,
+      title: tidyText(raw.title),
+      company: tidyText(raw.company),
+      bullets: raw.bullets.map((b) => ({
+        ...b,
+        text: tidyText(b.text),
+        action: tidyText(b.action),
+        scale: b.scale && tidyText(b.scale),
+        outcome: b.outcome && tidyText(b.outcome),
+      })),
     })),
-  }));
+  );
 
   // --- Roles first: a bullet's roleId must be a real row id, or the assembler has
   // nothing to group it under and it renders as a loose line with no employer.
@@ -274,7 +316,8 @@ export async function commitImport(
     rolesCreated,
     contactUpdated,
     unreadable,
-    message: summarize(created, duplicates, rolesCreated, contactUpdated, unreadable),
+    undated,
+    message: summarize(created, duplicates, rolesCreated, contactUpdated, unreadable, undated),
   };
 }
 
@@ -347,19 +390,26 @@ function summarize(
   rolesCreated: number,
   contactUpdated: boolean,
   unreadable: number,
+  undated = 0,
 ): string {
+  const undatedNote =
+    undated > 0
+      ? ` ${undated} job${undated === 1 ? '' : 's'} had no start date in the file and ${undated === 1 ? 'was' : 'were'} left out — add ${undated === 1 ? 'it' : 'them'} under Experience on your profile.`
+      : '';
   if (created === 0 && !contactUpdated && rolesCreated === 0) {
     if (unreadable > 0) {
-      return `${unreadable} selected entr${unreadable === 1 ? 'y was' : 'ies were'} incomplete and could not be saved.`;
+      return `${unreadable} selected entr${unreadable === 1 ? 'y was' : 'ies were'} incomplete and could not be saved.${undatedNote}`;
     }
-    return duplicates > 0
-      ? `Everything selected was already in your profile — nothing added.`
-      : 'Nothing was selected, so nothing was added.';
+    return (
+      (duplicates > 0
+        ? `Everything selected was already in your profile — nothing added.`
+        : 'Nothing was selected, so nothing was added.') + undatedNote
+    );
   }
   const bits = [`${created} fact${created === 1 ? '' : 's'} added`];
   if (rolesCreated > 0) bits.push(`${rolesCreated} role${rolesCreated === 1 ? '' : 's'}`);
   if (duplicates > 0) bits.push(`${duplicates} already present`);
   if (contactUpdated) bits.push('contact details filled in');
   if (unreadable > 0) bits.push(`${unreadable} incomplete and skipped`);
-  return bits.join(', ');
+  return bits.join(', ') + undatedNote;
 }

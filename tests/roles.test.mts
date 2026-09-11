@@ -12,7 +12,7 @@ import {
   splitMergedTitles,
   mergeRoles,
 } from '../lib/sync/roles';
-import { resolveRoles } from '../lib/import/commit';
+import { datedRoles, resolveRoles } from '../lib/import/commit';
 import { suite, test, assert } from './harness.mjs';
 
 const same = (a: [string, string], b: [string, string]) =>
@@ -181,5 +181,26 @@ suite('the dates a job may be saved with', () => {
     assert.ok(roleDateProblem('2024-03', '2022-06') !== null, 'reversed');
     assert.ok(roleDateProblem('2022-05', '2022') === null, 'same year is not reversed');
     assert.ok(roleDateProblem('2022-13', 'present') !== null, 'no thirteenth month');
+  });
+});
+
+suite('a job an import cannot date', () => {
+  const job = (startDate: string, endDate = '') => ({
+    title: 'Engineer', company: 'Acme', startDate, endDate, bullets: [],
+  });
+
+  test('a job with no readable start date is left out and counted', () => {
+    const { roles, undated } = datedRoles([job(''), job('sometime last year'), job('Sep 2024')]);
+    assert.ok(undated === 2 && roles.length === 1, `kept ${roles.length}, skipped ${undated}`);
+    assert.ok(roles[0].startDate === '2024-09', `dates are tidied on the way through: ${roles[0].startDate}`);
+  });
+
+  test('an end date that cannot be read means "still there", not a lost job', () => {
+    const { roles, undated } = datedRoles([job('2024-01', 'ongoing-ish')]);
+    assert.ok(undated === 0 && roles[0].endDate === 'present', JSON.stringify(roles[0]));
+  });
+
+  test('a reversed range is refused rather than stored backwards', () => {
+    assert.ok(datedRoles([job('2024-06', '2023-01')]).undated === 1, 'refused');
   });
 });

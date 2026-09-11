@@ -87,8 +87,8 @@ export async function GET(req: NextRequest) {
        */
       githubApp: isGitHubAppConfigured(),
       githubOAuthScope: isGitHubAppConfigured()
-        ? 'read:user user:email'
-        : 'read:user user:email repo',
+        ? 'read:user user:email read:org'
+        : 'read:user user:email read:org repo',
     },
     mail: {
       configured: isMailConfigured(),

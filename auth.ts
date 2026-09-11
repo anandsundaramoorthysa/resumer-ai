@@ -176,9 +176,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               // REQ-2.1 — one sign-in, no second credential to set up. The `repo` half
               // is dropped as soon as a GitHub App can take over the reading.
               params: {
+                // `read:org` is membership, read-only: it is what lets the install
+                // callback confirm that an organisation the app was installed on is one
+                // this person actually belongs to. Without it GitHub reports only public
+                // memberships, and most people's are private.
                 scope: isGitHubAppConfigured()
-                  ? 'read:user user:email'
-                  : 'read:user user:email repo',
+                  ? 'read:user user:email read:org'
+                  : 'read:user user:email read:org repo',
               },
             },
             // Linking by email is safe only because GitHub verifies the address it

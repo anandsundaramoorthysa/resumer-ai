@@ -173,6 +173,27 @@ export interface InstallationInfo {
   repositorySelection: 'all' | 'selected';
 }
 
+/** The organisations a user belongs to, by GitHub's numeric id. Empty on any failure. */
+export async function organizationIdsFor(userToken: string): Promise<string[]> {
+  try {
+    const res = await fetch('https://api.github.com/user/orgs?per_page=100', {
+      headers: {
+        Authorization: `Bearer ${userToken}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'ResumerAI/1.0',
+      },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return [];
+    const body = (await res.json()) as Array<{ id: number }>;
+    return body.map((o) => String(o.id));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Whether an installation is on a GitHub account this user has proved is theirs.
  *
@@ -182,15 +203,26 @@ export interface InstallationInfo {
  * this person signed in as — `githubAccountIds` are the `providerAccountId`s of their
  * GitHub sign-ins, which GitHub's OAuth vouched for.
  *
- * ponytail: organisation installations are refused. Proving someone administers an org
- * needs `read:org` or a user token from the App's own OAuth client, and neither exists
- * here; add that path when a portfolio in an organisation is actually needed.
+ * An organisation is accepted on membership rather than administration: proving someone
+ * ADMINISTERS an org needs a permission this app does not hold, and a member can already
+ * read the repositories the installation covers, so membership adds no reach — it only
+ * stops a stranger claiming an installation id they saw in a URL. Membership itself comes
+ * from the user's own token (`read:org`), which is why a member whose token predates that
+ * scope is asked to sign in again.
  */
 export function installationOwnedBy(
   installation: Pick<InstallationInfo, 'accountId' | 'targetType'>,
   githubAccountIds: string[],
+  /** The user's organisation ids, from `organizationIdsFor` — empty when unknown. */
+  organizationIds: string[] = [],
 ): boolean {
-  return installation.targetType === 'User' && githubAccountIds.includes(String(installation.accountId));
+  const account = String(installation.accountId);
+  if (installation.targetType === 'User') return githubAccountIds.includes(account);
+  // An organisation is accepted on membership, which is the strongest claim available
+  // here: proving someone ADMINISTERS an org needs a permission this app does not hold.
+  // A member can already read the repositories the installation covers, so this adds no
+  // reach — it only stops a stranger claiming an installation id they saw in a URL.
+  return installation.targetType === 'Organization' && organizationIds.includes(account);
 }
 
 /**
