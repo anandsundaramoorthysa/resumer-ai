@@ -1,20 +1,22 @@
 /**
  * SMTP delivery, configured for Gmail out of the box.
  *
- * This exists because the alternative needs a domain. Resend and every other transactional
- * provider will only send from `onboarding@resend.dev`-style sandbox addresses until you
- * verify a domain you own, and a sandbox sender can only mail the account holder — which
- * is fine while you are the only user and useless the moment someone else signs up.
- * A Gmail app password needs no domain and delivers to anyone.
+ * The only way this product sends mail. Transactional email APIs will only send from a
+ * sandbox address until you verify a domain you own, and a sandbox sender can only mail
+ * the account holder — fine while you are the only user and useless the moment someone
+ * else signs up. A Gmail app password needs no domain and delivers to anyone.
  *
  * What it costs: Gmail caps a consumer account at roughly 500 recipients a day (2,000 on
  * Workspace), and mail sent this way is authenticated as a person rather than as a
  * service, so it has none of the deliverability engineering a real sending domain gets.
- * That is the right trade for a personal product and the wrong one for a business, which
- * is why `lib/auth/mail.ts` prefers a real provider whenever one is configured.
+ * That is the right trade for a personal product; a business would want its own sending
+ * domain.
  *
  * Google retired plain-password SMTP in 2022. The password here must be a 16-character
- * app password from an account with 2-Step Verification enabled.
+ * app password from an account with 2-Step Verification enabled. Store it without the
+ * spaces Google shows between its four groups: the spaces are removed here anyway, but a
+ * value set on a command line without quotes keeps only the first group — which is how
+ * production ended up holding a 4-character password that Gmail rejected (535-5.7.8).
  */
 
 import 'server-only';

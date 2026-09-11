@@ -1,19 +1,13 @@
 /**
- * Sending the two emails this product sends.
+ * Sending the emails this product sends — through Gmail over SMTP (./smtp.ts).
  *
- * Two ways out, picked by whichever is configured:
+ * One way out, on purpose. A Gmail app password needs no domain and delivers to anyone,
+ * which is what a product without its own sending domain needs; an HTTP email API sat
+ * here too, took precedence whenever its key was set, and could only ever mail the
+ * account holder until a domain was verified. Two senders meant two things to configure
+ * and a quiet question of which one a message had actually gone through.
  *
- *   - **SMTP** (`lib/auth/smtp.ts`), which with a Gmail app password needs no domain and
- *     will deliver to anyone. This is the option that works when you do not own a domain.
- *   - **Resend** over its HTTP API, called with `fetch` — no SDK, because the integration
- *     is one POST and a dependency would be more code than the thing it wraps. Needs a
- *     verified domain before it will mail anyone but the account holder.
- *
- * Resend wins when both are set. A verified sending domain has SPF, DKIM and a warmed
- * reputation behind it; Gmail-as-a-service has none of that and a 500-a-day ceiling, so
- * it is the fallback rather than the preference.
- *
- * Both messages are plain text with the link on its own line. A link inside an HTML
+ * The messages are plain text with the link on its own line. A link inside an HTML
  * button is the shape phishing takes, and a verification email that looks like phishing
  * gets ignored — which turns into "I never got the email".
  */
@@ -25,25 +19,15 @@ export interface MailResult {
   ok: boolean;
   /** Set when the mail could not be sent, for the caller to log rather than display. */
   error?: string;
-  /** True when no provider is configured and the link was logged instead. */
+  /** True when SMTP is not configured and the link was logged instead. */
   loggedOnly?: boolean;
 }
 
-export type MailProvider = 'resend' | 'smtp' | 'none';
+export type MailProvider = 'smtp' | 'none';
 
-function resendConfig() {
-  return {
-    apiKey: process.env.RESEND_API_KEY?.trim() || '',
-    from: process.env.EMAIL_FROM?.trim() || '',
-  };
-}
-
-/** Which provider a message would go out through right now. */
+/** Whether a message would go out right now: SMTP when SMTP_USER and SMTP_PASS are set. */
 export function mailProvider(): MailProvider {
-  const { apiKey, from } = resendConfig();
-  if (apiKey && from) return 'resend';
-  if (smtpConfig()) return 'smtp';
-  return 'none';
+  return smtpConfig() ? 'smtp' : 'none';
 }
 
 export function isMailConfigured(): boolean {
@@ -52,59 +36,23 @@ export function isMailConfigured(): boolean {
 
 /** A one-line description of the mail setup, for the settings page and the setup check. */
 export function describeMailProvider(): string {
-  switch (mailProvider()) {
-    case 'resend':
-      return `Resend, sending as ${resendConfig().from}`;
-    case 'smtp': {
-      const c = smtpConfig()!;
-      return `SMTP via ${c.host}, sending as ${c.from}`;
-    }
-    default:
-      return 'not configured';
-  }
+  const c = smtpConfig();
+  return c ? `SMTP via ${c.host}, sending as ${c.from}` : 'not configured';
 }
 
 async function deliver(to: string, subject: string, text: string): Promise<MailResult> {
-  const provider = mailProvider();
+  const config = smtpConfig();
 
-  // With no provider the link goes to the server log. In development that is the whole
-  // flow working without an account anywhere; in production the sign-in page hides the
-  // email option rather than offering one that would strand whoever used it.
-  if (provider === 'none') {
-    console.warn(`[mail] no provider configured. To: ${to}\nSubject: ${subject}\n${text}`);
+  // Without SMTP the link goes to the server log. In development that is the whole flow
+  // working without an account anywhere; in production the sign-in page hides the email
+  // option rather than offering one that would strand whoever used it.
+  if (!config) {
+    console.warn(`[mail] SMTP is not configured. To: ${to}\nSubject: ${subject}\n${text}`);
     return { ok: true, loggedOnly: true };
   }
 
-  if (provider === 'smtp') {
-    const sent = await sendViaSmtp(smtpConfig()!, to, subject, text);
-    return sent.ok ? { ok: true } : { ok: false, error: sent.error };
-  }
-
-  const { apiKey, from } = resendConfig();
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ from, to: [to], subject, text }),
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      // The sandbox refusal is the one people hit first, and Resend's own wording does
-      // not say what to do about it.
-      const detail = /testing emails|own email address/i.test(body)
-        ? 'Resend is still in sandbox mode: it will only send to the address the account was registered with until a domain is verified. Use SMTP_USER/SMTP_PASS instead if you do not have a domain.'
-        : body.slice(0, 200);
-      return { ok: false, error: `${res.status} ${detail}` };
-    }
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'send failed' };
-  }
+  const sent = await sendViaSmtp(config, to, subject, text);
+  return sent.ok ? { ok: true } : { ok: false, error: sent.error };
 }
 
 /** A plain-text notice to the site operator — draft-failure alerts (lib/server/draft-alerts.ts). */

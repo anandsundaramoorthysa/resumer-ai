@@ -105,26 +105,19 @@ suite('provider selection', () => {
     });
   });
 
-  test('resend alone is used, but only with a from address', () => {
-    withEnv({ RESEND_API_KEY: 're_123' }, () =>
-      assert(mailProvider() === 'none', 'an API key with nothing to send as cannot send'),
-    );
+  test('an email API key no longer selects anything: Gmail SMTP is the only sender', () => {
     withEnv({ RESEND_API_KEY: 're_123', EMAIL_FROM: 'a@b.com' }, () =>
-      assert(mailProvider() === 'resend', 'both present'),
+      assert(mailProvider() === 'none', 'without SMTP there is no sender'),
+    );
+    withEnv(
+      { RESEND_API_KEY: 're_123', EMAIL_FROM: 'hello@example.com', SMTP_USER: 'me@gmail.com', SMTP_PASS: 'x'.repeat(16) },
+      () => assert(mailProvider() === 'smtp', 'SMTP, whatever else is set'),
     );
   });
 
-  test('a verified sending domain beats Gmail when both are configured', () => {
-    withEnv(
-      {
-        RESEND_API_KEY: 're_123', EMAIL_FROM: 'hello@example.com',
-        SMTP_USER: 'me@gmail.com', SMTP_PASS: 'x'.repeat(16),
-      },
-      () =>
-        assert(
-          mailProvider() === 'resend',
-          'SPF, DKIM and a warmed reputation beat a personal account with a 500-a-day cap',
-        ),
+  test('an app password pasted with Google\u2019s spaces is read without them', () => {
+    withEnv({ SMTP_USER: 'me@gmail.com', SMTP_PASS: 'abcd efgh ijkl mnop' }, () =>
+      assert(smtpConfig()?.pass === 'abcdefghijklmnop', 'spaces are not part of the password'),
     );
   });
 });
