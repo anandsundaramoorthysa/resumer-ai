@@ -198,10 +198,19 @@ function ReviewTool() {
                     const applied = new Set(res.data.applied);
                     done += res.data.applied.length;
                     failed += res.data.failed;
-                    setSuggestions((list) => list.filter((x) => !applied.has(x.id)));
+                    // A fix changes the record it touched, so anything else proposed
+                    // against that record was judged on words that no longer exist.
+                    const touched = new Set(
+                      chunk.filter((x) => applied.has(x.id)).flatMap((x) => Object.keys(x.basis)),
+                    );
+                    setSuggestions((list) =>
+                      list.filter((x) => !applied.has(x.id) && !Object.keys(x.basis).some((id) => touched.has(id))),
+                    );
                     setNotice(`Applying quick fixes… ${done} of ${quick.length}`);
                   }
-                  setNotice(`Applied ${done} quick fix${done === 1 ? '' : 'es'}${failed ? `; ${failed} could not be applied — review again` : ''}.`);
+                  setNotice(
+                    `Applied ${done} quick fix${done === 1 ? '' : 'es'}${failed ? `; ${failed} could not be applied — review again` : ''}. Suggestions about those records were cleared; review again to recheck them.`,
+                  );
                 })
               }
               className="min-h-11 rounded-lg border border-brand px-4 text-sm font-semibold text-brand-dark hover:bg-brand-tint disabled:opacity-50"
