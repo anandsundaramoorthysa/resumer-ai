@@ -99,6 +99,7 @@ export async function proposeChanges(args: {
   records: StewardRecord[];
   roles: StewardRole[];
   budget?: DraftBudget;
+  tier?: 'standard' | 'fast';
 }): Promise<{ proposals: AgentProposal[]; provider: string }> {
   if (args.records.length === 0) return { proposals: [], provider: 'none' };
   const roleById = new Map(args.roles.map((r) => [r.id, r]));
@@ -109,6 +110,7 @@ export async function proposeChanges(args: {
     system: SYSTEM,
     prompt: `${SECTION_FOCUS[args.section]}\n\nBEGIN RECORDS\n${payload}\nEND RECORDS`,
     options: draftCallOptions(args.budget, {
+      tier: args.tier ?? 'standard',
       temperature: 0.1,
       // Per attempt, not the whole budget. Handing one provider every second left meant a
       // slow Fireworks used all 22 s and the four providers behind it were never asked, so

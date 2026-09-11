@@ -95,10 +95,12 @@ function ReviewTool() {
     const found: Suggestion[] = [];
     const failed = new Set<string>();
     // Every section's first batch is known up front; later batches are learnt from it.
-    const queue: Array<{ section: StewardSection; batch: number }> = STEWARD_SECTIONS.map((s) => ({ section: s.id, batch: 0 }));
+    const queue: Array<{ section: StewardSection; batch: number; retried?: boolean }> = STEWARD_SECTIONS.map((s) => ({ section: s.id, batch: 0 }));
     let total = queue.length;
     let done = 0;
     setRun({ phase: 'running', done, total, current: STEWARD_SECTIONS[0].label });
+
+    const retry: Array<{ section: StewardSection; batch: number; retried?: boolean }> = [];
 
     const worker = async () => {
       while (queue.length > 0) {
@@ -115,16 +117,27 @@ function ReviewTool() {
             for (let b = 1; b < res.data.batches; b++) queue.push({ section: job.section, batch: b });
             total += res.data.batches - 1;
           }
-          if (res.data.model === 'failed') failed.add(label);
+          if (res.data.model === 'failed') {
+            if (!job.retried) retry.push({ ...job, retried: true });
+            else failed.add(label);
+          }
           found.push(...res.data.suggestions);
           setSuggestions(order(dedupe(found)));
         }
         setRun({ phase: 'running', done, total, current: label });
       }
     };
-    // Three at a time. Each request is one model call against a shared provider chain, so
-    // more than this queues at the provider rather than finishing sooner.
-    await Promise.all([worker(), worker(), worker()]);
+    // Two at a time. Each request is one model call against a shared provider chain, and
+    // three at once earned rate-limit refusals from it rather than finishing sooner.
+    await Promise.all([worker(), worker()]);
+    // One more pass at whatever the providers could not serve. A failed batch is usually a
+    // busy provider, not a broken request, and a retry costs seconds where re-running the
+    // whole review costs minutes.
+    if (retry.length > 0) {
+      queue.push(...retry.splice(0, retry.length));
+      total += queue.length;
+      await worker();
+    }
     setRun({ phase: 'done', failedSections: [...failed] });
   };
 

@@ -100,8 +100,17 @@ export const BATCH_SIZE: Record<StewardSection, number> = {
 
 const MODEL_TYPES_OTHER = new Set(['summary', 'achievement', 'award', 'volunteering', 'publication', 'writing']);
 
-/** What the model is shown for a section: only records it has something to judge in. */
+/**
+ * What the model is shown for a section: only records it has something to judge in.
+ *
+ * Skills are not among them. The rules already merge the duplicates and fix the spelling,
+ * and asked about the rest the model mostly proposed moving a skill between categories
+ * that the resume barely distinguishes — "Generative AI is a tool, not a framework" —
+ * which is noise for the reader and, at a hundred skills, five model calls of the dozen a
+ * review makes. It is the cheapest call to not make.
+ */
 function modelCandidates(profile: StewardProfile, section: StewardSection): StewardRecord[] {
+  if (section === 'skills') return [];
   return profile.records.filter((r) => {
     if (sectionOf(r.type) !== section) return false;
     if (r.type === 'experience-bullet') return !r.data.scale && !r.data.outcome;
