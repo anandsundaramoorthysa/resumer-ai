@@ -10,6 +10,7 @@ import { ProposedBulkControls, ProposedRecord } from './proposed-record';
 import { EnrichmentQuestion } from './enrichment-question';
 import { loadEnrichmentQueue } from '@/lib/server/enrichment';
 import { BulletEditor, type ExistingBullet } from './bullet-editor';
+import { AddJob, JobHeader } from './role-editor';
 import { RecordEditor, type EditableRecord } from './record-editor';
 import { ProfileAssistant } from './profile-assistant';
 import { RECORD_FORMS, describeRecord, formFor } from '@/lib/profile/forms';
@@ -384,8 +385,8 @@ export default async function ProfilePage() {
           </section>
         ) : null}
 
-        {roles.length > 0 ? (
-          <section className="mt-5 rounded-xl border border-line bg-surface p-5">
+        {/* Always rendered: with no jobs yet, this is where the first one is added. */}
+        <section className="mt-5 rounded-xl border border-line bg-surface p-5">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="font-display text-lg">Experience</h2>
               <span className="font-mono text-xs text-muted tabular">
@@ -396,18 +397,23 @@ export default async function ProfilePage() {
             <div className="mt-4 space-y-6">
               {roles.map((role) => {
                 const bullets = bulletsByRole.get(role.id) ?? [];
+                const job = {
+                  id: role.id,
+                  title: role.title,
+                  company: role.company,
+                  location: role.location ?? null,
+                  startDate: role.startDate,
+                  endDate: role.endDate,
+                };
                 return (
                   <div key={role.id} className="border-t border-line pt-4 first:border-t-0 first:pt-0">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <p className="font-semibold">
-                        {role.title}
-                        <span className="font-normal text-muted"> — {role.company}</span>
-                      </p>
-                      <span className="font-mono text-xs text-muted">
-                        {role.startDate || '(no start)'} → {role.endDate}
-                        {role.location ? ` · ${role.location}` : ''}
-                      </span>
-                    </div>
+                    <JobHeader
+                      job={job}
+                      bulletCount={bullets.length}
+                      others={roles
+                        .filter((r) => r.id !== role.id)
+                        .map((r) => ({ id: r.id, title: r.title, company: r.company, location: r.location ?? null, startDate: r.startDate, endDate: r.endDate }))}
+                    />
                     <BulletEditor
                       roleId={role.id}
                       roleLabel={role.company}
@@ -417,8 +423,8 @@ export default async function ProfilePage() {
                 );
               })}
             </div>
+            <AddJob />
           </section>
-        ) : null}
 
         {/* A profile with nothing in it gets the invitation above instead of twelve
             empty forms, which read as work to do rather than a place to start. */}

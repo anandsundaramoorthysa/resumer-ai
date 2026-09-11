@@ -13,7 +13,7 @@
 import { certificationHashParts, dedupeCertifications } from './certifications';
 import { z } from 'zod';
 import type { ParsedRecord } from './reconcile';
-import { hashContent } from './reconcile';
+import { bulletHash, hashContent } from './reconcile';
 import { classifySkill } from '../skills/categories';
 import { generateStructured } from '../ai/chain';
 import type { DraftBudget } from '../ai/budget';
@@ -477,7 +477,7 @@ export function toRecords(data: ExtractedProfile): ParseResult {
           scale: b.scale,
           outcome: b.outcome,
           tags: deriveTags(b.text),
-          contentHash: hashContent(['bullet', e.company, b.text]),
+          contentHash: bulletHash(e.company, b.text),
           source: 'github-sync',
         }) as ParsedRecord,
     );

@@ -1,13 +1,14 @@
 import 'server-only';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { profileRecords, roles as rolesTable } from '@/lib/db/schema';
-import { hashContent } from '@/lib/sync/reconcile';
+import { bulletHash, hashContent } from '@/lib/sync/reconcile';
 import { deriveTags } from '@/lib/sync/tags';
 import { audit } from '@/lib/server/profile';
 import { composeBulletText } from './bullet';
-import { tidyRecordData, tidyText } from '../steward/tidy';
+import { tidyDate, tidyRecordData, tidyText } from '../steward/tidy';
+import { roleDateProblem, roleIdentity } from '@/lib/sync/roles';
 import {
   coerceFormValues,
   formFor,
@@ -32,8 +33,8 @@ import {
  */
 
 export class DuplicateRecordError extends Error {
-  constructor() {
-    super('You already have this saved.');
+  constructor(message = 'You already have this saved.') {
+    super(message);
     this.name = 'DuplicateRecordError';
   }
 }
@@ -102,10 +103,12 @@ async function insertRecord(args: {
    * prefix is not always the type name (sync writes 'cert' for a certification), and
    * a prefix this function invented would hash the same fact two ways.
    */
-  hashParts: string[];
+  hashParts?: string[];
+  /** Set instead of `hashParts` where the recipe is not a list of parts (bullets). */
+  contentHash?: string;
   tagSource: string;
 }): Promise<string> {
-  const contentHash = hashContent(args.hashParts);
+  const contentHash = args.contentHash ?? hashContent(args.hashParts ?? []);
 
   try {
     const [row] = await db
@@ -135,13 +138,14 @@ async function insertRecord(args: {
  * orphan bucket at assembly time, where it silently never reaches a resume. That failed
  * quietly once already, so it fails loudly here instead.
  */
-async function assertOwnsRole(userId: string, roleId: string): Promise<void> {
+async function assertOwnsRole(userId: string, roleId: string): Promise<{ company: string }> {
   const [role] = await db
-    .select({ id: rolesTable.id })
+    .select({ company: rolesTable.company })
     .from(rolesTable)
     .where(and(eq(rolesTable.id, roleId), eq(rolesTable.userId, userId)))
     .limit(1);
   if (!role) throw new Error('That role does not exist on your profile.');
+  return role;
 }
 
 /** A bullet's three parts with layer-1 tidying — see lib/steward/tidy.ts. */
@@ -159,7 +163,7 @@ export async function createBullet(
   input: z.infer<typeof BulletInput>,
 ): Promise<string> {
   const parsed = tidyBullet(BulletInput.parse(input));
-  await assertOwnsRole(userId, parsed.roleId);
+  const { company } = await assertOwnsRole(userId, parsed.roleId);
 
   const text = composeBulletText(parsed);
   return insertRecord({
@@ -172,7 +176,7 @@ export async function createBullet(
       scale: parsed.scale || undefined,
       outcome: parsed.outcome || undefined,
     },
-    hashParts: ['experience-bullet', parsed.roleId, text],
+    contentHash: bulletHash(company, text),
     tagSource: text,
   });
 }
@@ -183,10 +187,10 @@ export async function updateBullet(
   input: z.infer<typeof BulletInput>,
 ): Promise<void> {
   const parsed = tidyBullet(BulletInput.parse(input));
-  await assertOwnsRole(userId, parsed.roleId);
+  const { company } = await assertOwnsRole(userId, parsed.roleId);
 
   const text = composeBulletText(parsed);
-  const contentHash = hashContent(['experience-bullet', parsed.roleId, text]);
+  const contentHash = bulletHash(company, text);
 
   const updated = await db
     .update(profileRecords)
@@ -210,6 +214,135 @@ export async function updateBullet(
 
   if (updated.length === 0) throw new Error('That entry no longer exists.');
   await audit(userId, recordId, 'update', 'manual', { type: 'experience-bullet' });
+}
+
+/* ------------------------------------------------------------------ jobs ---- */
+
+export const RoleInput = z.object({
+  title: nonEmpty.max(200),
+  company: nonEmpty.max(200),
+  location: z.string().trim().max(120).optional(),
+  startDate: z.string().trim().max(32),
+  endDate: z.string().trim().max(32),
+});
+
+/**
+ * The job's fields tidied and checked, or an error saying what to fix.
+ *
+ * Jobs had no writer but the importers and the sync, so a misspelt company, an empty start
+ * date or a duplicate an import created could never be corrected — in the section every
+ * resume leads with.
+ */
+function prepareRole(input: z.infer<typeof RoleInput>) {
+  const parsed = RoleInput.parse(input);
+  const role = {
+    title: tidyText(parsed.title),
+    company: tidyText(parsed.company),
+    location: parsed.location ? tidyText(parsed.location) : null,
+    startDate: tidyDate(parsed.startDate),
+    endDate: parsed.endDate ? tidyDate(parsed.endDate) : 'present',
+  };
+  const problem = roleDateProblem(role.startDate, role.endDate);
+  if (problem) throw new Error(problem);
+  return role;
+}
+
+/** Refuses a second copy of a job the profile already holds, however it is spelled. */
+async function assertNewJob(userId: string, role: { company: string; title: string }, exceptId?: string) {
+  const others = await db
+    .select({ id: rolesTable.id, company: rolesTable.company, title: rolesTable.title })
+    .from(rolesTable)
+    .where(and(eq(rolesTable.userId, userId), ne(rolesTable.reviewState, 'rejected')));
+  const identity = roleIdentity(role.company, role.title);
+  if (others.some((r) => r.id !== exceptId && roleIdentity(r.company, r.title) === identity)) {
+    throw new DuplicateRecordError('That job is already on your profile.');
+  }
+}
+
+export async function createRole(userId: string, input: z.infer<typeof RoleInput>): Promise<string> {
+  const role = prepareRole(input);
+  await assertNewJob(userId, role);
+  const [row] = await db
+    .insert(rolesTable)
+    .values({
+      userId,
+      ...role,
+      source: 'manual',
+      contentHash: hashContent(['role', role.company, role.title, role.startDate]),
+    })
+    .returning({ id: rolesTable.id });
+  await audit(userId, null, 'create', 'manual', { type: 'role', roleId: row.id });
+  return row.id;
+}
+
+export async function updateRole(userId: string, roleId: string, input: z.infer<typeof RoleInput>): Promise<void> {
+  const role = prepareRole(input);
+  await assertNewJob(userId, role, roleId);
+  const updated = await db
+    .update(rolesTable)
+    .set({
+      ...role,
+      // Edited by hand is the user's own, so a later sync matches it rather than
+      // proposing its own spelling again — the same promotion an edited bullet gets.
+      source: 'manual',
+      reviewState: 'approved',
+      contentHash: hashContent(['role', role.company, role.title, role.startDate]),
+    })
+    .where(and(eq(rolesTable.id, roleId), eq(rolesTable.userId, userId)))
+    .returning({ id: rolesTable.id });
+  if (updated.length === 0) throw new Error('That job no longer exists.');
+  await audit(userId, null, 'update', 'manual', { type: 'role', roleId });
+}
+
+/**
+ * Removes a job. Its accomplishments are moved to `moveTo` — the way two copies of one job
+ * become one — or removed with it.
+ *
+ * Bullets point at their job only through `data.roleId`, with no foreign key, so a plain
+ * delete would leave them orphaned: invisible on the profile and dropped from every draft.
+ */
+export async function deleteRole(userId: string, roleId: string, moveTo?: string | null): Promise<void> {
+  if (moveTo === roleId) throw new Error('Choose a different job to move them to.');
+  const target = moveTo ? await assertOwnsRole(userId, moveTo) : null;
+
+  await db.transaction(async (tx) => {
+    const bulletsOf = and(
+      eq(profileRecords.userId, userId),
+      eq(profileRecords.type, 'experience-bullet'),
+      sql`${profileRecords.data}->>'roleId' = ${roleId}`,
+    );
+    if (moveTo && target) {
+      // A bullet's identity includes its job's company, so a moved bullet has a new one.
+      // One the target job already holds is a duplicate and goes, rather than failing the
+      // move on the unique index. Moved bullets become the user's own: the sync would
+      // otherwise propose them again under the job they came from.
+      const bullets = await tx.select().from(profileRecords).where(bulletsOf);
+      for (const b of bullets) {
+        const data: Record<string, unknown> = { ...(b.data as Record<string, unknown>), roleId: moveTo };
+        const contentHash = bulletHash(target.company, String(data.text ?? ''));
+        const [clash] = await tx
+          .select({ id: profileRecords.id })
+          .from(profileRecords)
+          .where(and(eq(profileRecords.userId, userId), eq(profileRecords.contentHash, contentHash), ne(profileRecords.id, b.id)))
+          .limit(1);
+        if (clash) await tx.delete(profileRecords).where(eq(profileRecords.id, b.id));
+        else {
+          await tx
+            .update(profileRecords)
+            .set({ data, contentHash, source: 'manual', updatedAt: new Date() })
+            .where(eq(profileRecords.id, b.id));
+        }
+      }
+    } else {
+      await tx.delete(profileRecords).where(bulletsOf);
+    }
+    const deleted = await tx
+      .delete(rolesTable)
+      .where(and(eq(rolesTable.id, roleId), eq(rolesTable.userId, userId)))
+      .returning({ id: rolesTable.id });
+    if (deleted.length === 0) throw new Error('That job no longer exists.');
+  });
+  await audit(userId, null, 'delete', 'manual', { type: 'role', roleId, movedTo: moveTo ?? null });
 }
 
 export async function deleteRecord(userId: string, recordId: string): Promise<void> {
@@ -440,7 +573,8 @@ export async function patchRecord(
     data = tidyRecordData('experience-bullet', merged);
     const text = String(data.text ?? '');
     if (!text) throw new Error('A bullet cannot be empty.');
-    contentHash = hashContent(['experience-bullet', String(data.roleId ?? ''), text]);
+    const { company } = await assertOwnsRole(userId, String(data.roleId ?? ''));
+    contentHash = bulletHash(company, text);
     tags = deriveTags(text);
   } else {
     const form = formFor(existing.type);

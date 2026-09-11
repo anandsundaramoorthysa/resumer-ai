@@ -13,6 +13,9 @@ import { assert, report, suite, test } from './harness.mjs';
 import { MAX_CHUNK_CHARS, chunkResumeText, formatFromFile } from '@/lib/import/text';
 import { buildPreview } from '@/lib/import/parse';
 import type { ExtractedProfile } from '@/lib/sync/parse';
+import { mergeExtractions, toRecords } from '@/lib/sync/parse';
+import { bulletHash } from '@/lib/sync/reconcile';
+import { buildLinkedInPreview } from '@/lib/import/linkedin';
 
 /* ---------------------------------------------------------- file typing ---- */
 
@@ -228,6 +231,34 @@ suite('review candidates (task 2.3)', () => {
     assert.equal(empty.totalCount, 0);
     assert.deepEqual(empty.records, []);
     assert.deepEqual(empty.roles, []);
+  });
+});
+
+suite('one bullet, one identity, whichever way it arrived', () => {
+  test('the sync hashes a bullet exactly as a hand-written or imported one is hashed', () => {
+    const merged = mergeExtractions([
+      {
+        experience: [
+          { company: 'Acme', title: 'Engineer', startDate: '2022', endDate: 'present', bullets: [{ text: 'Built the billing service', action: 'Built the billing service' }] },
+        ],
+      } as unknown as Partial<ExtractedProfile>,
+    ]);
+    const bullet = toRecords(merged).records.find((r) => r.type === 'experience-bullet');
+    assert.ok(bullet, 'the sync produced the bullet');
+    assert.equal(bullet!.contentHash, bulletHash('Acme', 'Built the billing service'));
+  });
+
+  test('so does the LinkedIn import', () => {
+    const preview = buildLinkedInPreview(
+      new Map([
+        [
+          'Positions.csv',
+          ['Company Name,Title,Description,Location,Started On,Finished On', 'Acme,Engineer,Built the billing service,,Jan 2022,', ''].join(String.fromCharCode(10)),
+        ],
+      ]),
+    );
+    const hashes = JSON.stringify(preview);
+    assert.ok(hashes.includes(bulletHash('Acme', 'Built the billing service')), 'same hash');
   });
 });
 

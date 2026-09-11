@@ -56,6 +56,26 @@ export function normalizeCompany(company: string): string {
   return SELF_EMPLOYMENT.test(key) ? 'selfemployed' : key;
 }
 
+const ROLE_DATE = /^\d{4}(-(0[1-9]|1[0-2]))?$/;
+
+/**
+ * Why a job's dates cannot be saved, or null when they can. `startDate` and `endDate` are
+ * already tidied (lib/steward/tidy.ts), so "Sep 2023" has become "2023-09".
+ *
+ * A start date is required. An empty one printed as "(no start)" and broke the ATS date
+ * arithmetic (specs/AUDIT.md #4), and a year alone is fine — plenty of people do not
+ * remember the month. Ranges are compared at the precision both sides have, so "2022" to
+ * "2022-05" is not reversed.
+ */
+export function roleDateProblem(startDate: string, endDate: string): string | null {
+  if (!ROLE_DATE.test(startDate)) return 'Give a start date as a year, or a year and month (2022 or 2022-06).';
+  if (endDate === 'present') return null;
+  if (!ROLE_DATE.test(endDate)) return 'Give an end date as a year, or a year and month — or mark the job as current.';
+  const width = Math.min(startDate.length, endDate.length);
+  if (endDate.slice(0, width) < startDate.slice(0, width)) return 'The job ends before it starts.';
+  return null;
+}
+
 /** "Flutter Developer (Paid Intern)" and "Flutter Developer Intern" reduce alike. */
 export function normalizeTitle(title: string): string {
   return squash(title.replace(TITLE_QUALIFIERS, ' '))

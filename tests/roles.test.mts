@@ -4,6 +4,7 @@
  */
 
 import {
+  roleDateProblem,
   dedupeRoles,
   normalizeCompany,
   normalizeTitle,
@@ -162,5 +163,23 @@ suite('an import finds the jobs the profile already has', () => {
     ]);
     assert.ok(fresh.length === 1, `created ${fresh.length}`);
     assert.ok(JSON.stringify(targets[0]) === JSON.stringify(targets[1]), 'both point at it');
+  });
+});
+
+suite('the dates a job may be saved with', () => {
+  test('a year, or a year and month, and current jobs', () => {
+    assert.ok(roleDateProblem('2022', 'present') === null);
+    assert.ok(roleDateProblem('2022-06', '2024-03') === null);
+  });
+
+  test('a start date is required — "(no start)" broke the date arithmetic', () => {
+    assert.ok(roleDateProblem('', 'present') !== null);
+    assert.ok(roleDateProblem('June', 'present') !== null);
+  });
+
+  test('a range that ends before it starts is refused, at the precision both sides have', () => {
+    assert.ok(roleDateProblem('2024-03', '2022-06') !== null, 'reversed');
+    assert.ok(roleDateProblem('2022-05', '2022') === null, 'same year is not reversed');
+    assert.ok(roleDateProblem('2022-13', 'present') !== null, 'no thirteenth month');
   });
 });

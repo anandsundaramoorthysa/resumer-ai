@@ -17,7 +17,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { auditLog, contactInfo, profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { audit } from '@/lib/server/profile';
-import { hashContent } from '@/lib/sync/reconcile';
+import { bulletHash, hashContent } from '@/lib/sync/reconcile';
 import { formFor, hashInput, missingRequired, tagSource } from '@/lib/profile/forms';
 import { deriveTags } from '@/lib/sync/tags';
 import { roleIdentity } from '@/lib/sync/roles';
@@ -226,7 +226,7 @@ export async function commitImport(
     for (const bullet of role.bullets) {
       rows.push({
         type: 'experience-bullet',
-        contentHash: hashContent(['bullet', company, bullet.text]),
+        contentHash: bulletHash(company, bullet.text),
         // Derived here, like every other writer. The browser's tags were stored as sent,
         // and tags decide which job keywords a resume is allowed to claim.
         tags: deriveTags(bullet.text),

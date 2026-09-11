@@ -12,6 +12,9 @@ import {
   createSummary,
   createTypedRecord,
   updateTypedRecord,
+  createRole,
+  updateRole,
+  deleteRole,
   deleteRecord as removeRecord,
   setProjectMetrics,
   updateBullet,
@@ -42,10 +45,11 @@ async function run(fn: () => Promise<void>, success: string): Promise<Result> {
     return { ok: true, message: success };
   } catch (err) {
     if (err instanceof DuplicateRecordError) return { ok: false, message: err.message };
-    return {
-      ok: false,
-      message: err instanceof Error ? err.message : 'Something went wrong.',
-    };
+    // Validation errors thrown by lib/profile/records.ts are sentences; a ZodError or a
+    // database error is not, and its text is not for the page.
+    if (err instanceof Error && err.constructor === Error) return { ok: false, message: err.message };
+    console.error('[profile] save failed:', err);
+    return { ok: false, message: 'That could not be saved. Try again.' };
   }
 }
 
@@ -78,6 +82,32 @@ export async function editBullet(
     },
     'Saved.',
   );
+}
+
+export interface JobValues {
+  title: string;
+  company: string;
+  location: string;
+  startDate: string;
+  endDate: string;
+}
+
+export async function saveJob(roleId: string | null, values: JobValues): Promise<Result> {
+  const userId = await requireUserId();
+  return run(
+    async () => {
+      if (roleId) await updateRole(userId, roleId, values);
+      else await createRole(userId, values);
+    },
+    roleId ? 'Job saved.' : 'Job added.',
+  );
+}
+
+export async function removeJob(roleId: string, moveTo: string | null): Promise<Result> {
+  const userId = await requireUserId();
+  return run(async () => {
+    await deleteRole(userId, roleId, moveTo);
+  }, moveTo ? 'Job removed; its accomplishments were moved.' : 'Job removed.');
 }
 
 export async function deleteProfileRecord(recordId: string): Promise<Result> {

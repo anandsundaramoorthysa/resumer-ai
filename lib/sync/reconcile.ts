@@ -72,6 +72,20 @@ export function hashContent(parts: Array<string | undefined>): string {
 }
 
 /**
+ * The one identity of an experience bullet, for every writer: the job's company and the
+ * sentence.
+ *
+ * Hand-written bullets used to hash the role's row id instead, while the sync, the resume
+ * import and the LinkedIn import hashed the company — so the same accomplishment typed by
+ * hand and then imported was two rows the unique index could not see as one. The company
+ * rather than the row id because a synced or imported bullet has no row id until its job
+ * is written.
+ */
+export function bulletHash(company: string, text: string): string {
+  return hashContent(['bullet', company, text]);
+}
+
+/**
  * A record as produced by the parser, before it has an id.
  *
  * `reviewState` is omitted along with the rest: a parsed record carries no decision,
