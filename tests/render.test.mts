@@ -184,6 +184,16 @@ await (async () => {
     }
   });
 
+  await testAsync('a grade is not a date, and real dates still are', async () => {
+    // The owner's B.Sc. line — failed spelled-out-dates on every EA draft.
+    for (const grade of ['Bachelor of Science, Computer Science · 7.5 / 10', 'CGPA 8.2/10', '3.8 / 4.0']) {
+      assert.ok(!containsNumericDate(grade), `"${grade}" read as a date`);
+    }
+    for (const date of ['07/05/2023', '7-5-23', '12.03.2024', '05/2024', '1 / 2022']) {
+      assert.ok(containsNumericDate(date), `"${date}" was missed`);
+    }
+  });
+
   // --- decorative bullet ----------------------------------------------------
   await testAsync('catches a decorative bullet character', async () => {
     const doc = goodDoc();

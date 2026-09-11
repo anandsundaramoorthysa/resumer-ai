@@ -25,18 +25,25 @@ function normalize(s: string): string {
     .trim();
 }
 
-/** Whole-phrase containment: `haystack` contains `needle` on word boundaries. */
+/**
+ * Whole-phrase containment: `haystack` contains `needle` on word boundaries.
+ *
+ * Every occurrence is tried, not only the first. Checking just the first meant a needle
+ * that first appears inside a longer word was never found at all: "postgresql and sql"
+ * did not contain "sql", and a Skills row "Programming Languages: Python, R" did not
+ * contain "R", because the first "r" is in "programming". Every caller — the keyword
+ * gate, the skills scorer, retrieval — then counted a term the text states outright as
+ * missing, depending only on what happened to be printed before it.
+ */
 export function containsPhrase(haystack: string, needle: string): boolean {
   if (haystack === needle) return true;
-  const idx = haystack.indexOf(needle);
-  if (idx === -1) return false;
+  if (!needle) return false;
 
-  const before = idx === 0 ? ' ' : haystack[idx - 1];
-  const afterIdx = idx + needle.length;
-  const after = afterIdx >= haystack.length ? ' ' : haystack[afterIdx];
-
-  const boundary = (c: string) => !/[\p{L}\p{N}]/u.test(c);
-  return boundary(before) && boundary(after);
+  const boundary = (c: string | undefined) => c === undefined || !/[\p{L}\p{N}]/u.test(c);
+  for (let idx = haystack.indexOf(needle); idx !== -1; idx = haystack.indexOf(needle, idx + 1)) {
+    if (boundary(haystack[idx - 1]) && boundary(haystack[idx + needle.length])) return true;
+  }
+  return false;
 }
 
 function wordCount(s: string): number {
