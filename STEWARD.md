@@ -161,6 +161,20 @@ Measured against the owner's real profile (191 records) on production:
   them and says so, rather than offering a button whose only outcome is a refusal.
 - A whole review of that profile: about 135 seconds, ~46 suggestions.
 
+## 4a. The sixth skill category
+
+Added 2026-09-11. The five categories (language, framework, tool, platform, soft-skill)
+had no home for a technique, so every parser filed Machine Learning as a framework,
+Statistics as a tool, and Web Development and SEO as soft skills. `method` is that home.
+
+What fills it is `lib/skills/categories.ts` — a table, not a model, for the reason in §4:
+asked to sort a hundred skills the model produced a long list of defensible-either-way
+changes at five calls a review. The table answers only where the answer is not in doubt
+(43 of the owner's 103 skills; 38 of them were filed wrong), the steward proposes each as
+an ordinary suggestion, and a form saving a skill into a category the table disagrees with
+says so first. On a resume, a method no Skills rule already places gets a Methods and
+Practices row instead of falling into Other.
+
 ## 5. Test plan
 
 - Unit: tidy, every rule (fixtures taken from the real profile's defects), the verifier
