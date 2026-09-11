@@ -12,13 +12,15 @@
  */
 
 import 'server-only';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/lib/db';
-import { contactInfo, profileRecords, roles as rolesTable } from '@/lib/db/schema';
+import { auditLog, contactInfo, profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { audit } from '@/lib/server/profile';
 import { hashContent } from '@/lib/sync/reconcile';
-import { formFor, hashInput, missingRequired } from '@/lib/profile/forms';
+import { formFor, hashInput, missingRequired, tagSource } from '@/lib/profile/forms';
+import { deriveTags } from '@/lib/sync/tags';
+import { roleIdentity } from '@/lib/sync/roles';
 import type { RecordSource } from '@/lib/types';
 import { tidyRecordData, tidyText } from '@/lib/steward/tidy';
 import { fillContactGaps, type ContactFields } from './contact-links';
@@ -38,7 +40,7 @@ const RoleIn = z.object({
   company: z.string().max(200).default(''),
   startDate: z.string().max(32).default(''),
   endDate: z.string().max(32).default('present'),
-  bullets: z.array(BulletIn).max(100).default([]),
+  bullets: z.array(BulletIn).max(60).default([]),
 });
 
 /**
@@ -101,10 +103,12 @@ export const CommitPayloadSchema = z.object({
     })
     .nullable()
     .optional(),
-  // Bounded so a payload cannot be used as unmetered storage. A real resume yields tens
-  // of records, not thousands; anything past these caps is not an import.
-  roles: z.array(RoleIn).max(200).default([]),
-  records: z.array(RecordIn).max(2000).default([]),
+  // Bounded so a payload cannot be used as unmetered storage, and so one commit fits one
+  // request: a server action refuses a body over 1 MB, which 2,000 records of 2,000
+  // characters never would have. A real resume yields tens of records; a large LinkedIn
+  // export a few hundred.
+  roles: z.array(RoleIn).max(100).default([]),
+  records: z.array(RecordIn).max(600).default([]),
 });
 
 export type CommitPayload = z.infer<typeof CommitPayloadSchema>;
@@ -119,77 +123,126 @@ export interface CommitSummary {
   message: string;
 }
 
+/**
+ * Which stored job each incoming role is, or that it is new. Pure, so it is tested.
+ *
+ * Matched on the normalised company-and-title identity the sync already uses, not only on
+ * the exact hash: "2022-01" against "2022", "Acme Inc." against "Acme", or a missing start
+ * date each made a second copy of a job the profile already had — the "16 rows for 9
+ * jobs" bug, fixed for the sync and brought back by every import.
+ */
+export function resolveRoles(
+  stored: Array<{ id: string; contentHash: string; company: string; title: string }>,
+  incoming: Array<{ company: string; title: string; startDate: string }>,
+): { targets: Array<{ existingId: string } | { newIndex: number }>; fresh: number[] } {
+  const byHash = new Map(stored.map((r) => [r.contentHash, r.id]));
+  const byIdentity = new Map(stored.map((r) => [roleIdentity(r.company, r.title), r.id]));
+  const newByIdentity = new Map<string, number>();
+  const fresh: number[] = [];
+
+  const targets = incoming.map((role, i) => {
+    const hash = hashContent(['role', role.company, role.title, role.startDate]);
+    const identity = roleIdentity(role.company, role.title);
+    const existingId = byHash.get(hash) ?? byIdentity.get(identity);
+    if (existingId) return { existingId };
+    const seen = newByIdentity.get(identity);
+    if (seen !== undefined) return { newIndex: seen };
+    newByIdentity.set(identity, i);
+    fresh.push(i);
+    return { newIndex: i };
+  });
+  return { targets, fresh };
+}
+
+interface RowIn {
+  type: string;
+  contentHash: string;
+  tags: string[];
+  data: Record<string, unknown>;
+}
+
 export async function commitImport(
   userId: string,
   payload: CommitPayload,
   /** Provenance for everything written, so REQ-1.2 stays truthful per source. */
   source: RecordSource = 'ai-import',
 ): Promise<CommitSummary> {
-  let created = 0;
-  let duplicates = 0;
-  let rolesCreated = 0;
+  // Every write below is batched. This made one or two round trips per record — about 120
+  // statements for a 60-record resume at a quarter of a second each, past the 30-second
+  // function limit, leaving some rows written and no summary. The sync measured the same
+  // shape at 34s for 150 records before it was batched (lib/server/profile.ts).
+  const roles = payload.roles.map((raw) => ({
+    ...raw,
+    title: tidyText(raw.title),
+    company: tidyText(raw.company),
+    bullets: raw.bullets.map((b) => ({
+      ...b,
+      text: tidyText(b.text),
+      action: tidyText(b.action),
+      scale: b.scale && tidyText(b.scale),
+      outcome: b.outcome && tidyText(b.outcome),
+    })),
+  }));
 
   // --- Roles first: a bullet's roleId must be a real row id, or the assembler has
   // nothing to group it under and it renders as a loose line with no employer.
-  for (const raw of payload.roles) {
-    const role = {
-      ...raw,
-      title: tidyText(raw.title),
-      company: tidyText(raw.company),
-      bullets: raw.bullets.map((b) => ({
-        ...b,
-        text: tidyText(b.text),
-        action: tidyText(b.action),
-        scale: b.scale && tidyText(b.scale),
-        outcome: b.outcome && tidyText(b.outcome),
-      })),
-    };
-    const roleHash = hashContent(['role', role.company, role.title, role.startDate]);
+  const stored = roles.length
+    ? await db
+        .select({ id: rolesTable.id, contentHash: rolesTable.contentHash, company: rolesTable.company, title: rolesTable.title })
+        .from(rolesTable)
+        // A job the user rejected is not one to file new bullets under — they would be
+        // invisible, under a role no draft loads.
+        .where(and(eq(rolesTable.userId, userId), ne(rolesTable.reviewState, 'rejected')))
+    : [];
+  const { targets, fresh } = resolveRoles(stored, roles);
 
-    const [existing] = await db
-      .select({ id: rolesTable.id })
-      .from(rolesTable)
-      .where(
-        and(eq(rolesTable.userId, userId), eq(rolesTable.contentHash, roleHash)),
-      )
-      .limit(1);
-
-    let roleId = existing?.id;
-    if (!roleId) {
-      const [inserted] = await db
-        .insert(rolesTable)
-        .values({
+  const newIds = new Map<number, string>();
+  if (fresh.length > 0) {
+    const inserted = await db
+      .insert(rolesTable)
+      .values(
+        fresh.map((i) => ({
           userId,
-          title: role.title,
-          company: role.company,
-          startDate: role.startDate,
-          endDate: role.endDate || 'present',
+          title: roles[i].title,
+          company: roles[i].company,
+          startDate: roles[i].startDate,
+          endDate: roles[i].endDate || 'present',
           source,
-          contentHash: roleHash,
-        })
-        .returning({ id: rolesTable.id });
-      roleId = inserted.id;
-      rolesCreated += 1;
-    }
+          contentHash: hashContent(['role', roles[i].company, roles[i].title, roles[i].startDate]),
+        })),
+      )
+      .returning({ id: rolesTable.id });
+    fresh.forEach((i, n) => newIds.set(i, inserted[n].id));
+  }
 
+  const companyOf = new Map(stored.map((r) => [r.id, r.company]));
+  const rows: RowIn[] = [];
+  roles.forEach((role, i) => {
+    const target = targets[i];
+    const roleId = 'existingId' in target ? target.existingId : newIds.get(target.newIndex)!;
+    // Hashed under the company as the matched job spells it, so the same bullet imported
+    // again from a resume that writes "Acme" instead of "Acme Inc." is recognised.
+    const company = 'existingId' in target ? (companyOf.get(roleId) ?? role.company) : roles[target.newIndex].company;
     for (const bullet of role.bullets) {
-      const contentHash = hashContent(['bullet', role.company, bullet.text]);
-      const wrote = await insertRecord(userId, {
+      rows.push({
         type: 'experience-bullet',
-        contentHash,
-        tags: bullet.tags,
+        contentHash: hashContent(['bullet', company, bullet.text]),
+        // Derived here, like every other writer. The browser's tags were stored as sent,
+        // and tags decide which job keywords a resume is allowed to claim.
+        tags: deriveTags(bullet.text),
         data: {
           roleId,
           text: bullet.text,
-          action: bullet.action || bullet.text,
+          // A bullet split into parts keeps its action; otherwise the action is the text.
+          // Taking a suggested rewrite used to change `text` and leave the old `action`,
+          // which the evidence grader reads.
+          action: bullet.scale || bullet.outcome ? bullet.action || bullet.text : bullet.text,
           scale: bullet.scale,
           outcome: bullet.outcome,
         },
-      }, source);
-      if (wrote) created += 1;
-      else duplicates += 1;
+      });
     }
-  }
+  });
 
   let unreadable = 0;
   for (const rec of payload.records) {
@@ -202,21 +255,18 @@ export async function commitImport(
       continue;
     }
     const form = formFor(rec.type)!;
-    const wrote = await insertRecord(
-      userId,
-      {
-        type: rec.type,
-        contentHash: hashContent(hashInput(form, data)),
-        tags: rec.tags,
-        data,
-      },
-      source,
-    );
-    if (wrote) created += 1;
-    else duplicates += 1;
+    rows.push({
+      type: rec.type,
+      contentHash: hashContent(hashInput(form, data)),
+      tags: deriveTags(tagSource(form, data)),
+      data,
+    });
   }
 
+  const created = await insertRecords(userId, rows, source);
   const contactUpdated = await writeContact(userId, payload.contact ?? null, source);
+  const duplicates = rows.length - created;
+  const rolesCreated = fresh.length;
 
   return {
     created,
@@ -229,41 +279,37 @@ export async function commitImport(
 }
 
 /**
- * Returns false when the record was already in the profile. The unique index on
- * (userId, contentHash) is what makes re-importing the same file safe: a second import
- * adds nothing rather than duplicating a career.
+ * Inserts what is not already in the profile and returns how many rows landed. The unique
+ * index on (userId, contentHash) is what makes re-importing the same file safe: a second
+ * import adds nothing rather than duplicating a career. Each chunk and its audit rows
+ * (REQ-10.1) commit together, so a record never exists without the row naming its source.
  */
-async function insertRecord(
-  userId: string,
-  input: {
-    type: string;
-    contentHash: string;
-    tags: string[];
-    data: Record<string, unknown>;
-  },
-  source: RecordSource,
-): Promise<boolean> {
-  const inserted = await db
-    .insert(profileRecords)
-    .values({
-      userId,
-      type: input.type,
-      source,
-      contentHash: input.contentHash,
-      tags: input.tags ?? [],
-      data: input.data,
-    })
-    .onConflictDoNothing()
-    .returning({ id: profileRecords.id });
-
-  if (inserted.length === 0) return false;
-
-  // REQ-10.1 — one audit row per created record, naming the source.
-  await audit(userId, inserted[0].id, 'create', source, {
-    type: input.type,
-    contentHash: input.contentHash,
-  });
-  return true;
+async function insertRecords(userId: string, rows: RowIn[], source: RecordSource): Promise<number> {
+  const unique = [...new Map(rows.map((r) => [r.contentHash, r])).values()];
+  let created = 0;
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    created += await db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(profileRecords)
+        .values(chunk.map((r) => ({ userId, source, type: r.type, contentHash: r.contentHash, tags: r.tags, data: r.data })))
+        .onConflictDoNothing()
+        .returning({ id: profileRecords.id, type: profileRecords.type, contentHash: profileRecords.contentHash });
+      if (inserted.length > 0) {
+        await tx.insert(auditLog).values(
+          inserted.map((r) => ({
+            userId,
+            recordId: r.id,
+            action: 'create',
+            source,
+            diff: { type: r.type, contentHash: r.contentHash },
+          })),
+        );
+      }
+      return inserted.length;
+    });
+  }
+  return created;
 }
 
 /**

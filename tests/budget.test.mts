@@ -17,6 +17,7 @@ import {
   RENDER_RESERVE_MS,
   BudgetExceededError,
   draftCallOptions,
+  defaultTimeBudgetMs,
 } from '@/lib/ai/budget';
 
 const LIMITS = { maxCalls: 4, maxTokens: 10_000 };
@@ -122,6 +123,22 @@ suite('failed attempts count against the budget', () => {
   test('the time cap still fires independently of the call cap', () => {
     const budget = new DraftBudget(LIMITS, 0);
     assert.throws(() => budget.assertCanSpend(), BudgetExceededError);
+  });
+});
+
+suite('the default draft clock', () => {
+  test('with nothing set it fits a 30-second function, whatever the host', () => {
+    // Netlify's functions cannot see NETLIFY, so "no variables" is what production looks
+    // like the day MAX_DRAFT_SECONDS goes missing.
+    assert(defaultTimeBudgetMs({}) === 20_000, `got ${defaultTimeBudgetMs({})}`);
+  });
+
+  test('only Vercel, which can be recognised at runtime, gets the long budget', () => {
+    assert(defaultTimeBudgetMs({ VERCEL: '1' }) === 280_000, 'vercel');
+  });
+
+  test('MAX_DRAFT_SECONDS wins over both', () => {
+    assert(defaultTimeBudgetMs({ MAX_DRAFT_SECONDS: '25', VERCEL: '1' }) === 25_000, 'override');
   });
 });
 

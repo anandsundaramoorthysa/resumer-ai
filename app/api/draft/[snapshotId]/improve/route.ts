@@ -23,7 +23,7 @@ import {
   loadSnapshotForImprove,
   saveImprovedSnapshot,
 } from '@/lib/server/profile';
-import { recordDraftRun } from '@/lib/server/draft-run';
+import { recordDraftRun, startDraftRun } from '@/lib/server/draft-run';
 import { jsonError } from '@/lib/server/job-submission';
 import { eventStream } from '@/lib/server/sse';
 import { BudgetExceededError } from '@/lib/ai/budget';
@@ -61,9 +61,11 @@ export async function POST(
     company: snap.document.jobRequirement?.company ?? '',
   };
   let failure: { error?: unknown; kind?: string } | null = null;
+  let runId: string | null = null;
 
   return eventStream({
-    run: async ({ send, emit }) => {
+    run: async ({ send, emit, startedAt }) => {
+      runId = await startDraftRun(userId, startedAt);
       try {
         const profile = await loadProfileForUser(userId);
         const { outcome, improved } = await runImprovePass(
@@ -107,6 +109,7 @@ export async function POST(
         // Every pass is a row, linked to the resume it worked on — so "how many passes
         // did this resume take, and what did each one do" has an answer.
         await recordDraftRun({
+          runId,
           userId,
           startedAt,
           finishedAt: new Date(),

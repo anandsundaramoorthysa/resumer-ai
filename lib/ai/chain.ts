@@ -83,8 +83,10 @@ export interface CallOptions {
   deadlineMs?: number;
 }
 
-const DEFAULT_ATTEMPT_TIMEOUT_MS = Number(
-  process.env.AI_ATTEMPT_TIMEOUT_MS ?? 25_000,
+// 10s, what production runs with. 25s — most of a 30s function on one provider — was the
+// default wherever AI_ATTEMPT_TIMEOUT_MS was not set.
+export const DEFAULT_ATTEMPT_TIMEOUT_MS = Number(
+  process.env.AI_ATTEMPT_TIMEOUT_MS ?? 10_000,
 );
 
 interface Attempt {

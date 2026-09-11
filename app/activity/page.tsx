@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { AppHeader } from '@/components/app-header';
 import { getActivity } from '@/lib/server/activity';
+import { effectiveRunStatus } from '@/lib/server/draft-run';
 
 export const metadata = { title: 'Activity' };
 export const dynamic = 'force-dynamic';
@@ -14,6 +15,13 @@ export const dynamic = 'force-dynamic';
  */
 const when = (d: Date) =>
   `${d.toLocaleString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} UTC`;
+
+const STATUS: Record<ReturnType<typeof effectiveRunStatus>, { label: string; tone: string }> = {
+  success: { label: 'Finished', tone: 'bg-success-tint text-success' },
+  failed: { label: 'Failed', tone: 'bg-danger-tint text-danger' },
+  killed: { label: 'Timed out', tone: 'bg-danger-tint text-danger' },
+  running: { label: 'Running', tone: 'bg-warning-tint text-warning' },
+};
 
 const HALT_WORDS: Record<string, string> = {
   'iteration-cap': 'stopped after its attempts',
@@ -27,6 +35,11 @@ export default async function ActivityPage() {
   if (!session?.user?.id) redirect('/sign-in');
 
   const { runs, summary, usage, dailyLimit, changes } = await getActivity(session.user.id);
+  // The stored error detail is for the operator (lib/db/schema.ts says so): it can carry a
+  // provider's or the database's own words. Everyone else sees what kind of failure it was.
+  const operator = Boolean(
+    process.env.ALERT_EMAIL && session.user.email?.toLowerCase() === process.env.ALERT_EMAIL.trim().toLowerCase(),
+  );
   const today = usage[0];
 
   return (
@@ -62,7 +75,9 @@ export default async function ActivityPage() {
             </p>
           ) : (
             <ul className="mt-4 space-y-3">
-              {runs.map((r) => (
+              {runs.map((r) => {
+                const status = effectiveRunStatus(r);
+                return (
                 <li key={r.id} className="rounded-xl border border-line bg-surface p-4">
                   <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                     <div className="min-w-0">
@@ -83,20 +98,17 @@ export default async function ActivityPage() {
                           {r.score.toFixed(1)}
                         </span>
                       ) : null}
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          r.status === 'failed' ? 'bg-danger-tint text-danger' : 'bg-success-tint text-success'
-                        }`}
-                      >
-                        {r.status === 'failed' ? 'Failed' : 'Finished'}
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS[status].tone}`}>
+                        {STATUS[status].label}
                       </span>
                     </div>
                   </div>
 
-                  {r.status === 'failed' ? (
+                  {status === 'failed' || status === 'killed' ? (
                     <p className="mt-2 rounded-lg bg-danger-tint px-3 py-2 font-mono text-xs text-danger [overflow-wrap:anywhere]">
-                      {r.errorKind ?? 'unknown'}
-                      {r.errorDetail ? ` — ${r.errorDetail}` : ''}
+                      {status === 'killed'
+                        ? 'Stopped at the time limit before it could finish.'
+                        : `${r.errorKind ?? 'unknown'}${operator && r.errorDetail ? ` — ${r.errorDetail}` : ''}`}
                     </p>
                   ) : null}
 
@@ -129,7 +141,8 @@ export default async function ActivityPage() {
                     ) : null}
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </section>

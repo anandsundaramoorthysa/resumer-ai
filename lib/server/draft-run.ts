@@ -100,7 +100,52 @@ export function redactErrorDetail(error: unknown, maxChars = MAX_ERROR_DETAIL_CH
   return cleaned.length > maxChars ? `${cleaned.slice(0, maxChars)}… (truncated)` : cleaned;
 }
 
+/**
+ * A run still marked `running` this long after it started was killed, not slow: every
+ * route that writes one runs inside a 30-second function.
+ */
+export const KILLED_AFTER_MS = 2 * 60_000;
+
+/**
+ * What a stored status means now. A row is written as `running` when the stream starts
+ * and completed in `finish` — and a function killed at the platform's time limit never
+ * reaches `finish`, so its row stays `running`. That is the one failure that used to leave
+ * no record at all, and the likeliest one in production.
+ */
+export function effectiveRunStatus(
+  run: { status: string; startedAt: Date },
+  now = new Date(),
+): 'success' | 'failed' | 'running' | 'killed' {
+  if (run.status !== 'running') return run.status === 'failed' ? 'failed' : 'success';
+  return now.getTime() - run.startedAt.getTime() > KILLED_AFTER_MS ? 'killed' : 'running';
+}
+
+/**
+ * Writes the `running` row a stream completes later. Returns its id, or null when it could
+ * not be written — the draft goes ahead regardless, and `recordDraftRun` inserts instead.
+ */
+export async function startDraftRun(userId: string, startedAt: Date): Promise<string | null> {
+  try {
+    const [row] = await db
+      .insert(draftRuns)
+      .values({ userId, startedAt, finishedAt: startedAt, status: 'running' })
+      .returning({ id: draftRuns.id });
+    return row?.id ?? null;
+  } catch (err) {
+    console.error('[draft-run] could not open a run record for user', userId, err);
+    return null;
+  }
+}
+
+/** Removes a `running` row for an attempt that turned out not to be worth recording. */
+export async function discardDraftRun(userId: string, runId: string | null): Promise<void> {
+  if (!runId) return;
+  await db.delete(draftRuns).where(and(eq(draftRuns.id, runId), eq(draftRuns.userId, userId)));
+}
+
 export interface RecordDraftRunInput {
+  /** The row `startDraftRun` opened, completed in place; without one a row is inserted. */
+  runId?: string | null;
   userId: string;
   startedAt: Date;
   finishedAt: Date;
@@ -124,7 +169,7 @@ export async function recordDraftRun(input: RecordDraftRunInput): Promise<void> 
   const { trace } = input;
   const failed = input.error !== undefined || Boolean(input.errorKind);
 
-  await db.insert(draftRuns).values({
+  const values = {
     userId: input.userId,
     startedAt: input.startedAt,
     finishedAt: input.finishedAt,
@@ -144,7 +189,15 @@ export async function recordDraftRun(input: RecordDraftRunInput): Promise<void> 
     rewriteFallbackReason: trace.rewrite.reason,
     errorKind: errorKindFor(input.error, input.errorKind),
     errorDetail: redactErrorDetail(input.error),
-  });
+  };
+  if (input.runId) {
+    await db
+      .update(draftRuns)
+      .set(values)
+      .where(and(eq(draftRuns.id, input.runId), eq(draftRuns.userId, input.userId)));
+  } else {
+    await db.insert(draftRuns).values(values);
+  }
 
   try {
     await pruneDraftRuns(input.userId);

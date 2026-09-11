@@ -66,9 +66,19 @@ async function gh<T>(path: string, token: string): Promise<T> {
       'X-GitHub-Api-Version': '2022-11-28',
     },
     cache: 'no-store',
+    // Every other outside call here has a timeout; these had none, and they run in front
+    // of every fit check and in sync steps with an 8.5s budget inside a 30s function.
+    signal: AbortSignal.timeout(8_000),
   });
   if (!res.ok) {
-    throw new Error(`GitHub ${res.status} on ${path}: ${await res.text().catch(() => '')}`);
+    // The body goes to the log, not into the error: this message reaches the user through
+    // the sync job and the fit check, and GitHub's JSON is not a sentence.
+    console.warn(`[github] ${res.status} on ${path}:`, (await res.text().catch(() => '')).slice(0, 300));
+    throw new Error(
+      res.status === 404
+        ? 'GitHub could not find that repository, or this account has no access to it.'
+        : `GitHub answered ${res.status} while reading the repository.`,
+    );
   }
   return res.json() as Promise<T>;
 }

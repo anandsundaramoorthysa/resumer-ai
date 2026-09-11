@@ -11,6 +11,7 @@ import {
   splitMergedTitles,
   mergeRoles,
 } from '../lib/sync/roles';
+import { resolveRoles } from '../lib/import/commit';
 import { suite, test, assert } from './harness.mjs';
 
 const same = (a: [string, string], b: [string, string]) =>
@@ -142,5 +143,24 @@ suite('role identity', () => {
       diffuse.every((r) => r.startDate.trim().length > 0),
       'no role should be left without a start date',
     );
+  });
+});
+
+suite('an import finds the jobs the profile already has', () => {
+  const stored = [{ id: 'r1', contentHash: 'h', company: 'Acme Inc.', title: 'Flutter Developer (Paid Intern)' }];
+
+  test('a job spelled or dated differently is the stored one, not a second copy', () => {
+    const { targets, fresh } = resolveRoles(stored, [{ company: 'Acme', title: 'Flutter Developer Intern', startDate: '2022' }]);
+    assert.ok('existingId' in targets[0] && targets[0].existingId === 'r1', JSON.stringify(targets));
+    assert.ok(fresh.length === 0, 'nothing new');
+  });
+
+  test('the same new job twice in one import is created once', () => {
+    const { targets, fresh } = resolveRoles(stored, [
+      { company: 'Globex', title: 'Engineer', startDate: '2023-01' },
+      { company: 'Globex Ltd', title: 'Engineer', startDate: '' },
+    ]);
+    assert.ok(fresh.length === 1, `created ${fresh.length}`);
+    assert.ok(JSON.stringify(targets[0]) === JSON.stringify(targets[1]), 'both point at it');
   });
 });

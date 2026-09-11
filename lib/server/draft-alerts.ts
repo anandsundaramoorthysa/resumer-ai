@@ -13,10 +13,11 @@
  */
 
 import 'server-only';
-import { and, eq, gte, lt } from 'drizzle-orm';
+import { and, eq, gte, lt, or } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { draftRuns } from '@/lib/db/schema';
 import { appUrl, isMailConfigured, sendOperatorEmail } from '@/lib/auth/mail';
+import { KILLED_AFTER_MS } from './draft-run';
 
 /** The clock hour before `now`, in UTC: [start, end). */
 export function previousHour(now: Date): { start: Date; end: Date } {
@@ -79,8 +80,9 @@ export interface AlertOutcome {
 
 export async function runDraftAlerts(now = new Date(), opts: { dryRun?: boolean } = {}): Promise<AlertOutcome> {
   const window = previousHour(now);
-  const failures = await db
+  const rows = await db
     .select({
+      status: draftRuns.status,
       finishedAt: draftRuns.finishedAt,
       errorKind: draftRuns.errorKind,
       errorDetail: draftRuns.errorDetail,
@@ -89,13 +91,24 @@ export async function runDraftAlerts(now = new Date(), opts: { dryRun?: boolean 
     })
     .from(draftRuns)
     .where(
-      and(
-        eq(draftRuns.status, 'failed'),
-        gte(draftRuns.finishedAt, window.start),
-        lt(draftRuns.finishedAt, window.end),
+      or(
+        and(eq(draftRuns.status, 'failed'), gte(draftRuns.finishedAt, window.start), lt(draftRuns.finishedAt, window.end)),
+        // Killed at the time limit: opened in this hour and never completed. A running row
+        // keeps finishedAt equal to startedAt, so the same window applies.
+        and(
+          eq(draftRuns.status, 'running'),
+          gte(draftRuns.finishedAt, window.start),
+          lt(draftRuns.finishedAt, window.end),
+          lt(draftRuns.finishedAt, new Date(now.getTime() - KILLED_AFTER_MS)),
+        ),
       ),
     )
     .orderBy(draftRuns.finishedAt);
+  const failures: FailedRun[] = rows.map(({ status, ...run }) =>
+    status === 'running'
+      ? { ...run, errorKind: 'killed-at-time-limit', errorDetail: 'The function stopped before it could record an outcome.' }
+      : run,
+  );
 
   const base = {
     window: { start: window.start.toISOString(), end: window.end.toISOString() },

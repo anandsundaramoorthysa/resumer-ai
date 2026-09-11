@@ -28,8 +28,7 @@ import type {
 } from '../types';
 import { DRAFT_BUDGET, DraftBudget } from '../ai/budget';
 import { assertDailyBudget, recordDailyUsage } from '../ai/daily-budget';
-import { AllProvidersFailedError } from '../ai/chain';
-import { BudgetExceededError } from '../ai/budget';
+import { userMessage } from '../server/user-message';
 import { extractJobRequirement } from '../intake/extract';
 import { combineJobText } from '../intake/job-input';
 import { looksLikeUrl, scrapeJobUrl } from '../intake/scrape';
@@ -495,11 +494,13 @@ async function syncProfile(
     emit({ stage: 'sync', status: 'done', message: result.summary });
     return result.records ?? input.records;
   } catch (err) {
-    // A sync failure is non-fatal: draft from what we already have, but say so.
+    // A sync failure is non-fatal: draft from what we already have, but say so. The cause
+    // goes to the log; the row the user reads used to quote GitHub's raw response.
+    console.warn('[pipeline] portfolio freshness check failed:', err instanceof Error ? err.message : err);
     emit({
       stage: 'sync',
       status: 'error',
-      message: `Couldn't refresh from GitHub (${short(err)}). Drafting from your saved profile instead.`,
+      message: "Couldn't check GitHub for new commits. Drafting from your saved profile instead.",
     });
     return input.records;
   }
@@ -517,7 +518,8 @@ async function readJob(
   // combining first would silently turn "link + file" into "never scraped".
   let jobText = input.jobInput.trim();
   if (jobText && looksLikeUrl(jobText)) {
-    const scraped = await scrapeJobUrl(jobText);
+    // Whatever is left after the scrape has to cover reading the job and the fit call.
+    const scraped = await scrapeJobUrl(jobText, Math.max(3_000, budget.remainingMs - 10_000));
     if (scraped.ok) {
       jobText = scraped.text;
       emit({ stage: 'understand', status: 'running', message: 'Fetched the posting. Reading it…' });
@@ -620,13 +622,5 @@ export function describeAiError(err: unknown): string {
   // experiencing high demand…". Nothing diagnostic is lost: the caller rethrows the
   // original error and the route logs it in full, attempts and all, which is the log
   // line that found the overload gap in the first place.
-  if (err instanceof AllProvidersFailedError) {
-    return 'The AI providers are busy or unavailable right now. Nothing was saved — try again in a minute.';
-  }
-  if (err instanceof BudgetExceededError) return err.message;
-  return `Something went wrong: ${short(err)}`;
-}
-
-function short(err: unknown): string {
-  return err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
+  return userMessage(err, 'Something went wrong. Nothing was saved — try again in a minute.');
 }

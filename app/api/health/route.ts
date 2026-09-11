@@ -5,9 +5,10 @@
  * different question from whether it's set in a dashboard — build scope, function scope
  * and deploy context can each hide a value that looks present elsewhere.
  *
- * Booleans and lengths only. No secret value is ever returned, so this is safe to leave
- * enabled in production, where it's the fastest way to tell a config problem apart from
- * a code problem.
+ * Anyone gets `ok`. The detail needs CRON_SECRET (as `x-cron-secret` or a bearer token):
+ * it used to be public, and told strangers the length of AUTH_SECRET and DATABASE_URL,
+ * which providers are wired up and whether cron was enabled. No secret value is returned
+ * even then.
  */
 
 import { availableProviders } from '@/lib/ai/models';
@@ -16,16 +17,20 @@ import { getSiteUrl } from '@/lib/site-url';
 import { isEncryptionConfigured } from '@/lib/auth/secret-box';
 import { isGitHubAppConfigured } from '@/lib/github/app';
 import { isMailConfigured, mailProvider } from '@/lib/auth/mail';
+import { DRAFT_TIME_BUDGET_MS, RENDER_RESERVE_MS } from '@/lib/ai/budget';
+import { DEFAULT_ATTEMPT_TIMEOUT_MS } from '@/lib/ai/chain';
+import { ASSESS_TIME_BUDGET_MS } from '@/lib/pipeline/run';
+import { cronAuthorized } from '@/lib/server/cron-auth';
+import type { NextRequest } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function present(key: string): { set: boolean; length: number } {
-  const v = process.env[key];
-  return { set: Boolean(v && v.trim()), length: v ? v.trim().length : 0 };
+function present(key: string): { set: boolean } {
+  return { set: Boolean(process.env[key]?.trim()) };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const auth = {
     AUTH_SECRET: present('AUTH_SECRET'),
     AUTH_GITHUB_ID: present('AUTH_GITHUB_ID'),
@@ -35,8 +40,21 @@ export async function GET() {
   const authReady =
     auth.AUTH_SECRET.set && auth.AUTH_GITHUB_ID.set && auth.AUTH_GITHUB_SECRET.set;
 
+  const ok = authReady && isDatabaseConfigured && availableProviders().length > 0;
+  if (!cronAuthorized(req)) return Response.json({ ok });
+
   return Response.json({
-    ok: authReady && isDatabaseConfigured && availableProviders().length > 0,
+    ok,
+    /**
+     * The clocks every request runs against, as the runtime actually resolved them. Each
+     * one is a variable nobody could see from outside, and a lost one was an outage.
+     */
+    limits: {
+      draftMs: DRAFT_TIME_BUDGET_MS,
+      assessMs: ASSESS_TIME_BUDGET_MS,
+      renderReserveMs: RENDER_RESERVE_MS,
+      attemptTimeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+    },
     siteUrl: getSiteUrl(),
     platform: {
       netlify: Boolean(process.env.NETLIFY),

@@ -72,13 +72,11 @@ export async function connectRepo(
     await latestCommitSha(ref, access.token);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('404')) {
-      return {
-        ok: false,
-        message: `Can't see ${ref.owner}/${ref.repo}. Either it doesn't exist, or your sign-in didn't include private-repo access — sign out and back in to re-grant it.`,
-      };
-    }
-    return { ok: false, message: `GitHub rejected the request: ${msg.slice(0, 160)}` };
+    // lib/sync/github.ts words its errors for people already; a timeout is the one that isn't.
+    return {
+      ok: false,
+      message: err instanceof Error && err.name === 'TimeoutError' ? 'GitHub took too long to answer. Try again.' : msg,
+    };
   }
 
   await db

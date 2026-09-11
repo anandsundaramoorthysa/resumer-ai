@@ -19,7 +19,7 @@
 import { findContactLinks, mergeContactLinks } from './contact-links';
 import { z } from 'zod';
 import { generateStructured } from '../ai/chain';
-import type { DraftBudget } from '../ai/budget';
+import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import type { ExtractedProfile } from '../sync/parse';
 import { mergeExtractions, toRecords } from '../sync/parse';
 import type { ParsedRecord } from '../sync/reconcile';
@@ -166,7 +166,7 @@ export async function extractFromChunk(
 ${chunk}
 
 Extract every professional fact this excerpt actually states. Return empty arrays for categories it does not mention.`,
-    options: { budget, temperature: 0.1 },
+    options: draftCallOptions(budget, { temperature: 0.1 }),
   });
 
   /**

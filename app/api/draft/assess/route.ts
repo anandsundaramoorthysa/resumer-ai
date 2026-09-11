@@ -18,7 +18,7 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import { runAssessment, newDraftRunTrace, PipelineError } from '@/lib/pipeline/run';
 import { loadProfileForUser, buildSyncStep } from '@/lib/server/profile';
-import { errorKindFor, recordDraftRun } from '@/lib/server/draft-run';
+import { discardDraftRun, errorKindFor, recordDraftRun, startDraftRun } from '@/lib/server/draft-run';
 import { readJobSubmission, jsonError } from '@/lib/server/job-submission';
 import { eventStream } from '@/lib/server/sse';
 import { sealAssessment } from '@/lib/fit/token';
@@ -37,9 +37,11 @@ export async function POST(req: NextRequest) {
 
   const trace = newDraftRunTrace();
   let failure: { error?: unknown; kind?: string } | null = null;
+  let runId: string | null = null;
 
   return eventStream({
-    run: async ({ send, emit }) => {
+    run: async ({ send, emit, startedAt }) => {
+      runId = await startDraftRun(userId, startedAt);
       try {
         const profile = await loadProfileForUser(userId);
         if (profile.records.length === 0) {
@@ -84,10 +86,18 @@ export async function POST(req: NextRequest) {
       }
     },
     finish: async ({ events, startedAt }) => {
-      if (!failure) return;
+      // A fit check that worked is not a run worth keeping; its row only existed so that a
+      // check killed at the time limit would still leave one.
+      if (!failure) {
+        await discardDraftRun(userId, runId).catch((err) =>
+          console.error('[assess] could not discard the run record for user', userId, err),
+        );
+        return;
+      }
       const f = failure as { error?: unknown; kind?: string };
       try {
         await recordDraftRun({
+          runId,
           userId,
           startedAt,
           finishedAt: new Date(),

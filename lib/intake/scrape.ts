@@ -42,7 +42,14 @@ export function normalizeUrl(input: string): string {
   return /^https?:\/\//i.test(t) ? t : `https://${t}`;
 }
 
-export async function scrapeJobUrl(rawUrl: string): Promise<ScrapeOutcome> {
+/**
+ * The longest a scrape may take. It was 45 seconds, inside a fit check with a 22-second
+ * budget inside a 30-second function: a slow careers page killed the request outright,
+ * and the user saw "connection closed" instead of being asked to paste the text.
+ */
+export const MAX_SCRAPE_MS = 12_000;
+
+export async function scrapeJobUrl(rawUrl: string, timeoutMs = MAX_SCRAPE_MS): Promise<ScrapeOutcome> {
   const url = normalizeUrl(rawUrl);
 
   if (isBlockedDomain(url)) {
@@ -67,7 +74,7 @@ export async function scrapeJobUrl(rawUrl: string): Promise<ScrapeOutcome> {
       method: 'POST',
       headers,
       body: JSON.stringify({ url, formats: ['markdown'], onlyMainContent: true }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(Math.min(timeoutMs, MAX_SCRAPE_MS)),
     });
 
     if (!res.ok) {
@@ -96,11 +103,14 @@ export async function scrapeJobUrl(rawUrl: string): Promise<ScrapeOutcome> {
     }
 
     return { ok: true, text, source: 'firecrawl' };
-  } catch {
+  } catch (err) {
     return {
       ok: false,
       reason: 'scrape-failed',
-      message: "Couldn't reach that page. Paste the posting text instead.",
+      message:
+        err instanceof Error && err.name === 'TimeoutError'
+          ? 'That page took too long to load. Paste the posting text instead.'
+          : "Couldn't reach that page. Paste the posting text instead.",
     };
   }
 }

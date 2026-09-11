@@ -30,7 +30,9 @@ export interface RunSummary {
 
 /** Pure, so the arithmetic is pinned by tests rather than by a database. */
 export function summarizeRuns(runs: Array<{ status: string; durationMs: number }>): RunSummary {
-  const failed = runs.filter((r) => r.status === 'failed').length;
+  // A run still `running` when this is read either is in progress or was killed; either
+  // way it has not succeeded, and a killed run is the failure that matters most.
+  const failed = runs.filter((r) => r.status !== 'success').length;
   const durations = runs.map((r) => r.durationMs).sort((a, b) => a - b);
   const mid = Math.floor(durations.length / 2);
   const median =

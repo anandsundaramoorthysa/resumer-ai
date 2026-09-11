@@ -183,6 +183,7 @@ export async function canConnectRepo(
         'X-GitHub-Api-Version': '2022-11-28',
       },
       cache: 'no-store',
+      signal: AbortSignal.timeout(8_000),
     });
   } catch (err) {
     return {
@@ -200,11 +201,7 @@ export async function canConnectRepo(
     };
   }
   if (!res.ok) {
-    return {
-      ok: false,
-      code: 'error',
-      message: `GitHub rejected the request: ${res.status} ${(await res.text().catch(() => '')).slice(0, 120)}`,
-    };
+    return { ok: false, code: 'error', message: `GitHub rejected the request (${res.status}). Try again in a minute.` };
   }
 
   const body = (await res.json().catch(() => null)) as {

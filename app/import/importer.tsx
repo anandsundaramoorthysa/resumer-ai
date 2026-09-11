@@ -18,6 +18,17 @@ import { useRouter } from 'next/navigation';
 import { commitImportAction, reviewImportAction, type ImportActionResult } from './actions';
 import type { ImportNote } from '@/lib/server/steward';
 
+/**
+ * A response body as JSON, or null when it is not JSON. A function killed at the host's
+ * time limit answers with an HTML error page, and `res.json()` on that threw a SyntaxError
+ * whose text was then shown to the user as the reason the import failed.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function readJson(res: Response): Promise<any> {
+  if (!res.headers.get('content-type')?.includes('application/json')) return null;
+  return res.json().catch(() => null);
+}
+
 interface Candidate {
   key: string;
   type: string;
@@ -121,13 +132,11 @@ export function Importer() {
       const form = new FormData();
       form.append('file', file);
       const res = await fetch('/api/import/linkedin', { method: 'POST', body: form });
-      const data = (await res.json()) as Preview & {
-        error?: string;
-        notes?: string[];
-        filesRead?: string[];
-      };
-      if (!res.ok) {
-        setError(data.error ?? 'That export could not be read.');
+      const data = (await readJson(res)) as
+        | (Preview & { error?: string; notes?: string[]; filesRead?: string[] })
+        | null;
+      if (!res.ok || !data) {
+        setError(data?.error ?? 'That export could not be read. Try again.');
         setPhase('choose');
         return;
       }
@@ -146,8 +155,8 @@ export function Importer() {
         notes.unshift(`Read ${data.filesRead.length} file${data.filesRead.length === 1 ? '' : 's'} from the archive.`);
       }
       setNotice(notes.length > 0 ? notes.join(' ') : null);
-    } catch (err) {
-      setError((err as Error).message);
+    } catch {
+      setError('That export could not be read. Check your connection and try again.');
       setPhase('choose');
     }
   };
@@ -162,9 +171,9 @@ export function Importer() {
         method: 'POST',
         body: form,
       });
-      const upload = await uploadRes.json();
-      if (!uploadRes.ok) {
-        setError(upload.error ?? 'That file could not be read.');
+      const upload = await readJson(uploadRes);
+      if (!uploadRes.ok || !upload) {
+        setError(upload?.error ?? 'That file could not be read. Try again.');
         setPhase('choose');
         return;
       }
@@ -180,14 +189,17 @@ export function Importer() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chunk: chunks[i] }),
-        });
-        const json = await res.json();
-        if (!res.ok) {
-          setError(json.error ?? 'The extraction stopped partway through.');
+        }).catch(() => null);
+        const json = res ? await readJson(res) : null;
+        if (res?.status === 401 || res?.status === 429) {
+          // Signed out, or today's AI allowance is spent: every later chunk would fail too.
+          setError(json?.error ?? 'The extraction stopped partway through.');
           setPhase('choose');
           return;
         }
-        if (json.read) partials.push(json.partial);
+        // Anything else — a dropped connection, a host error page — costs this chunk only.
+        // It used to parse the error page as JSON and throw away every chunk already read.
+        if (res?.ok && json?.read) partials.push(json.partial);
         else unread += 1;
         setProgress({ done: i + 1, total: chunks.length });
       }
@@ -197,9 +209,9 @@ export function Importer() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ partials }),
       });
-      const data = (await previewRes.json()) as Preview & { error?: string };
-      if (!previewRes.ok) {
-        setError(data.error ?? 'Could not assemble the results.');
+      const data = (await readJson(previewRes)) as (Preview & { error?: string }) | null;
+      if (!previewRes.ok || !data) {
+        setError(data?.error ?? 'Could not assemble the results. Try again.');
         setPhase('choose');
         return;
       }
@@ -229,8 +241,8 @@ export function Importer() {
         );
       }
       setNotice(notes.length > 0 ? notes.join(' ') : null);
-    } catch (err) {
-      setError((err as Error).message);
+    } catch {
+      setError('The import stopped. Check your connection and try again.');
       setPhase('choose');
     }
   };

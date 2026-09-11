@@ -8,6 +8,7 @@
  */
 
 import {
+  effectiveRunStatus,
   errorKindFor,
   redactErrorDetail,
   stagesFromEvents,
@@ -116,5 +117,23 @@ suite('history is bounded', () => {
     // Small enough that a free tier never notices, large enough to cover any question
     // anyone asks of it. A guard against a future edit that sets it to 5 or 5,000.
     assert.ok(RUNS_KEPT_PER_USER >= 20 && RUNS_KEPT_PER_USER <= 200);
+  });
+});
+
+suite('a run the platform killed', () => {
+  const now = new Date('2026-09-11T12:00:00Z');
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+
+  test('still running long after a 30-second function could have is a kill', () => {
+    assert.ok(effectiveRunStatus({ status: 'running', startedAt: ago(5 * 60_000) }, now) === 'killed');
+  });
+
+  test('a run that started moments ago is in progress, not killed', () => {
+    assert.ok(effectiveRunStatus({ status: 'running', startedAt: ago(10_000) }, now) === 'running');
+  });
+
+  test('completed rows keep what they recorded', () => {
+    assert.ok(effectiveRunStatus({ status: 'failed', startedAt: ago(9e6) }, now) === 'failed');
+    assert.ok(effectiveRunStatus({ status: 'success', startedAt: ago(9e6) }, now) === 'success');
   });
 });

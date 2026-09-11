@@ -14,6 +14,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { auth } from '@/auth';
 import { BudgetExceededError, DraftBudget } from '@/lib/ai/budget';
+import { userMessage } from '@/lib/server/user-message';
 import { assertDailyBudget, recordDailyUsage } from '@/lib/ai/daily-budget';
 import { MAX_CHUNK_CHARS } from '@/lib/import/text';
 import { extractFromChunk } from '@/lib/import/parse';
@@ -47,9 +48,11 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Expected { chunk: string }.' }, { status: 400 });
   }
 
-  // One call, so the circuit breaker (REQ-5.6) still applies to an import even though
-  // this is not a draft run.
-  const budget = new DraftBudget({ maxCalls: 1, maxTokens: 60_000 });
+  // A budget with a clock, so the circuit breaker (REQ-5.6) applies and the chain has a
+  // deadline. It had none: up to 25s an attempt across five providers, in a 30-second
+  // function, and a killed request reached the browser as an HTML 502 that took every
+  // chunk already read down with it.
+  const budget = new DraftBudget({ maxCalls: 4, maxTokens: 60_000 }, 20_000, 1_000);
 
   try {
     const partial = await extractFromChunk(
@@ -58,12 +61,13 @@ export async function POST(req: NextRequest) {
     );
     return Response.json({ partial, read: true });
   } catch (err) {
+    console.warn('[import] chunk extraction failed:', err instanceof Error ? err.message.slice(0, 300) : err);
     // One unreadable chunk costs only itself. The client counts these and says how many
     // sections it could not read, rather than reporting a clean import that wasn't.
     return Response.json({
       partial: {},
       read: false,
-      reason: err instanceof Error ? err.message.slice(0, 200) : 'Extraction failed.',
+      reason: userMessage(err, 'That section could not be read.'),
     });
   } finally {
     // A chunk that failed still spent its tokens, so it still counts.

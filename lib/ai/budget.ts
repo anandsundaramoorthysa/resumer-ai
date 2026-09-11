@@ -50,20 +50,20 @@ export class BudgetExceededError extends Error {
  * Measure the ceiling from your own function logs; do not take it from the docs.
  * Vercel functions here allow 300s.
  */
-function defaultTimeBudgetMs(): number {
-  const override = Number(process.env.MAX_DRAFT_SECONDS);
+export function defaultTimeBudgetMs(env: Record<string, string | undefined> = process.env): number {
+  const override = Number(env.MAX_DRAFT_SECONDS);
   if (Number.isFinite(override) && override > 0) return override * 1000;
 
-  // Netlify sets NETLIFY=true in its BUILD, but not in the function runtime — so in
-  // practice MAX_DRAFT_SECONDS is what decides this there, and it must be set.
+  // Only Vercel gets the long budget, because only Vercel can be recognised at runtime:
+  // Netlify sets NETLIFY in its build and not in its functions, so a check for it never
+  // fired and the default was 280s. Production survived only while MAX_DRAFT_SECONDS
+  // stayed set in the dashboard — one lost variable from every draft being killed at 30s
+  // with nothing recorded, which is the outage this budget was written for.
   //
-  // When this branch does run, the plan is unknown, and the two ways to be wrong are not
-  // equally expensive: budgeting low on a 60s plan costs a quality iteration or two,
-  // while budgeting high on a 30s plan costs the entire resume. So it assumes the lower
-  // ceiling — 20s, which leaves about 4s for the work done before the budget starts and a
-  // margin under 30.
-  if (process.env.NETLIFY) return 20_000;
-  return 280_000; // 20s of headroom under Vercel's 300s maxDuration
+  // The two ways to be wrong are not equally expensive: budgeting low on a longer limit
+  // costs a quality iteration or two, budgeting high on a 30s limit costs the entire
+  // resume. 20s leaves room for the work before the clock starts and a margin under 30.
+  return env.VERCEL ? 280_000 : 20_000; // 280: 20s of headroom under Vercel's 300s maxDuration
 }
 
 export const DRAFT_TIME_BUDGET_MS = defaultTimeBudgetMs();

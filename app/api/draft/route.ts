@@ -17,7 +17,7 @@ import { auth } from '@/auth';
 import { runDraftPipeline, newDraftRunTrace, PipelineError } from '@/lib/pipeline/run';
 import { loadProfileForUser, persistDraft, buildSyncStep } from '@/lib/server/profile';
 import { recordEnrichmentQuestions } from '@/lib/server/enrichment';
-import { recordDraftRun } from '@/lib/server/draft-run';
+import { recordDraftRun, startDraftRun } from '@/lib/server/draft-run';
 import { readJobSubmission, jsonError } from '@/lib/server/job-submission';
 import { eventStream } from '@/lib/server/sse';
 import { AssessmentTokenError, openAssessment } from '@/lib/fit/token';
@@ -58,9 +58,11 @@ export async function POST(req: NextRequest) {
   let snapshotId: string | null = null;
   /** Set on every path that does not finish with a resume; null means it did. */
   let failure: { error?: unknown; kind?: string } | null = null;
+  let runId: string | null = null;
 
   return eventStream({
-    run: async ({ send, emit }) => {
+    run: async ({ send, emit, startedAt }) => {
+      runId = await startDraftRun(userId, startedAt);
       try {
         const profile = await loadProfileForUser(userId);
 
@@ -164,6 +166,7 @@ export async function POST(req: NextRequest) {
       const f = failure as { error?: unknown; kind?: string } | null;
       try {
         await recordDraftRun({
+          runId,
           userId,
           startedAt,
           finishedAt: new Date(),
