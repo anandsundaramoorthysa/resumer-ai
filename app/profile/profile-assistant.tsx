@@ -122,8 +122,9 @@ function ReviewTool() {
         setRun({ phase: 'running', done, total, current: label });
       }
     };
-    // Two at a time: each request is one model call, and the provider chain is shared.
-    await Promise.all([worker(), worker()]);
+    // Three at a time. Each request is one model call against a shared provider chain, so
+    // more than this queues at the provider rather than finishing sooner.
+    await Promise.all([worker(), worker(), worker()]);
     setRun({ phase: 'done', failedSections: [...failed] });
   };
 

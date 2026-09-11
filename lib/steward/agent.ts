@@ -91,6 +91,9 @@ const SECTION_FOCUS: Record<StewardSection, string> = {
   other: 'These are the remaining records: summary, achievements, awards, publications, writing, volunteering, languages, interests. Check wording and capitals.',
 };
 
+/** How long one provider gets before the chain moves on. */
+const PER_ATTEMPT_MS = 12_000;
+
 export async function proposeChanges(args: {
   section: StewardSection;
   records: StewardRecord[];
@@ -107,7 +110,10 @@ export async function proposeChanges(args: {
     prompt: `${SECTION_FOCUS[args.section]}\n\nBEGIN RECORDS\n${payload}\nEND RECORDS`,
     options: draftCallOptions(args.budget, {
       temperature: 0.1,
-      timeoutMs: args.budget ? args.budget.callDeadlineMs() : 25_000,
+      // Per attempt, not the whole budget. Handing one provider every second left meant a
+      // slow Fireworks used all 22 s and the four providers behind it were never asked, so
+      // a batch failed outright rather than falling through to Groq, which answers in two.
+      timeoutMs: PER_ATTEMPT_MS,
     }),
   });
   return { proposals: data.proposals, provider };

@@ -83,16 +83,19 @@ export async function loadStewardProfile(userId: string): Promise<StewardProfile
 /* ----------------------------------------------------------------- review -- */
 
 /**
- * Records per model call, per section. Measured on the owner's profile against the
- * provider chain: 25 short skill records answer in 5–16 s, 12 projects in 7–15 s. The
- * request budget below is 22 s, so these are the sizes that fit with margin.
+ * Records per model call, per section.
+ *
+ * Measured on the owner's profile: 25 short skill records answered in 5–16 s and 12
+ * projects in 7–15 s — but in production the slow end of that range spent the whole 22 s
+ * budget on the first provider, so the batch failed instead of falling through to a faster
+ * one. These sizes leave room for a second provider inside the same request.
  */
 export const BATCH_SIZE: Record<StewardSection, number> = {
-  skills: 25,
-  experience: 15,
-  projects: 12,
-  credentials: 20,
-  other: 20,
+  skills: 20,
+  experience: 12,
+  projects: 10,
+  credentials: 15,
+  other: 15,
 };
 
 const MODEL_TYPES_OTHER = new Set(['summary', 'achievement', 'award', 'volunteering', 'publication', 'writing']);
