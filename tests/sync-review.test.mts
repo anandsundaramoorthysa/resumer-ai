@@ -12,6 +12,7 @@
  * nobody runs protects nobody.
  */
 
+import { createHash } from 'node:crypto';
 import { hashContent, reconcile, summarizePlan } from '../lib/sync/reconcile';
 import type { ParsedRecord } from '../lib/sync/reconcile';
 import { canConnectWithPermissions } from '../lib/server/repo-access';
@@ -267,5 +268,45 @@ suite('which repositories may be connected', () => {
     assert(!canConnectWithPermissions({ admin: false, push: false, pull: true }));
     assert(!canConnectWithPermissions({}));
     assert(!canConnectWithPermissions(undefined));
+  });
+});
+
+suite('a content hash cannot have its boundaries moved', () => {
+  test('two parts split differently are different facts', () => {
+    assert.notEqual(hashContent(['ab', 'c']), hashContent(['a', 'bc']));
+  });
+
+  test('a missing part is not the same as no part at all', () => {
+    assert.notEqual(hashContent(['skill', '', 'python']), hashContent(['skill', 'python']));
+  });
+
+  test('the same parts still hash the same, however often it is asked', () => {
+    assert.equal(
+      hashContent(['role', 'Acme', 'Engineer', '2022-01']),
+      hashContent(['role', 'Acme', 'Engineer', '2022-01']),
+    );
+  });
+
+  test('spacing and case are still ignored, as every writer relies on', () => {
+    assert.equal(hashContent(['Skill', ' Python  3 ']), hashContent(['skill', 'python 3']));
+  });
+});
+
+suite('rows keyed by the old recipe cross over on the next sync', () => {
+  /** What a row stored before the separator existed carries. */
+  const oldRecipeHash = (name: string) =>
+    createHash('sha256').update(['skill', name, 'tool'].join('').toLowerCase()).digest('hex').slice(0, 32);
+
+  test('a stored row with an old hash is updated, not proposed a second time', () => {
+    const stored = { ...storedSkill('Kubernetes'), contentHash: oldRecipeHash('Kubernetes') } as ProfileRecord;
+    const plan = reconcile([stored], [parsedSkill('Kubernetes')]);
+    assert.equal(plan.toInsert.length, 0, 'nothing proposed again');
+    assert.equal(plan.toUpdate.length, 1, 'matched by identity and re-keyed');
+    assert.equal(plan.toUpdate[0].id, stored.id);
+  });
+
+  test('and it is not flagged as having vanished from the portfolio', () => {
+    const stored = { ...storedSkill('Kubernetes'), contentHash: oldRecipeHash('Kubernetes') } as ProfileRecord;
+    assert.equal(reconcile([stored], [parsedSkill('Kubernetes')]).toFlag.length, 0, 'still there');
   });
 });

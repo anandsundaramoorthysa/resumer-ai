@@ -64,12 +64,46 @@ import { educationIdentity } from './education';
 import { createHash } from 'node:crypto';
 import type { ProfileRecord, RecordSource } from '../types';
 
+/**
+ * Between the parts, so a boundary cannot move.
+ *
+ * The parts used to be concatenated with nothing between them, and empty ones dropped —
+ * so ["ab", "c"] and ["a", "bc"] hashed identically, and a recipe with an optional field
+ * hashed the same whether that field was absent or the next one started where it would
+ * have been. With `(userId, contentHash)` unique and inserts using ON CONFLICT DO
+ * NOTHING, such a collision does not error: it silently drops a record.
+ *
+ * U+001F is the ASCII unit separator. It cannot appear in a name, a date or a sentence,
+ * which is exactly what it is for. Written with fromCharCode so the character cannot be
+ * lost or mangled by an editor that will not show it.
+ */
+const PART_SEPARATOR = String.fromCharCode(31);
+
 export function hashContent(parts: Array<string | undefined>): string {
   return createHash('sha256')
-    .update(parts.filter(Boolean).join('').toLowerCase().replace(/\s+/g, ' ').trim())
+    .update(
+      parts
+        // Per part, not over the joined string: the separator is not whitespace, so
+        // " Python 3 " beside it would keep the space the old recipe trimmed away.
+        .map((part) => (part ?? '').toLowerCase().replace(/\s+/g, ' ').trim())
+        .join(PART_SEPARATOR),
+    )
     .digest('hex')
     .slice(0, 32);
 }
+
+/**
+ * Rows stored under the old recipe are NOT migrated in bulk, and cannot be: the sync
+ * stores tidied data under the parser's hash of the raw data (lib/server/profile.ts says
+ * why), so this code cannot reconstruct the parts an existing hash was made from — a
+ * migration would have to guess, and a wrong guess re-keys a row onto a fact it is not.
+ *
+ * It does not need to. `reconcile` matches a parsed record to a stored row by hash OR by
+ * `identityKey`, which every type defines, and a match plans an update — which rewrites
+ * that row's hash with the recipe above. So the next sync moves each row across, one at a
+ * time, and nothing is proposed twice in the meantime. The test for exactly that is in
+ * tests/sync-review.test.mts.
+ */
 
 /**
  * The one identity of an experience bullet, for every writer: the job's company and the
