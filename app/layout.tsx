@@ -78,12 +78,22 @@ const structuredData = {
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
 };
 
+const STRIP_HOST_INJECTIONS = `(function(){var h=document.head;if(!h)return;[].slice.call(h.childNodes).forEach(function(n){if((n.nodeType===3&&!n.textContent.trim())||(n.nodeType===8&&/Netlify/.test(n.textContent))||(n.nodeType===1&&n.matches('meta[name="hosting-provider"],meta[name="netlify-deploy"],script[src^="/.netlify/scripts/"]')))h.removeChild(n)})})()`;
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
       <head>
+        {/*
+          Netlify's edge writes a comment, two <meta> tags and a HUD script into every
+          page's <head>, with newlines between them. React finds those nodes where it
+          expects only its own and throws hydration error #418 on every page load, which
+          re-renders the whole page on the client. This runs during parsing, before React
+          hydrates, and removes exactly what was injected.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: STRIP_HOST_INJECTIONS }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/*
