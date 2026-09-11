@@ -8,7 +8,7 @@
  *
  * These cases pin the two early stops and, just as importantly, pin that they do not fire
  * on a loop that is actually making progress. `revise` is injected, so no model is
- * involved; the document deliberately carries no experience, projects or summary section,
+ * involved; the document deliberately carries no experience or projects section,
  * which is the path where `scoreEvidence` returns a fixed 1 without calling one either.
  */
 
@@ -230,7 +230,7 @@ await suiteAsync('quality gate — stopping when nothing can change', async () =
  * A document with bullets the evidence scorer has to grade.
  *
  * thinDocument() has none, which is why every case above runs without a model: with no
- * experience, projects or summary, scoreEvidence returns a fixed 1 before calling one.
+ * experience or projects, scoreEvidence returns a fixed 1 before calling one.
  * That also meant nothing here had ever reached the failure path these cases are about.
  */
 function gradableDocument(): ResumeDocument {
@@ -306,6 +306,48 @@ await suiteAsync('quality gate — running out of time keeps the resume', async 
 
     assert.ok(outcome.document);
     assert.ok(outcome.result.overall > 0, `expected a real floor, got ${outcome.result.overall}`);
+  });
+
+  await testAsync('a pass whose evidence was not graded is not counted as a stall', async () => {
+    // Every pass here is a floor: the budget refuses the evidence call. Measured against
+    // each other they cannot say whether the revisions helped, so the loop must not end on
+    // "no progress" — it pauses with passes left, as it would for time.
+    const revise = busywork();
+    const outcome = await runQualityGate({
+      document: gradableDocument(),
+      records,
+      // No calls, but a clock long enough that time is not what stops it.
+      budget: new DraftBudget({ maxCalls: 0, maxTokens: 0 }, 600_000),
+      revise: revise.fn,
+    });
+
+    assert.notEqual(outcome.result.haltReason, 'no-progress');
+    assert.equal(outcome.history.length, MAX_ITERATIONS);
+    assert.equal(outcome.result.loop?.canContinue, true);
+  });
+
+  await testAsync('an ungraded score is scored again, not ended on "identical document"', async () => {
+    // With evidence ungraded there is nothing for a revision to act on, so it changes
+    // nothing — which must not end the loop for good on a floor. Fresh, and resumed.
+    const noCalls = () => new DraftBudget({ maxCalls: 0, maxTokens: 0 }, 600_000);
+    const fresh = await runQualityGate({
+      document: gradableDocument(),
+      records,
+      budget: noCalls(),
+      revise: didNothing,
+    });
+    assert.equal(fresh.history.length, MAX_ITERATIONS);
+    assert.equal(fresh.result.loop?.canContinue, true);
+
+    const resumed = await runQualityGate({
+      document: fresh.document,
+      records,
+      budget: noCalls(),
+      revise: didNothing,
+      resume: fresh.result,
+    });
+    assert.ok(resumed.history.length > fresh.history.length, 'the resumed request must score again');
+    assert.notEqual(resumed.result.haltReason, 'no-progress');
   });
 
   await testAsync('any other failure still surfaces — only running out of time is absorbed', async () => {
