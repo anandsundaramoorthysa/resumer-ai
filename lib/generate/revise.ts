@@ -24,7 +24,7 @@ import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
 import { trimToPage } from './fit-page';
 import { formatSkillRow, groupSkills, parseSkillRow } from './resume-lines';
-import { dedupeSkillNames } from '../skills/identity';
+import { dedupeStackNames } from '../skills/identity';
 import { formatDate } from '../render/dates';
 import { holdsKeyword } from '../quality/vocabulary';
 import {
@@ -343,7 +343,7 @@ function applyRecordSwapIn(
 function projectGroup(p: ProjectRecord): NonNullable<ResumeSection['groups']>[number] {
   return {
     title: p.name,
-    subtitle: dedupeSkillNames(p.stack).slice(0, 6).join(', '),
+    subtitle: dedupeStackNames(p.stack).slice(0, 6).join(', '),
     items: [
       ...(p.description?.trim() ? [{ text: p.description.trim(), sourceRecordId: p.id }] : []),
       ...p.impactMetrics

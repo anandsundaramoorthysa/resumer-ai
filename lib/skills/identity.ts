@@ -308,6 +308,28 @@ export function canonicalSkillName(name: string): string {
 }
 
 /**
+ * A project's stack, one entry per technology, spelled for print.
+ *
+ * Not `dedupeSkillNames` alone: a stack names packages as well as skills, and a package
+ * is spelled by its author. "markdown-it" and "html-to-docx" came out as "Markdown-It"
+ * and "Html-to-Docx" on the owner's resume, because title-casing is right for a lowercase
+ * skill phrase and wrong for an identifier. A lowercase token joined by hyphens, dots or
+ * underscores keeps its spelling unless the table knows the thing.
+ */
+export function dedupeStackNames(names: string[]): string[] {
+  const seen = new Map<string, string>();
+  for (const raw of names) {
+    const name = raw?.trim();
+    if (!name) continue;
+    const key = skillIdentity(name);
+    if (!key || seen.has(key)) continue;
+    const identifier = /^[a-z0-9]+(?:[-_.][a-z0-9]+)+$/.test(name) && !ALIASES[normalizeSkill(name)];
+    seen.set(key, identifier ? name : canonicalSkillName(name));
+  }
+  return [...seen.values()];
+}
+
+/**
  * Every spelling sharing this skill's identity, normalised.
  *
  * The keyword gate needs this: a posting asking for "Node.js" against a resume that says

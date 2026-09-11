@@ -20,6 +20,7 @@ import { audit } from '@/lib/server/profile';
 import { hashContent } from '@/lib/sync/reconcile';
 import { formFor, hashInput, missingRequired } from '@/lib/profile/forms';
 import type { RecordSource } from '@/lib/types';
+import { tidyRecordData, tidyText } from '@/lib/steward/tidy';
 
 const Tags = z.array(z.string().max(64)).max(50).default([]);
 
@@ -81,8 +82,9 @@ function sanitize(
     }
   }
 
-  if (missingRequired(form, data).length > 0) return null;
-  return data;
+  const tidy = tidyRecordData(type, data);
+  if (missingRequired(form, tidy).length > 0) return null;
+  return tidy;
 }
 
 export const CommitPayloadSchema = z.object({
@@ -128,7 +130,19 @@ export async function commitImport(
 
   // --- Roles first: a bullet's roleId must be a real row id, or the assembler has
   // nothing to group it under and it renders as a loose line with no employer.
-  for (const role of payload.roles) {
+  for (const raw of payload.roles) {
+    const role = {
+      ...raw,
+      title: tidyText(raw.title),
+      company: tidyText(raw.company),
+      bullets: raw.bullets.map((b) => ({
+        ...b,
+        text: tidyText(b.text),
+        action: tidyText(b.action),
+        scale: b.scale && tidyText(b.scale),
+        outcome: b.outcome && tidyText(b.outcome),
+      })),
+    };
     const roleHash = hashContent(['role', role.company, role.title, role.startDate]);
 
     const [existing] = await db

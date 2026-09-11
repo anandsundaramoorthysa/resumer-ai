@@ -6,6 +6,7 @@
  */
 
 import 'server-only';
+import { tidyRecordData } from '@/lib/steward/tidy';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
@@ -233,7 +234,9 @@ export async function applyParsedProfile(
       source: 'github-sync',
       contentHash,
       tags: tags ?? [],
-      data: data as Record<string, unknown>,
+      // Layer-1 tidying (lib/steward/tidy.ts). The hash stays the parser's, so a later
+      // sync still recognises the fact it proposed.
+      data: tidyRecordData(type, data),
       reviewState: 'pending',
     };
   });
@@ -263,7 +266,7 @@ export async function applyParsedProfile(
           .set({
             contentHash,
             tags: tags ?? [],
-            data: data as Record<string, unknown>,
+            data: tidyRecordData(type, data),
             updatedAt: new Date(),
           })
           .where(

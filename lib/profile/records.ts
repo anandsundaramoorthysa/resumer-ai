@@ -7,6 +7,7 @@ import { hashContent } from '@/lib/sync/reconcile';
 import { deriveTags } from '@/lib/sync/tags';
 import { audit } from '@/lib/server/profile';
 import { composeBulletText } from './bullet';
+import { tidyRecordData, tidyText } from '../steward/tidy';
 import {
   coerceFormValues,
   formFor,
@@ -143,11 +144,21 @@ async function assertOwnsRole(userId: string, roleId: string): Promise<void> {
   if (!role) throw new Error('That role does not exist on your profile.');
 }
 
+/** A bullet's three parts with layer-1 tidying — see lib/steward/tidy.ts. */
+function tidyBullet<T extends { action: string; scale?: string; outcome?: string }>(b: T): T {
+  return {
+    ...b,
+    action: tidyText(b.action),
+    scale: b.scale === undefined ? undefined : tidyText(b.scale),
+    outcome: b.outcome === undefined ? undefined : tidyText(b.outcome),
+  };
+}
+
 export async function createBullet(
   userId: string,
   input: z.infer<typeof BulletInput>,
 ): Promise<string> {
-  const parsed = BulletInput.parse(input);
+  const parsed = tidyBullet(BulletInput.parse(input));
   await assertOwnsRole(userId, parsed.roleId);
 
   const text = composeBulletText(parsed);
@@ -171,7 +182,7 @@ export async function updateBullet(
   recordId: string,
   input: z.infer<typeof BulletInput>,
 ): Promise<void> {
-  const parsed = BulletInput.parse(input);
+  const parsed = tidyBullet(BulletInput.parse(input));
   await assertOwnsRole(userId, parsed.roleId);
 
   const text = composeBulletText(parsed);
@@ -216,6 +227,7 @@ export async function createSkill(
   input: z.infer<typeof SkillInput>,
 ): Promise<string> {
   const parsed = SkillInput.parse(input);
+  parsed.name = tidyRecordData('skill', { name: parsed.name }).name as string;
   return insertRecord({
     userId,
     type: 'skill',
@@ -233,7 +245,7 @@ export async function createProject(
   userId: string,
   input: z.infer<typeof ProjectInput>,
 ): Promise<string> {
-  const parsed = ProjectInput.parse(input);
+  const parsed = tidyRecordData('project', ProjectInput.parse(input)) as z.infer<typeof ProjectInput>;
   return insertRecord({
     userId,
     type: 'project',
@@ -249,7 +261,7 @@ export async function setProjectMetrics(
   recordId: string,
   metrics: string[],
 ): Promise<void> {
-  const clean = metrics.map((m) => m.trim()).filter(Boolean).slice(0, 6);
+  const clean = metrics.map(tidyText).filter(Boolean).slice(0, 6);
 
   const [existing] = await db
     .select({ data: profileRecords.data })
@@ -278,7 +290,7 @@ export async function setProjectMetrics(
 }
 
 export async function createSummary(userId: string, text: string): Promise<string> {
-  const parsed = SimpleTextInput.parse({ text });
+  const parsed = SimpleTextInput.parse({ text: tidyText(text) });
 
   // Only one summary is ever used, so replacing beats accumulating drafts.
   const existing = await db
@@ -322,7 +334,8 @@ function prepare(type: string, raw: Record<string, string>) {
   const form = formFor(type);
   if (!form) throw new Error(`${type} cannot be edited here.`);
 
-  const data = coerceFormValues(form, raw);
+  // Layer-1 tidying before validation and hashing, so the hash is of what is stored.
+  const data = tidyRecordData(form.type, coerceFormValues(form, raw));
   const missing = missingRequired(form, data);
   if (missing.length > 0) throw new Error(`${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} required.`);
   enforceLimits(form, data);

@@ -78,8 +78,11 @@ function escapeRegExp(s: string): string {
  * no glyph for it, so the PDF printed "product focused" — and its text layer, which is
  * what an ATS reads, said "productfocused". Soft hyphens are dropped outright.
  */
+const HYPHEN_LOOKALIKES = new RegExp(`[${String.fromCharCode(0x2010, 0x2011, 0x2012, 0x2212)}]`, 'g');
+const SOFT_HYPHEN = new RegExp(String.fromCharCode(0x00ad), 'g');
+
 export function printable(text: string): string {
-  return text.replace(/[‐‑‒−]/g, '-').replace(/­/g, '');
+  return text.replace(HYPHEN_LOOKALIKES, '-').replace(SOFT_HYPHEN, '');
 }
 
 export function tidyResumeText(doc: ResumeDocument): ResumeDocument {
