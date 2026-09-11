@@ -15,7 +15,8 @@ export interface NavLink {
 /**
  * In the order someone would use them: the thing you do (dashboard), the thing it is
  * built from (profile), the things that fill it (import, portfolio), the record of what
- * you sent (applications), and the settings you rarely touch (answers).
+ * you sent (applications), what happened under the hood (activity), and the settings you
+ * rarely touch (answers).
  */
 export const NAV_LINKS: NavLink[] = [
   { href: '/', label: 'Dashboard' },
@@ -23,5 +24,6 @@ export const NAV_LINKS: NavLink[] = [
   { href: '/import', label: 'Import' },
   { href: '/settings/portfolio', label: 'Portfolio' },
   { href: '/applications', label: 'Applications' },
+  { href: '/activity', label: 'Activity' },
   { href: '/settings/application', label: 'Answers' },
 ];

@@ -17,7 +17,7 @@
 
 import { getRepoAccess } from '@/lib/server/repo-access';
 import { users } from '@/lib/db/schema';
-import { timingSafeEqual } from 'node:crypto';
+import { cronAuthorized } from '@/lib/server/cron-auth';
 import { NextRequest } from 'next/server';
 import { eq, isNotNull } from 'drizzle-orm';
 import { db } from '@/lib/db';
@@ -31,21 +31,6 @@ const RUN_BUDGET_MS = Number(process.env.CRON_BUDGET_MS ?? 8_000);
 
 /** Users checked per run. Single-user today; the cap is here before it isn't. */
 const MAX_USERS_PER_RUN = Number(process.env.CRON_MAX_USERS ?? 25);
-
-function authorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const header =
-    req.headers.get('x-cron-secret') ??
-    req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
-    '';
-  // Constant-time, matching the GitHub webhook's comparison. `===` short-circuits on the
-  // first differing byte, which is a timing oracle in principle even if extracting a
-  // secret through serverless jitter is not realistic in practice.
-  const a = Buffer.from(header);
-  const b = Buffer.from(secret);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 export async function POST(req: NextRequest) {
   return run(req);
@@ -63,7 +48,7 @@ async function run(req: NextRequest) {
       { status: 501 },
     );
   }
-  if (!authorized(req)) {
+  if (!cronAuthorized(req)) {
     return Response.json({ error: 'Unauthorized.' }, { status: 401 });
   }
 

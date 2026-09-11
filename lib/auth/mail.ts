@@ -107,6 +107,11 @@ async function deliver(to: string, subject: string, text: string): Promise<MailR
   }
 }
 
+/** A plain-text notice to the site operator — draft-failure alerts (lib/server/draft-alerts.ts). */
+export function sendOperatorEmail(to: string, subject: string, text: string): Promise<MailResult> {
+  return deliver(to, subject, text);
+}
+
 export function appUrl(path: string): string {
   const base =
     process.env.AUTH_URL?.replace(/\/$/, '') ||

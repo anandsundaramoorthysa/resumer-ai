@@ -401,9 +401,13 @@ async function runDraft(
     };
   }
 
+  // Below the 8.5 target is a finished score, not a failed step: it printed as "failed"
+  // with a red mark on nearly every draft, for a profile that simply lacks what the
+  // posting asks for. The message says where it landed and why; 'error' is kept for a
+  // step that actually broke.
   emit({
     stage: 'score',
-    status: outcome.result.passed ? 'done' : 'error',
+    status: 'done',
     message: outcome.result.passed
       ? `Cleared the bar at ${outcome.result.overall.toFixed(1)}/10 after ${outcome.result.iterations} attempt(s)`
       : (outcome.result.haltExplanation ?? 'Could not reach 8.5/10.'),
