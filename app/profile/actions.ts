@@ -160,14 +160,6 @@ export async function skipQuestion(questionId: string): Promise<void> {
 export async function chooseEnrichmentMode(mode: string): Promise<void> {
   const userId = await requireUserId();
   if (!isEnrichmentMode(mode)) return;
-  try {
-    await setEnrichmentMode(userId, mode);
-  } catch (err) {
-    // Before scripts/2026-09-12-enrichment-preference.sql runs, the table does not exist.
-    // A thrown server action inside a transition takes the whole page to the error
-    // boundary; logged and absorbed instead, the radio simply snaps back to `all` on the
-    // refresh, which is the truth. Remove with the migration's other catches.
-    console.error('[enrichment] could not save the question setting', err);
-  }
+  await setEnrichmentMode(userId, mode);
   refresh();
 }

@@ -1,18 +1,9 @@
 -- Questions that can be turned off, and questions that stop asking on their own.
 --
--- NOT APPLIED. Production DDL is not run from an agent session — apply this by hand:
+-- APPLIED to production 2026-09-12, by hand:
 --   psql "$DATABASE_URL" -f scripts/2026-09-12-enrichment-preference.sql
--- or let `npm run db:push` pick up `enrichmentPreferences` in lib/db/schema.ts (which does
--- NOT cover the asked_count column below — that one is only here).
---
--- The code ships ahead of this migration and works without it:
---   * `loadEnrichmentMode` catches the missing relation and reads it as the default `all`,
---     so /profile renders and every user keeps the behaviour they have today.
---   * `askedCounts` / `countAsked` catch the missing column and return no counts, so the
---     "asked three times and still open" test simply never fires.
--- Both catches are marked in lib/server/enrichment.ts and should be deleted once this has
--- run, along with moving asked_count into lib/db/schema.ts — a swallowed error that has
--- stopped being possible is a swallowed error nobody will remember is there.
+-- Both objects are declared in lib/db/schema.ts. The code no longer tolerates their
+-- absence, so a fresh database needs this (or `npm run db:push`) before /profile renders.
 --
 -- Safe to re-run, and nothing here touches an existing row's meaning: the new table starts
 -- empty (empty == `all`) and the new column starts at 0 (0 == never re-asked), so applying

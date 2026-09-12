@@ -475,8 +475,8 @@ suite('a question asked and ignored stops being asked', () => {
   });
 
   test('no count recorded is not a count of many', () => {
-    // The column ships before its migration. Absent must read as zero, or the queue empties
-    // itself on every deployment where the migration has not run yet.
+    // Intake (`buildEnrichmentQuestions`) has no counts to pass. Absent must read as zero,
+    // or a question would be refused by the draft that first derived it.
     assert.equal(
       questionQualifies(
         { kind: 'skill', recordId: null, topic: 'PostgreSQL', subjectKey: 'skill:postgresql' },

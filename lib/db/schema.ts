@@ -314,6 +314,8 @@ export const enrichmentQuestions = pgTable(
     reason: text('reason').notNull().default(''),
     /** Impact, highest first — see IMPACT in lib/profile/enrichment.ts. */
     priority: integer('priority').notNull().default(0),
+    /** Drafts that re-derived this while it stayed open — see MAX_TIMES_ASKED. */
+    askedCount: integer('asked_count').notNull().default(0),
     state: text('state').notNull().default('open'), // open | answered | dismissed
     /** What the answer became, so a fact can be traced back to the question. */
     answerRecordId: text('answer_record_id'),
@@ -337,11 +339,8 @@ export const enrichmentQuestions = pgTable(
  * that there was no way to stop them, and a prompt you cannot turn off is one you learn to
  * scroll past — which costs the questions you would otherwise have answered.
  *
- * One row per person, written only when they change it. Absent means `all`, so the table
- * being empty and the table not existing yet are the same answer: see
- * `loadEnrichmentMode` in lib/server/enrichment.ts, which treats a missing relation as the
- * default rather than an error. That is deliberate — this table ships before its migration
- * is applied to production.
+ * One row per person, written only when they change it. Absent means `all` — see
+ * `loadEnrichmentMode` in lib/server/enrichment.ts.
  *
  * Per-question refusal is NOT here. That has always been `enrichment_question.state =
  * 'dismissed'`, a tombstone the unique index on (user_id, subject_key) makes permanent.

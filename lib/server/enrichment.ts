@@ -97,26 +97,14 @@ export function isEnrichmentMode(value: unknown): value is EnrichmentMode {
   return typeof value === 'string' && (ENRICHMENT_MODES as readonly string[]).includes(value);
 }
 
-/**
- * What this user chose, or `all`.
- *
- * Swallows the error on purpose, and only this one: `enrichment_preference` ships before
- * its migration runs on production (scripts/2026-09-12-enrichment-preference.sql), and a
- * relation that does not exist yet must read as "they have not chosen anything", not as a
- * 500 on the profile page. Remove the catch once the migration is applied and this becomes
- * an ordinary select.
- */
+/** What this user chose, or `all` — no row means they never changed it. */
 export async function loadEnrichmentMode(userId: string): Promise<EnrichmentMode> {
-  try {
-    const [row] = await db
-      .select({ mode: enrichmentPreferences.mode })
-      .from(enrichmentPreferences)
-      .where(eq(enrichmentPreferences.userId, userId))
-      .limit(1);
-    return isEnrichmentMode(row?.mode) ? row.mode : 'all';
-  } catch {
-    return 'all';
-  }
+  const [row] = await db
+    .select({ mode: enrichmentPreferences.mode })
+    .from(enrichmentPreferences)
+    .where(eq(enrichmentPreferences.userId, userId))
+    .limit(1);
+  return isEnrichmentMode(row?.mode) ? row.mode : 'all';
 }
 
 export async function setEnrichmentMode(userId: string, mode: EnrichmentMode): Promise<void> {
@@ -127,46 +115,6 @@ export async function setEnrichmentMode(userId: string, mode: EnrichmentMode): P
       target: enrichmentPreferences.userId,
       set: { mode, updatedAt: new Date() },
     });
-}
-
-/**
- * How many drafts have re-derived each open question.
- *
- * Raw SQL, and `asked_count` is deliberately NOT in lib/db/schema.ts: every other read of
- * this table uses `db.select()` over the declared columns, so declaring a column that
- * production does not have yet would break the profile page for everyone until the
- * migration ran. Here the absence is caught and read as "no count recorded", which
- * degrades to the old behaviour — the patience test simply never fires. Move it into the
- * schema and delete the catch once the migration is applied.
- */
-async function askedCounts(userId: string): Promise<Map<string, number>> {
-  try {
-    const rows = await db.execute<{ subject_key: string; asked_count: number }>(
-      sql`select subject_key, asked_count from enrichment_question
-          where user_id = ${userId} and state = 'open'`,
-    );
-    const out = new Map<string, number>();
-    for (const r of rows as unknown as Array<{ subject_key: string; asked_count: number }>) {
-      out.set(r.subject_key, Number(r.asked_count) || 0);
-    }
-    return out;
-  } catch {
-    return new Map();
-  }
-}
-
-/** Bumps the count for questions this draft raised again. Silent if not migrated. */
-async function countAsked(userId: string, ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
-  try {
-    await db.execute(
-      sql`update enrichment_question set asked_count = asked_count + 1
-          where user_id = ${userId}
-            and id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`,
-    );
-  } catch {
-    /* column not migrated yet — the patience test stays off, nothing else changes. */
-  }
 }
 
 /**
@@ -264,19 +212,26 @@ export async function recordEnrichmentQuestions(
   const openBySubject = new Map(
     survivors.filter((q) => q.state === 'open').map((q) => [q.subjectKey, q.id]),
   );
-  const reAsked: string[] = [];
   for (const q of drafted) {
     const id = openBySubject.get(q.subjectKey);
     if (!id) continue;
-    reAsked.push(id);
     await db
       .update(enrichmentQuestions)
-      .set({ priority: q.priority, reason: q.reason, updatedAt: new Date() })
+      .set({
+        priority: q.priority,
+        reason: q.reason,
+        // One more draft has put this in front of the user. Past MAX_TIMES_ASKED the
+        // answer is that they are not going to answer this one, and it stops being shown.
+        askedCount: sql`${enrichmentQuestions.askedCount} + 1`,
+        // The database's clock, not this server's: `current-job` compares this against
+        // the snapshot's `created_at`, which is the database's `now()`. With `new Date()`
+        // a server clock 3.6 s behind Neon's (measured on a dev machine) stamped every
+        // re-raised question as older than the draft that raised it, and `current-job`
+        // hid exactly the questions it exists to show.
+        updatedAt: sql`now()`,
+      })
       .where(and(eq(enrichmentQuestions.userId, userId), eq(enrichmentQuestions.id, id)));
   }
-  // One more draft has put these in front of the user. Past MAX_TIMES_ASKED the answer is
-  // that they are not going to answer this one, and it stops being shown.
-  await countAsked(userId, reAsked);
 
   const fresh = selectNewQuestions(
     drafted,
@@ -332,10 +287,8 @@ export async function loadEnrichmentQueue(
     );
 
   const byId = new Map(records.map((r) => [r.id, r]));
-  const [{ job, at: lastDraftAt }, asked] = await Promise.all([
-    latestDraftContext(userId),
-    askedCounts(userId),
-  ]);
+  const { job, at: lastDraftAt } = await latestDraftContext(userId);
+  const asked = new Map(rows.map((r) => [r.subjectKey, r.askedCount]));
 
   const live = rows
     // "Only ask about the job I am drafting for" — a row this latest draft did not touch
