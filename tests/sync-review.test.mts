@@ -14,6 +14,7 @@
 
 import { createHash } from 'node:crypto';
 import { hashContent, reconcile, summarizePlan } from '../lib/sync/reconcile';
+import { honorHashParts } from '../lib/profile/honors';
 import type { ParsedRecord } from '../lib/sync/reconcile';
 import { canConnectWithPermissions } from '../lib/server/repo-access';
 import type { ProfileRecord, RecordSource, ReviewState } from '../lib/types';
@@ -310,3 +311,44 @@ suite('rows keyed by the old recipe cross over on the next sync', () => {
     assert.equal(reconcile([stored], [parsedSkill('Kubernetes')]).toFlag.length, 0, 'still there');
   });
 });
+
+suite('honours keyed by the old type-prefixed recipe cross over on the next sync', () => {
+  // Every award and achievement stored before lib/profile/honors.ts carries
+  // hashContent([type, title]); the sync now emits hashContent(honorHashParts(...)). The
+  // owner's six awards are synced rows on the old hash, and this is what re-keys them.
+  const storedHonor = (type: 'award' | 'achievement', title: string) =>
+    ({
+      id: `id-${type}-${title}`,
+      userId: 'u1',
+      type,
+      title,
+      tags: [],
+      contentHash: hashContent([type, title]),
+      source: 'github-sync',
+      reviewState: 'approved',
+      flaggedForRemoval: false,
+      createdAt: new Date('2024-01-01'),
+      updatedAt: new Date('2024-01-01'),
+    }) as unknown as ProfileRecord;
+  const parsedHonor = (type: 'award' | 'achievement', title: string) =>
+    ({ type, title, tags: [], contentHash: hashContent(honorHashParts({ title })) }) as unknown as ParsedRecord;
+
+  test('an old-hash award is updated to the new hash, not proposed again or flagged', () => {
+    const title = 'First Prize in Debugging at INNOFESTA 2K24 Symposium';
+    const stored = storedHonor('award', title);
+    const plan = reconcile([stored], [parsedHonor('award', title)]);
+    assert.equal(plan.toInsert.length, 0);
+    assert.equal(plan.toFlag.length, 0);
+    assert.equal(plan.toUpdate.length, 1);
+    assert.equal(plan.toUpdate[0].id, stored.id);
+    assert.equal(plan.toUpdate[0].parsed.contentHash, hashContent(honorHashParts({ title })));
+  });
+
+  test('an old-hash achievement re-parsed as an award is the same row, not a second one', () => {
+    const stored = storedHonor('achievement', 'Best Innovation');
+    const plan = reconcile([stored], [parsedHonor('award', 'Best Innovation Award')]);
+    assert.equal(plan.toInsert.length, 0, 'one fact, one row');
+    assert.equal(plan.toUpdate[0]?.id, stored.id);
+  });
+});
+
