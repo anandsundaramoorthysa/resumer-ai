@@ -52,31 +52,26 @@
 /**
  * The dark palette, as plain CSS rather than a second `@theme`.
  *
- * This was `@media (prefers-color-scheme: dark) { @theme { … } }`, which does not do what
- * it reads as. Tailwind v4 only honours `@theme` at the top level: it hoists the
- * declarations out of the media query into the single `:root` block, where these values —
- * being second — overwrote the light ones unconditionally. The compiled stylesheet
- * contained `--color-paper: #14161c` and nothing else, not one `prefers-color-scheme`
- * block, and no light value anywhere. Every visitor got dark mode whatever their system
- * was set to, and the light palette above had never once rendered.
+ * This was `/*
+ * Which palette applies, in three cases:
  *
- * Redefining the same custom properties in ordinary CSS works because the utilities
- * compile to `var(--color-*)` — the variable is resolved at use, so overriding it inside
- * a media query is exactly the right lever. `@theme` above still declares the tokens and
- * generates the utility classes; this only changes their values.
+ *   no `data-theme`          follow the device, as it always has.
+ *   data-theme="light"       the device says dark, the person said light. The light values
+ *                            are the `@theme` ones above, so this only has to stop the
+ *                            system rule below from firing — hence the `:not()` on it.
+ *   data-theme="dark"        dark whatever the device says.
  *
- * `color-scheme` is set alongside, which was missing entirely: without it the browser
- * renders native selects, scrollbars and autofill backgrounds in light form against a
- * dark UI.
+ * The attribute is written before first paint by the inline script in app/layout.tsx, from
+ * the cookie components/theme-toggle.tsx sets.
+ *
+ * The dark values appear twice, which is the one duplication in this file: CSS cannot
+ * share a declaration block between a media query and a selector. `tests` drives the real
+ * browser and asserts every token resolves identically in the two cases, so a value edited
+ * in one list and not the other fails there rather than shipping as a half-dark page.
  */
-:root {
-  color-scheme: light;
-}
-
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     color-scheme: dark;
-
     --color-paper: #14161c;
     --color-surface: #1b1e26;
     --color-ink: #eaebef;
@@ -98,6 +93,34 @@
     --color-danger: #e58080;
     --color-danger-tint: #331a1a;
   }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+    --color-paper: #14161c;
+    --color-surface: #1b1e26;
+    --color-ink: #eaebef;
+    --color-muted: #9ba1ac;
+    --color-line: #2b2f3a;
+
+    --color-brand: #2ba6af;
+    --color-brand-dark: #6fc9d0;
+    --color-brand-tint: #17313f;
+    --color-on-brand: #0c1416;
+
+    --color-gold: #d8ae5e;
+    --color-gold-tint: #33291a;
+
+    --color-success: #4fbe81;
+    --color-success-tint: #16301f;
+    --color-warning: #e0994a;
+    --color-warning-tint: #33260f;
+    --color-danger: #e58080;
+    --color-danger-tint: #331a1a;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 html {
@@ -135,5 +158,24 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * The desktop sidebar (components/desktop-sidebar.tsx) is fixed, so the page has to make
+ * room for it. Keyed on the sidebar's own class and state rather than a wrapper class,
+ * because eleven pages render the header and every one of them would have to remember the
+ * wrapper — and a signed-out page, which renders no sidebar, must keep its full width.
+ *
+ * The widths mirror `w-60` and `w-[4.5rem]` on the component. Changing one without the
+ * other leaves either a gap or navigation sitting on top of the page.
+ */
+@media (min-width: 64rem) {
+  body:has(.app-sidebar) {
+    padding-left: 15rem;
+  }
+
+  body:has(.app-sidebar[data-collapsed='true']) {
+    padding-left: 4.5rem;
   }
 }
