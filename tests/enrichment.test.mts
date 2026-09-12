@@ -30,6 +30,11 @@ import {
   orderQuestions,
   rationedSlice,
   QUESTIONS_SHOWN,
+  isAskableSkill,
+  MAX_TIMES_ASKED,
+  qualifyQuestions,
+  questionQualifies,
+  reachableRecordIds,
   recordIdForText,
   selectNewQuestions,
   type DraftedQuestion,
@@ -357,6 +362,158 @@ suite('enrichment — one question per subject', () => {
       queued = [...queued, ...fresh.map((q) => q.subjectKey)];
     }
     assert.deepEqual(queued, ['bullet:b1']);
+  });
+});
+
+
+/* ------------------------------------------------ does the question earn it -- */
+
+/**
+ * The owner's complaint, as three rules.
+ *
+ * "We don't need to ask unnecessary questions which are not needed to draft the resume."
+ * A question is unnecessary when answering it cannot change a draft, and there are exactly
+ * three ways that happens: the record never reaches a resume, the thing being asked about
+ * is not something a person can have, or the user has already declined to answer it three
+ * times by ignoring it. Each is pinned here, and each one was measured on the real profile
+ * before being written — see the numbers in scripts/enrichment-before-after.mts.
+ */
+
+function job(over: Partial<JobRequirement> = {}): JobRequirement {
+  return {
+    roleTitle: 'Technical SEO Lead',
+    company: 'Acme',
+    category: 'general',
+    seniority: 'mid',
+    requiredSkills: [],
+    preferredSkills: [],
+    atsKeywords: [],
+    responsibilities: [],
+    ...over,
+  } as JobRequirement;
+}
+
+suite('a keyword has to be something a person can have', () => {
+  test('the posting\'s location and contract type are not skills', () => {
+    // Measured on a real run: `scoreSkillsCompleteness` reported "Remote", "India" and
+    // "Technical SEO Lead" as genuine gaps, correctly — the profile cannot evidence them.
+    // Asking someone whether they "have" India is how a queue earns a reputation.
+    for (const junk of ['Remote', 'India', 'Technical SEO Lead', 'Full-time']) {
+      assert.equal(isAskableSkill(junk, job()), false, junk);
+    }
+  });
+
+  test('a name the classifier places is askable', () => {
+    assert.equal(isAskableSkill('Screaming Frog', job()), true);
+    assert.equal(isAskableSkill('PostgreSQL', null), true);
+  });
+
+  test('a certification is not asked as a skill', () => {
+    // Answering it would have written a skill of category `tool` — the misfiling in
+    // tests/record-type.test.mts. The honest fix is not to ask it in this shape at all.
+    assert.equal(isAskableSkill('AWS Certified Solutions Architect', job()), false);
+  });
+
+  test('the posting may vouch for a tool no dictionary has heard of', () => {
+    // Otherwise a genuinely new tool in the requirements could never be asked about, which
+    // is the opposite failure: the queue goes quiet exactly where it is most useful.
+    assert.equal(isAskableSkill('Sitebulb', job()), false);
+    assert.equal(isAskableSkill('Sitebulb', job({ requiredSkills: ['Sitebulb'] })), true);
+    // An ATS keyword is not enough — that list is where the location and job title live.
+    assert.equal(isAskableSkill('Sitebulb', job({ atsKeywords: ['Sitebulb'] })), false);
+  });
+});
+
+suite('the record has to reach a resume', () => {
+  const b = bullet('b1', 'r1', 'Ran technical SEO audits across eight sites');
+  const far = bullet('b2', 'r1', 'Watered the office plants every Tuesday');
+
+  test('reachable ids are exactly what retrieval would select', () => {
+    const reach = reachableRecordIds([b, far], job({ atsKeywords: ['seo', 'audits'] }));
+    assert.ok(reach.has('b1'));
+  });
+
+  test('a question about a record retrieval excludes does not qualify', () => {
+    const reach = new Set(['b1']);
+    const ask = (id: string) =>
+      questionQualifies(
+        { kind: 'bullet', recordId: id, topic: '', subjectKey: `bullet:${id}` },
+        { records: [b, far], job: job() },
+        reach,
+      );
+    assert.equal(ask('b1').ok, true);
+    assert.equal(ask('b2').ok, false);
+    assert.match(ask('b2').why, /retrieval/);
+  });
+
+  test('with no posting yet, reach is unjudged rather than failed', () => {
+    // A profile that has never been drafted from has no posting to rank against. Silently
+    // disqualifying everything would empty the queue for exactly the new user it helps most.
+    const verdict = questionQualifies(
+      { kind: 'bullet', recordId: 'b2', topic: '', subjectKey: 'bullet:b2' },
+      { records: [b, far], job: null },
+    );
+    assert.equal(verdict.ok, true);
+  });
+});
+
+suite('a question asked and ignored stops being asked', () => {
+  const ask = (times: number) =>
+    questionQualifies(
+      { kind: 'skill', recordId: null, topic: 'PostgreSQL', subjectKey: 'skill:postgresql' },
+      { records: [], job: null, timesAsked: () => times },
+    );
+
+  test('under the limit it still qualifies', () => {
+    assert.equal(ask(MAX_TIMES_ASKED - 1).ok, true);
+  });
+
+  test('at the limit it does not', () => {
+    assert.equal(ask(MAX_TIMES_ASKED).ok, false);
+    assert.match(ask(MAX_TIMES_ASKED).why, /asked/);
+  });
+
+  test('no count recorded is not a count of many', () => {
+    // The column ships before its migration. Absent must read as zero, or the queue empties
+    // itself on every deployment where the migration has not run yet.
+    assert.equal(
+      questionQualifies(
+        { kind: 'skill', recordId: null, topic: 'PostgreSQL', subjectKey: 'skill:postgresql' },
+        { records: [], job: null },
+      ).ok,
+      true,
+    );
+  });
+});
+
+suite('qualification is applied to what a draft produces', () => {
+  test('a keyword gap that is not a skill never becomes a question', () => {
+    const qs = buildEnrichmentQuestions(
+      {
+        rejectedRewrites: [],
+        weakBullets: [],
+        genuineGaps: ['Remote', 'India', 'PostgreSQL'],
+        document: null,
+        job: job({ atsKeywords: ['Remote', 'India', 'PostgreSQL'] }),
+      },
+      [],
+      [],
+    );
+    assert.deepEqual(
+      qs.map((q) => q.topic),
+      ['PostgreSQL'],
+    );
+  });
+
+  test('qualifyQuestions keeps order and keeps nothing it rejects', () => {
+    const drafted = [
+      { kind: 'skill' as const, recordId: null, topic: 'PostgreSQL', subjectKey: 'skill:postgresql' },
+      { kind: 'skill' as const, recordId: null, topic: 'Remote', subjectKey: 'skill:remote' },
+    ];
+    assert.deepEqual(
+      qualifyQuestions(drafted, { records: [], job: job() }).map((q) => q.subjectKey),
+      ['skill:postgresql'],
+    );
   });
 });
 

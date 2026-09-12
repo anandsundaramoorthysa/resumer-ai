@@ -329,6 +329,32 @@ export const enrichmentQuestions = pgTable(
   ],
 );
 
+/**
+ * Whether this person wants to be asked draft questions at all — REQ-5.5's off switch.
+ *
+ * The enrichment queue was unconditional: every draft added to it and /profile always
+ * showed the top of it. The owner's complaint was not that the questions were wrong but
+ * that there was no way to stop them, and a prompt you cannot turn off is one you learn to
+ * scroll past — which costs the questions you would otherwise have answered.
+ *
+ * One row per person, written only when they change it. Absent means `all`, so the table
+ * being empty and the table not existing yet are the same answer: see
+ * `loadEnrichmentMode` in lib/server/enrichment.ts, which treats a missing relation as the
+ * default rather than an error. That is deliberate — this table ships before its migration
+ * is applied to production.
+ *
+ * Per-question refusal is NOT here. That has always been `enrichment_question.state =
+ * 'dismissed'`, a tombstone the unique index on (user_id, subject_key) makes permanent.
+ */
+export const enrichmentPreferences = pgTable('enrichment_preference', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** all | current-job | off — see ENRICHMENT_MODES in lib/server/enrichment.ts. */
+  mode: text('mode').notNull().default('all'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 /** REQ-1.3 — reserved for Phase 10 autofill. Nothing reads these yet. */
 export const applicationFormFields = pgTable('application_form_fields', {
   userId: text('user_id')

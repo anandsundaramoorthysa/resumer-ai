@@ -33,15 +33,21 @@
  */
 
 import 'server-only';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
-import { enrichmentQuestions, profileRecords } from '@/lib/db/schema';
-import type { ProfileRecord, RoleRecord } from '@/lib/types';
+import {
+  enrichmentPreferences,
+  enrichmentQuestions,
+  profileRecords,
+  resumeSnapshots,
+} from '@/lib/db/schema';
+import type { JobRequirement, ProfileRecord, RoleRecord } from '@/lib/types';
 import { audit } from '@/lib/server/profile';
 import {
   buildEnrichmentQuestions,
   isGapOpen,
   missingBulletParts,
+  qualifyQuestions,
   rationedSlice,
   selectNewQuestions,
   QUESTIONS_SHOWN,
@@ -51,6 +57,7 @@ import {
 } from '@/lib/profile/enrichment';
 import { createSkill, setProjectMetrics, updateBullet } from '@/lib/profile/records';
 import { suggestedSkillCategory } from '@/lib/skills/categories';
+import { classifyRecordType } from '@/lib/profile/record-type';
 
 export interface QueuedQuestion {
   id: string;
@@ -72,6 +79,124 @@ export interface QueuedQuestion {
   missing: BulletPart[];
 }
 
+/* ------------------------------------------------- whether to ask at all -- */
+
+/**
+ * How much the user wants to be asked.
+ *
+ *   all           the backlog as it has always worked.
+ *   current-job   only questions this most recent draft raised. The backlog still exists
+ *                 and still refreshes, but /profile shows nothing about last month's
+ *                 posting — which is the owner's own phrasing of what they wanted.
+ *   off           nothing is shown and no draft adds anything.
+ */
+export const ENRICHMENT_MODES = ['all', 'current-job', 'off'] as const;
+export type EnrichmentMode = (typeof ENRICHMENT_MODES)[number];
+
+export function isEnrichmentMode(value: unknown): value is EnrichmentMode {
+  return typeof value === 'string' && (ENRICHMENT_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * What this user chose, or `all`.
+ *
+ * Swallows the error on purpose, and only this one: `enrichment_preference` ships before
+ * its migration runs on production (scripts/2026-09-12-enrichment-preference.sql), and a
+ * relation that does not exist yet must read as "they have not chosen anything", not as a
+ * 500 on the profile page. Remove the catch once the migration is applied and this becomes
+ * an ordinary select.
+ */
+export async function loadEnrichmentMode(userId: string): Promise<EnrichmentMode> {
+  try {
+    const [row] = await db
+      .select({ mode: enrichmentPreferences.mode })
+      .from(enrichmentPreferences)
+      .where(eq(enrichmentPreferences.userId, userId))
+      .limit(1);
+    return isEnrichmentMode(row?.mode) ? row.mode : 'all';
+  } catch {
+    return 'all';
+  }
+}
+
+export async function setEnrichmentMode(userId: string, mode: EnrichmentMode): Promise<void> {
+  await db
+    .insert(enrichmentPreferences)
+    .values({ userId, mode })
+    .onConflictDoUpdate({
+      target: enrichmentPreferences.userId,
+      set: { mode, updatedAt: new Date() },
+    });
+}
+
+/**
+ * How many drafts have re-derived each open question.
+ *
+ * Raw SQL, and `asked_count` is deliberately NOT in lib/db/schema.ts: every other read of
+ * this table uses `db.select()` over the declared columns, so declaring a column that
+ * production does not have yet would break the profile page for everyone until the
+ * migration ran. Here the absence is caught and read as "no count recorded", which
+ * degrades to the old behaviour — the patience test simply never fires. Move it into the
+ * schema and delete the catch once the migration is applied.
+ */
+async function askedCounts(userId: string): Promise<Map<string, number>> {
+  try {
+    const rows = await db.execute<{ subject_key: string; asked_count: number }>(
+      sql`select subject_key, asked_count from enrichment_question
+          where user_id = ${userId} and state = 'open'`,
+    );
+    const out = new Map<string, number>();
+    for (const r of rows as unknown as Array<{ subject_key: string; asked_count: number }>) {
+      out.set(r.subject_key, Number(r.asked_count) || 0);
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+/** Bumps the count for questions this draft raised again. Silent if not migrated. */
+async function countAsked(userId: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  try {
+    await db.execute(
+      sql`update enrichment_question set asked_count = asked_count + 1
+          where user_id = ${userId}
+            and id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`,
+    );
+  } catch {
+    /* column not migrated yet — the patience test stays off, nothing else changes. */
+  }
+}
+
+/**
+ * The posting the most recent draft was for, and when that draft happened.
+ *
+ * The queue lives on /profile, which knows nothing about any job — so "would a resume for
+ * the job you are actually applying for use this record?" has to be answered from the last
+ * snapshot. Shape-checked rather than trusted: `job_requirement` is jsonb written by
+ * several versions of the extractor, and `rankRecords` indexes `atsKeywords` unguarded.
+ */
+async function latestDraftContext(
+  userId: string,
+): Promise<{ job: JobRequirement | null; at: Date | null }> {
+  const [row] = await db
+    .select({ job: resumeSnapshots.jobRequirement, at: resumeSnapshots.createdAt })
+    .from(resumeSnapshots)
+    .where(eq(resumeSnapshots.userId, userId))
+    .orderBy(desc(resumeSnapshots.createdAt))
+    .limit(1);
+  if (!row) return { job: null, at: null };
+
+  const raw = row.job as Record<string, unknown> | null;
+  const usable =
+    raw &&
+    Array.isArray(raw.atsKeywords) &&
+    Array.isArray(raw.requiredSkills) &&
+    Array.isArray(raw.preferredSkills);
+  return { job: usable ? (raw as unknown as JobRequirement) : null, at: row.at };
+}
+
 /* --------------------------------------------------- writing what a draft found -- */
 
 /**
@@ -87,6 +212,10 @@ export async function recordEnrichmentQuestions(
   records: ProfileRecord[],
   roles: RoleRecord[],
 ): Promise<{ added: number; closed: number }> {
+  // Turned off means no new backlog. Stale rows are still swept below, because a question
+  // about a gap the user has since closed is wrong whether or not they want to be asked.
+  const mode = await loadEnrichmentMode(userId);
+
   const existing = await db
     .select({
       id: enrichmentQuestions.id,
@@ -124,6 +253,8 @@ export async function recordEnrichmentQuestions(
   }
 
   const survivors = existing.filter((q) => !stale.includes(q.id));
+  if (mode === 'off') return { added: 0, closed: stale.length };
+
   const drafted = buildEnrichmentQuestions(signal, records, roles);
 
   // A question already open on the same subject gets its priority refreshed rather than
@@ -133,14 +264,19 @@ export async function recordEnrichmentQuestions(
   const openBySubject = new Map(
     survivors.filter((q) => q.state === 'open').map((q) => [q.subjectKey, q.id]),
   );
+  const reAsked: string[] = [];
   for (const q of drafted) {
     const id = openBySubject.get(q.subjectKey);
     if (!id) continue;
+    reAsked.push(id);
     await db
       .update(enrichmentQuestions)
       .set({ priority: q.priority, reason: q.reason, updatedAt: new Date() })
       .where(and(eq(enrichmentQuestions.userId, userId), eq(enrichmentQuestions.id, id)));
   }
+  // One more draft has put these in front of the user. Past MAX_TIMES_ASKED the answer is
+  // that they are not going to answer this one, and it stops being shown.
+  await countAsked(userId, reAsked);
 
   const fresh = selectNewQuestions(
     drafted,
@@ -184,7 +320,10 @@ export async function recordEnrichmentQuestions(
 export async function loadEnrichmentQueue(
   userId: string,
   records: ProfileRecord[],
-): Promise<{ shown: QueuedQuestion[]; total: number }> {
+): Promise<{ shown: QueuedQuestion[]; total: number; mode: EnrichmentMode }> {
+  const mode = await loadEnrichmentMode(userId);
+  if (mode === 'off') return { shown: [], total: 0, mode };
+
   const rows = await db
     .select()
     .from(enrichmentQuestions)
@@ -193,8 +332,16 @@ export async function loadEnrichmentQueue(
     );
 
   const byId = new Map(records.map((r) => [r.id, r]));
+  const [{ job, at: lastDraftAt }, asked] = await Promise.all([
+    latestDraftContext(userId),
+    askedCounts(userId),
+  ]);
 
   const live = rows
+    // "Only ask about the job I am drafting for" — a row this latest draft did not touch
+    // is about a posting the user has moved on from. It stays open and keeps refreshing,
+    // so switching back to `all` brings the whole backlog back unchanged.
+    .filter((r) => mode !== 'current-job' || !lastDraftAt || r.updatedAt >= lastDraftAt)
     .map((r) => ({
       id: r.id,
       kind: r.kind as QuestionKind,
@@ -209,10 +356,26 @@ export async function loadEnrichmentQueue(
     }))
     .filter((q) => isGapOpen(q, records));
 
+  /*
+   * The same qualification the intake applies, re-applied against the job in hand.
+   *
+   * Intake judged each question against the posting of the draft that raised it; weeks of
+   * drafts later, the backlog is full of rows whose records no longer reach a resume for
+   * anything the user is applying to, and of keywords the scorer named that nobody can
+   * claim to have ("Remote", "India", a seniority word). Those are exactly the questions
+   * the owner said do not help. `total` counts what survives, so the "and N more" line on
+   * /profile counts questions that could still change a draft rather than all of them.
+   */
+  const useful = qualifyQuestions(live, {
+    records,
+    job,
+    timesAsked: (key) => asked.get(key) ?? 0,
+  });
+
   // Rationed rather than sliced, for the reason recorded on `rationedSlice`: the top
   // three by impact were all keyword gaps on the profile this was built for, so the
   // first thing the user saw never mentioned a line they had written.
-  return { shown: rationedSlice(live, QUESTIONS_SHOWN), total: live.length };
+  return { shown: rationedSlice(useful, QUESTIONS_SHOWN), total: useful.length, mode };
 }
 
 /* --------------------------------------------------------------- settling it -- */
@@ -348,6 +511,34 @@ export async function answerEnrichmentQuestion(
   // where they used it. A checkbox here would be a way to pad a Skills section by reflex,
   // and the Skills section is the heaviest thing the scorer reads.
   if (!text) throw new Error('Say where you used it.');
+
+  /*
+   * Where the answer is filed is decided, not assumed.
+   *
+   * This branch used to call `createSkill` for every keyword the posting had named, with
+   * `suggestedSkillCategory(topic) ?? 'tool'` for the category. Measured against the real
+   * classifier, `classifySkill` returns null for "AWS Certified Solutions Architect",
+   * "Certified Scrum Master", "Six Sigma Black Belt" and "Google Analytics Certified" — so
+   * each of them became a skill of category `tool` and printed in the Skills section under
+   * "tools". A certification filed as a tool is both the wrong section and a smaller claim
+   * than the truth, and the user cannot see that it happened.
+   *
+   * `classifyRecordType` settles it instead (lib/profile/record-type.ts). A keyword it
+   * places somewhere other than `skill` is refused with the section it belongs in, and
+   * nothing is written: "where did you use it?" is the wrong question for a certificate,
+   * and its answer cannot supply the issuer a certification requires or the venue a
+   * publication does. Storing it half-formed, or as a skill, would be the guess this
+   * exists to stop. New questions of this shape are no longer asked at all —
+   * `isAskableSkill` rejects them at intake — so this only meets rows queued before that
+   * rule existed, and the card keeps its "don't ask again" button for them.
+   */
+  const filed = classifyRecordType({ name: question.topic }).type;
+  if (filed && filed !== 'skill') {
+    throw new Error(
+      `${question.topic} is a${filed === 'award' || filed === 'education' ? 'n' : ''} ${filed}, not a skill — add it under that section of your profile so it prints in the right place.`,
+    );
+  }
+
   const recordId = await createSkill(userId, {
     name: question.topic,
     category: suggestedSkillCategory(question.topic) ?? 'tool',

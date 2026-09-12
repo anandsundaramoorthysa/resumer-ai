@@ -16,6 +16,8 @@ import {
 import {
   answerEnrichmentQuestion,
   dismissEnrichmentQuestion,
+  isEnrichmentMode,
+  setEnrichmentMode,
 } from '@/lib/server/enrichment';
 import type { Result } from './record-actions';
 
@@ -144,5 +146,28 @@ export async function answerQuestion(
 export async function skipQuestion(questionId: string): Promise<void> {
   const userId = await requireUserId();
   await dismissEnrichmentQuestion(userId, questionId);
+  refresh();
+}
+
+/**
+ * How much the user wants to be asked — `all`, `current-job` or `off`.
+ *
+ * The per-question refusal was already permanent (`skipQuestion` writes a tombstone the
+ * unique index makes final); what was missing was a way to refuse the whole queue. A
+ * prompt that cannot be turned off gets scrolled past, and a user who has learned to
+ * scroll past this section also scrolls past the two review queues sharing the page.
+ */
+export async function chooseEnrichmentMode(mode: string): Promise<void> {
+  const userId = await requireUserId();
+  if (!isEnrichmentMode(mode)) return;
+  try {
+    await setEnrichmentMode(userId, mode);
+  } catch (err) {
+    // Before scripts/2026-09-12-enrichment-preference.sql runs, the table does not exist.
+    // A thrown server action inside a transition takes the whole page to the error
+    // boundary; logged and absorbed instead, the radio simply snaps back to `all` on the
+    // refresh, which is the truth. Remove with the migration's other catches.
+    console.error('[enrichment] could not save the question setting', err);
+  }
   refresh();
 }

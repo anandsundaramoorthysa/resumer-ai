@@ -6,7 +6,7 @@ import { profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
 import { FlaggedRecord } from './flagged-record';
 import { ProposedBulkControls, ProposedRecord } from './proposed-record';
-import { EnrichmentQuestion } from './enrichment-question';
+import { EnrichmentControls, EnrichmentQuestion } from './enrichment-question';
 import { loadEnrichmentQueue } from '@/lib/server/enrichment';
 import { BulletEditor, type ExistingBullet } from './bullet-editor';
 import { AddJob, JobHeader } from './role-editor';
@@ -334,17 +334,32 @@ export default async function ProfilePage() {
           * the evidence grader's own words, or a keyword the posting demanded that
           * nothing in the profile evidences.
           */}
-        {queue.shown.length > 0 ? (
+        {/*
+          * Shown when the queue has something, and also when the user has turned it down
+          * — otherwise `off` would hide the only control that undoes `off`.
+          */}
+        {queue.shown.length > 0 || queue.mode !== 'all' ? (
           <section className="mt-7 rounded-xl border border-brand bg-brand-tint/40 p-5">
             <h2 className="font-display text-lg text-brand-dark">
-              {queue.total} question{queue.total === 1 ? '' : 's'} from your last draft
+              {queue.shown.length === 0
+                ? 'Questions from your drafts are turned off'
+                : `${queue.total} question${queue.total === 1 ? '' : 's'} from your last draft`}
             </h2>
             <p className="mt-1.5 max-w-prose text-sm text-muted">
-              Each of these is a fact your resume needed and only you have. Nothing here
-              will guess one for you — that is the whole point — so the draft stopped and
-              wrote down what it was missing instead. Answering one takes a sentence, and
-              what you type is stored word for word as your own record: a sync will never
-              overwrite it, and every later draft can use it.
+              {queue.shown.length === 0 ? (
+                <>
+                  Nothing is being asked. Drafts still record what they could not evidence,
+                  so turning this back on brings the backlog back as it was.
+                </>
+              ) : (
+                <>
+                  Each of these is a fact your resume needed and only you have. Nothing here
+                  will guess one for you — that is the whole point — so the draft stopped and
+                  wrote down what it was missing instead. Answering one takes a sentence, and
+                  what you type is stored word for word as your own record: a sync will never
+                  overwrite it, and every later draft can use it.
+                </>
+              )}
               {queue.total > queue.shown.length
                 ? ` Showing the ${queue.shown.length} with the most effect on your score; the other ${
                     queue.total - queue.shown.length
@@ -367,6 +382,7 @@ export default async function ProfilePage() {
                 />
               ))}
             </ul>
+            <EnrichmentControls mode={queue.mode} />
           </section>
         ) : null}
 

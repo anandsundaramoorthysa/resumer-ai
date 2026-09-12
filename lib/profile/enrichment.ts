@@ -36,6 +36,8 @@ import { hasMeasurableOutcome } from './gaps';
 import { profileVocabulary } from '../quality/skills';
 import { holdsKeyword } from '../quality/vocabulary';
 import { canonicalSkillName, skillAliases } from '../skills/identity';
+import { classifyRecordType } from './record-type';
+import { DEFAULT_CAPS, rankRecords, selectTop } from '../retrieval/rank';
 
 /* ----------------------------------------------------------------- volume -- */
 
@@ -452,7 +454,136 @@ export function buildEnrichmentQuestions(
     });
   }
 
-  return orderQuestions([...byKey.values()]);
+  // Qualified here rather than by the caller, so no producer above can add a question
+  // that could not change a draft however strong its signal looked. `timesAsked` is not
+  // available at intake and is not needed: a question this draft derived for the first
+  // time has by definition not been ignored yet.
+  return qualifyQuestions(orderQuestions([...byKey.values()]), {
+    records,
+    job: signal.job,
+  });
+}
+
+/* ------------------------------------------- whether a question earns its place -- */
+
+/**
+ * How many drafts may re-derive one question before it stops being shown.
+ *
+ * Every draft that hits the same gap refreshes the row rather than duplicating it
+ * (lib/server/enrichment.ts), so the refresh count is exactly "how many times we put this
+ * in front of you and you did neither thing". Three is the point at which the honest
+ * reading stops being "they have not got round to it" and becomes "they are not going to
+ * answer this one" — and a queue whose top item never changes is a queue people stop
+ * looking at, which costs the questions they WOULD have answered.
+ *
+ * Not a tombstone: the row stays open and keeps being counted, so nothing is thrown away
+ * and a record that changes can bring its question back.
+ */
+export const MAX_TIMES_ASKED = 3;
+
+/**
+ * What is needed to judge whether answering a question could change anything.
+ *
+ * `job` is the posting being drafted for — at intake that is the draft that produced the
+ * signal, and on /profile it is the most recent one. Null means no draft has happened, and
+ * the retrieval test is then skipped rather than guessed: a question about a record no
+ * posting has been matched against is not disqualified, it is simply unjudged.
+ */
+export interface QuestionAudience {
+  records: ProfileRecord[];
+  job: JobRequirement | null;
+  /** How many drafts have re-asked this subject. Absent where it is not recorded. */
+  timesAsked?: (subjectKey: string) => number;
+}
+
+/**
+ * The records a resume for this job would actually be built from.
+ *
+ * The same two calls the pipeline makes — `rankRecords` then `selectTop` — so a question
+ * qualifies on exactly the decision the draft makes rather than on a second opinion about
+ * it. This is the test the owner's complaint is really about: a bullet the relevance floor
+ * drops for the posting in hand cannot be improved into a better resume however much scale
+ * the user types into it, so asking spends the only thing this queue has — their
+ * willingness to answer the next one.
+ */
+export function reachableRecordIds(records: ProfileRecord[], job: JobRequirement): Set<string> {
+  const live = records.filter((r) => !r.flaggedForRemoval);
+  const { ranked } = rankRecords(live, job);
+  return new Set(selectTop(ranked, DEFAULT_CAPS).map((r) => r.id));
+}
+
+/**
+ * Whether a keyword is a thing a person can be asked whether they have.
+ *
+ * `scoreSkillsCompleteness` reports everything the posting names and the profile cannot
+ * evidence, which is right for the score and wrong for a question: a real run against a
+ * Technical SEO posting listed "Remote", "India" and "Technical SEO Lead" as genuine gaps.
+ * The role title and employer are already filtered by name in `buildEnrichmentQuestions`;
+ * this is the general form of the same rule, and it catches the ones that are not the
+ * title — a location, a contract type, a seniority word.
+ *
+ * Two ways to pass. The deterministic classifier places it as a skill (./record-type.ts,
+ * which is also what stops "AWS Certified Solutions Architect" being asked as one), or the
+ * posting itself calls it a required skill — the posting asserting it is one, and the only
+ * thing that lets a tool no dictionary has heard of still be asked about.
+ */
+export function isAskableSkill(topic: string, job: JobRequirement | null): boolean {
+  const name = (topic ?? '').trim();
+  if (!name) return false;
+  if (classifyRecordType({ name }).type === 'skill') return true;
+  const key = name.toLowerCase();
+  return Boolean(job?.requiredSkills.some((s) => s.toLowerCase().trim() === key));
+}
+
+/**
+ * Whether answering this could move a score, with the reason when it could not.
+ *
+ * Three tests, each one a decision the pipeline already makes somewhere else:
+ *
+ *   reach      the record survives retrieval for this job (`reachableRecordIds`), or the
+ *              keyword is one the posting states. Nothing else reaches a draft at all.
+ *   read       the missing piece is one a scorer grades. `isGapOpen` is that test and it
+ *              stays the caller's, so all that is added here is the skill-shape rule that
+ *              stops the queue asking whether you "have" a location.
+ *   patience   it has not been re-asked past `MAX_TIMES_ASKED`.
+ *
+ * The reason string is not shown to the user — it is for the probes and the tests, because
+ * "the new code asks four where the old asked nineteen" is only believable alongside which
+ * rule removed each of the fifteen.
+ */
+export function questionQualifies(
+  question: { kind: QuestionKind; recordId: string | null; topic: string; subjectKey: string },
+  audience: QuestionAudience,
+  reachable?: Set<string>,
+): { ok: boolean; why: string } {
+  const asked = audience.timesAsked?.(question.subjectKey) ?? 0;
+  if (asked >= MAX_TIMES_ASKED) {
+    return { ok: false, why: `asked ${asked} times and still open` };
+  }
+
+  if (question.kind === 'skill') {
+    return isAskableSkill(question.topic, audience.job)
+      ? { ok: true, why: 'the posting asks for a skill the profile cannot evidence' }
+      : { ok: false, why: `"${question.topic}" is not a skill anyone can claim to have` };
+  }
+
+  if (!audience.job) return { ok: true, why: 'no posting to judge reach against yet' };
+
+  const reach = reachable ?? reachableRecordIds(audience.records, audience.job);
+  if (!question.recordId || !reach.has(question.recordId)) {
+    return { ok: false, why: 'retrieval would not put this record on a resume for this job' };
+  }
+  return { ok: true, why: 'the record reaches the resume and the scorer grades what is missing' };
+}
+
+/** The questions that qualify. Retrieval is ranked once for the whole list. */
+export function qualifyQuestions<
+  T extends { kind: QuestionKind; recordId: string | null; topic: string; subjectKey: string },
+>(questions: T[], audience: QuestionAudience): T[] {
+  const needsReach = questions.some((q) => q.kind !== 'skill');
+  const reachable =
+    needsReach && audience.job ? reachableRecordIds(audience.records, audience.job) : undefined;
+  return questions.filter((q) => questionQualifies(q, audience, reachable).ok);
 }
 
 /**
