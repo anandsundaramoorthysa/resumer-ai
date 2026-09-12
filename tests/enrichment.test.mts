@@ -31,6 +31,7 @@ import {
   rationedSlice,
   QUESTIONS_SHOWN,
   isAskableSkill,
+  isDeclinedAnswer,
   MAX_TIMES_ASKED,
   qualifyQuestions,
   questionQualifies,
@@ -784,5 +785,47 @@ suite('enrichment — reading the signal', () => {
       [CURRENT],
     );
     assert.equal(qs.length, 0);
+  });
+});
+
+suite('a typed "no" is a decline, not a fact', () => {
+  test("the owner's refusal of R — the regression", () => {
+    // Stored as a skill with this sentence as evidence, so R printed under Skills.
+    assert.equal(isDeclinedAnswer("No I don't have any knowledge in that."), true);
+  });
+
+  test('the common refusals, in any casing', () => {
+    for (const s of [
+      'no', 'No.', 'NO', 'nope', 'Nah', 'none', 'N/A', 'n/a', 'NA', 'skip', 'Skip!', 'pass',
+      "I don't know", 'i dont know', 'I DO NOT KNOW', 'idk', 'not really', 'Not really, no',
+      'never used it', 'Never used it.', "I haven't used it", 'I have never used R',
+      "I've never touched it", 'no experience with it', 'No idea', "don't know",
+      'not sure', "I'm not familiar with it", 'Sorry, no', '-', '?', '…',
+      'No, I have not', 'no thanks', 'not applicable', 'I didn’t measure it',
+    ]) {
+      assert.equal(isDeclinedAnswer(s), true, s);
+    }
+  });
+
+  test('real answers that happen to start with a negative word are kept', () => {
+    for (const s of [
+      'no downtime across 40 deploys',
+      'Never missed an SLA in two years',
+      'None of the 40 releases rolled back after it',
+      'Nothing like it existed before; 200 people use it',
+      'No, but I used it in a class project',
+      'Not sure of the exact figure but around 200 users',
+      'Notebook analysis in R for my thesis',
+      'Node.js service at Acme',
+      'Nagios alerting for the on-call rota',
+      'I built the R dashboards at Acme',
+    ]) {
+      assert.equal(isDeclinedAnswer(s), false, s);
+    }
+  });
+
+  test('nothing typed is not a refusal — the caller still asks for an answer', () => {
+    assert.equal(isDeclinedAnswer(''), false);
+    assert.equal(isDeclinedAnswer('   '), false);
   });
 });

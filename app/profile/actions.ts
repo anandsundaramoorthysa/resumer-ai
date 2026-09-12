@@ -132,9 +132,15 @@ export async function answerQuestion(
 ): Promise<Result> {
   const userId = await requireUserId();
   try {
-    await answerEnrichmentQuestion(userId, questionId, answer);
+    const outcome = await answerEnrichmentQuestion(userId, questionId, answer);
     refresh();
-    return { ok: true, message: 'Saved to your profile.' };
+    return {
+      ok: true,
+      message:
+        outcome === 'declined'
+          ? 'Noted — nothing was added, and this will not be asked again.'
+          : 'Saved to your profile.',
+    };
   } catch (err) {
     return {
       ok: false,

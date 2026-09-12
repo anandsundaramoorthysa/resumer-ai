@@ -535,6 +535,45 @@ export function isAskableSkill(topic: string, job: JobRequirement | null): boole
   return Boolean(job?.requiredSkills.some((s) => s.toLowerCase().trim() === key));
 }
 
+/* --------------------------------------------------- an answer that says no -- */
+
+/**
+ * Whether a typed answer is the user declining the question rather than answering it.
+ *
+ * The answer box stored whatever was typed as the fact. The owner answered a skill
+ * question about "R" with "No I don't have any knowledge in that." and R became a skill
+ * with that sentence as its evidence — so the next resume listed R under Skills, the exact
+ * opposite of what they had said. A "no" typed into the box has to mean what the "I
+ * haven't used it" button means.
+ *
+ * Deliberately narrow, because a false positive silently drops a real fact: every rule
+ * is anchored at the START of the answer, and a bare leading "no" or "never" only counts
+ * when what follows is about the person ("no I…", "never used…"). That keeps "no downtime
+ * across 40 deploys" and "never missed an SLA" — both real outcomes — as answers. A
+ * "but"/"except" anywhere means there is substance after the no, so it is kept too.
+ */
+export function isDeclinedAnswer(raw: string): boolean {
+  if (!raw?.trim()) return false; // Nothing typed is not a refusal — the caller asks again.
+  const text = raw
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[^a-z0-9' ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return true; // "-", "?", "…": typed, and says nothing.
+  if (/\b(?:but|however|although|though|except)\b/.test(text)) return false;
+  return DECLINES.some((rule) => rule.test(text));
+}
+
+const DECLINES = [
+  /^(?:no|nope|nah|none|nothing|nil|never|na|n a|skip|pass|idk|dunno|unsure|not yet|not me|no thanks|not applicable)$/,
+  /^(?:nope|nah|sorry|not really|not at all|not sure|no idea|no clue|no experience|no knowledge|no exposure|idk|dunno)\b/,
+  /^no (?:i|im|i'm|ive|i've|not|never|thanks)\b/,
+  /^never (?:used|worked|touched|tried|done|had|heard|learned|learnt|needed)\b/,
+  /^(?:i|ive|i've|im|i'm) (?:do not|don't|dont|did not|didn't|didnt|have not|haven't|havent|have never|had never|never|am not|not|can't|cant|cannot|can not)\b/,
+  /^(?:don't|dont|do not|haven't|havent|have not|didn't|didnt) (?:know|have|use|used|remember)\b/,
+];
+
 /**
  * Whether answering this could move a score, with the reason when it could not.
  *

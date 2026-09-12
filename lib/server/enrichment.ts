@@ -45,6 +45,7 @@ import type { JobRequirement, ProfileRecord, RoleRecord } from '@/lib/types';
 import { audit } from '@/lib/server/profile';
 import {
   buildEnrichmentQuestions,
+  isDeclinedAnswer,
   isGapOpen,
   missingBulletParts,
   qualifyQuestions,
@@ -393,15 +394,28 @@ export async function answerEnrichmentQuestion(
   userId: string,
   questionId: string,
   answer: EnrichmentAnswer,
-): Promise<void> {
+): Promise<'saved' | 'declined'> {
   const question = await loadQuestion(userId, questionId);
   if (!question || question.state !== 'open') {
     throw new Error('That question has already been dealt with.');
   }
 
-  const scale = (answer.scale ?? '').trim();
-  const outcome = (answer.outcome ?? '').trim();
-  const text = (answer.text ?? '').trim();
+  // A field that says "no" is not a fact (`isDeclinedAnswer`): it is dropped before
+  // anything is written, so "n/a" never lands in a bullet's scale and "No I don't know
+  // it" never becomes a skill's evidence.
+  const typed = [answer.scale, answer.outcome, answer.text].map((s) => (s ?? '').trim());
+  const [scale, outcome, text] = typed.map((s) => (isDeclinedAnswer(s) ? '' : s));
+
+  if (typed.some(Boolean) && !scale && !outcome && !text) {
+    // Everything typed was a refusal. Closed as answered with no record, which the
+    // unique index makes as final as the skip button: the question is not asked again.
+    await settle(userId, questionId, 'answered', typed.filter(Boolean).join(' · '), null);
+    await audit(userId, question.recordId, 'update', 'manual', {
+      enrichmentQuestion: question.subjectKey,
+      declinedByUser: true,
+    });
+    return 'declined';
+  }
 
   if (question.kind === 'bullet') {
     if (!scale && !outcome) throw new Error('Write at least one of the two.');
@@ -433,7 +447,7 @@ export async function answerEnrichmentQuestion(
       [scale, outcome].filter(Boolean).join(' · '),
       question.recordId,
     );
-    return;
+    return 'saved';
   }
 
   if (question.kind === 'project') {
@@ -456,7 +470,7 @@ export async function answerEnrichmentQuestion(
     // is what lib/generate/assemble.ts prints under it.
     await setProjectMetrics(userId, question.recordId!, [...metrics, text]);
     await settle(userId, questionId, 'answered', text, question.recordId);
-    return;
+    return 'saved';
   }
 
   // A skill gap. The answer is an attestation, so it is required: a keyword the profile
@@ -498,6 +512,7 @@ export async function answerEnrichmentQuestion(
     evidence: text,
   });
   await settle(userId, questionId, 'answered', text, recordId);
+  return 'saved';
 }
 
 /** Skipping. A tombstone, so a later draft that finds the same gap does not re-ask. */
