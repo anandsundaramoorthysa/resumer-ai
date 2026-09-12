@@ -77,6 +77,16 @@ const structuredData = {
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
 };
 
+/**
+ * The chosen theme, applied before the first pixel.
+ *
+ * Read from the cookie here rather than passed down from a server component: reading it on
+ * the server would make every page dynamic for a preference, and applying it in a React
+ * effect would paint the system theme first and flip after hydration. Nothing else writes
+ * this attribute, so React never has to agree with it.
+ */
+const APPLY_THEME = `(function(){try{var m=document.cookie.match(/(?:^|; )theme=(light|dark)/);if(m)document.documentElement.setAttribute('data-theme',m[1])}catch(e){}})()`;
+
 const STRIP_HOST_INJECTIONS = `(function(){var h=document.head;if(!h)return;[].slice.call(h.childNodes).forEach(function(n){if((n.nodeType===3&&!n.textContent.trim())||(n.nodeType===8&&/Netlify/.test(n.textContent))||(n.nodeType===1&&n.matches('meta[name="hosting-provider"],meta[name="netlify-deploy"],script[src^="/.netlify/scripts/"]')))h.removeChild(n)})})()`;
 
 export default function RootLayout({
@@ -92,6 +102,7 @@ export default function RootLayout({
           re-renders the whole page on the client. This runs during parsing, before React
           hydrates, and removes exactly what was injected.
         */}
+        <script dangerouslySetInnerHTML={{ __html: APPLY_THEME }} />
         <script dangerouslySetInnerHTML={{ __html: STRIP_HOST_INJECTIONS }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

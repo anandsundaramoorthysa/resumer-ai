@@ -29,6 +29,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { ThemeToggle } from './theme-toggle';
+import type { ThemeChoice } from './theme-state';
 import type { NavLink } from './nav-links';
 
 export function MobileNav({
@@ -36,6 +38,7 @@ export function MobileNav({
   current,
   userName,
   signOut,
+  theme,
 }: {
   links: NavLink[];
   current?: string;
@@ -43,6 +46,8 @@ export function MobileNav({
   userName?: string | null;
   /** The server action, passed down so the menu can render its own sign-out form. */
   signOut: () => Promise<void>;
+  /** The stored theme choice — the phone gets the same control the sidebar has. */
+  theme: ThemeChoice;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -142,6 +147,10 @@ export function MobileNav({
               })}
             </ul>
           </nav>
+
+          <div className="mt-1 border-t border-line pt-2">
+            <ThemeToggle choice={theme} className="px-3 pb-1" />
+          </div>
 
           <div className="mt-1 border-t border-line pt-1">
             {userName ? (
