@@ -6,6 +6,7 @@ import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { profileRecords } from '@/lib/db/schema';
 import { audit } from '@/lib/server/profile';
+import { deleteRecord } from '@/lib/profile/records';
 import {
   approveProposedRecords,
   approveProposedRoles,
@@ -51,13 +52,17 @@ export async function keepRecord(recordId: string): Promise<void> {
   revalidatePath('/');
 }
 
-/** Confirms a removal. Only ever reached by explicit user action, never by a sync. */
+/**
+ * Confirms a removal. Only ever reached by explicit user action, never by a sync.
+ *
+ * Goes through `deleteRecord` rather than its own DELETE so it leaves the same mark every
+ * other removal does. It did not, and this is the path where that mattered most: the
+ * record was flagged BECAUSE the portfolio had changed, and the next parse that saw it
+ * again proposed it back to a user who had just confirmed dropping it.
+ */
 export async function removeRecord(recordId: string): Promise<void> {
   const userId = await requireUserId();
-  await db
-    .delete(profileRecords)
-    .where(and(eq(profileRecords.id, recordId), eq(profileRecords.userId, userId)));
-  await audit(userId, recordId, 'delete', 'manual', { confirmedByUser: true });
+  await deleteRecord(userId, recordId);
   revalidatePath('/profile');
   revalidatePath('/settings/portfolio');
   revalidatePath('/');

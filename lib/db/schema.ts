@@ -637,3 +637,42 @@ export const skillCategoryCache = pgTable('skill_category', {
   source: text('source').notNull().default('ai'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+/**
+ * What the user removed, so nothing puts it back.
+ *
+ * A denied proposal leaves a rejected `profile_record` row, which is what stops the next
+ * sync re-proposing it. A REMOVED record left nothing at all: the row was gone, the
+ * portfolio still said it, and the parser proposed it again on the next run — the user
+ * being asked to approve a fact they had already thrown away, every sync, forever. Same
+ * for a re-imported resume and for LinkedIn.
+ *
+ * This is the mark a removal leaves. The rule for what it blocks is in
+ * lib/profile/dismissals.ts; the operations are in lib/server/dismissals.ts.
+ */
+export const dismissedRecords = pgTable(
+  'dismissed_record',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** record | role — a job is removed the same way and must not come back either. */
+    kind: text('kind').notNull(),
+    type: text('type').notNull(),
+    contentHash: text('content_hash').notNull(),
+    /** Null where the type has no looser identity; the fingerprint alone blocks then. */
+    identityKey: text('identity_key'),
+    label: text('label').notNull().default(''),
+    /** The whole row, its id included, so bringing it back restores it rather than a copy. */
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull().default({}),
+    source: text('source').notNull().default('manual'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('dismissed_record_hash_idx').on(t.userId, t.contentHash),
+    index('dismissed_record_identity_idx').on(t.userId, t.identityKey),
+  ],
+);

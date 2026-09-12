@@ -64,6 +64,7 @@ import { honorTitleKey } from '../profile/honors';
 import { educationIdentity } from './education';
 import { createHash } from 'node:crypto';
 import type { ProfileRecord, RecordSource } from '../types';
+import { dismissalFilter, type Dismissal } from '../profile/dismissals';
 
 /**
  * Between the parts, so a boundary cannot move.
@@ -153,6 +154,11 @@ export interface ReconcilePlan {
 export function reconcile(
   existing: ProfileRecord[],
   parsed: ParsedRecord[],
+  /**
+   * What the user has removed (lib/profile/dismissals.ts). Defaulted so every existing
+   * caller and test keeps its meaning: no marks, nothing blocked.
+   */
+  dismissed: Dismissal[] = [],
 ): ReconcilePlan {
   const plan: ReconcilePlan = {
     toInsert: [],
@@ -171,7 +177,7 @@ export function reconcile(
   // an attacker re-wording a rejected claim would otherwise arrive as a fresh proposal.
   const rejected = synced.filter((r) => r.reviewState === 'rejected');
   const refusedHashes = new Set(rejected.map((r) => r.contentHash));
-  const refusedIdentities = new Set(rejected.map(identityKey));
+  const refusedIdentities = new Set(rejected.map(identityKeyOf));
 
   // Approved and pending rows are both "already known": one is in the profile, the
   // other is already sitting in the review queue. Neither should be proposed twice.
@@ -184,9 +190,20 @@ export function reconcile(
   // Manual records are invisible to this whole process by construction — they are
   // never read into any of the maps above, so nothing here can act on them.
 
+  const wasRemoved = dismissalFilter(dismissed);
+
   for (const p of parsed) {
     const asRecord = p as unknown as ProfileRecord;
-    if (refusedHashes.has(p.contentHash) || refusedIdentities.has(identityKey(asRecord))) {
+    if (refusedHashes.has(p.contentHash) || refusedIdentities.has(identityKeyOf(asRecord))) {
+      plan.refused += 1;
+      continue;
+    }
+
+    // Removed by hand, at any time, from any source. Unlike a denial — which only a
+    // proposal can carry — this covers a record the user approved months ago and has
+    // since deleted, and it is counted as refused for the same reason: it is an answer
+    // already given, not a claim being seen for the first time.
+    if (wasRemoved({ contentHash: p.contentHash, identityKey: identityKeyOf(asRecord) })) {
       plan.refused += 1;
       continue;
     }
@@ -204,7 +221,7 @@ export function reconcile(
     // Same logical item, changed content? Match on a stable identity key. An update
     // never changes a row's review state: a re-worded approved record stays approved,
     // and a re-worded proposal stays a proposal, so the queue shows the current text.
-    const identityMatch = known.find((e) => identityKey(e) === identityKey(asRecord));
+    const identityMatch = known.find((e) => identityKeyOf(e) === identityKeyOf(asRecord));
     if (identityMatch) {
       plan.toUpdate.push({ id: identityMatch.id, parsed: p });
     } else {
@@ -221,7 +238,7 @@ export function reconcile(
   for (const e of approved) {
     if (parsedHashes.has(e.contentHash)) continue;
     const stillPresentByIdentity = parsed.some(
-      (p) => identityKey(p as unknown as ProfileRecord) === identityKey(e),
+      (p) => identityKeyOf(p as unknown as ProfileRecord) === identityKeyOf(e),
     );
     if (stillPresentByIdentity) continue;
     if (e.flaggedForRemoval) continue;
@@ -245,7 +262,7 @@ export function reconcile(
  * normalises the credential to its level and the institution to its leading words, so
  * one degree is one record however it happens to be written.
  */
-function identityKey(r: ProfileRecord): string {
+export function identityKeyOf(r: ProfileRecord): string {
   switch (r.type) {
     case 'skill':
       return `skill:${r.name.toLowerCase().trim()}`;

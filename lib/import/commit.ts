@@ -24,6 +24,8 @@ import { isRoleDate, roleDateProblem, roleIdentity } from '@/lib/sync/roles';
 import type { RecordSource } from '@/lib/types';
 import { tidyDate, tidyRecordData, tidyText } from '@/lib/steward/tidy';
 import { fillContactGaps, type ContactFields } from './contact-links';
+import { dismissalFilter } from '@/lib/profile/dismissals';
+import { dismissalKeysFor, loadDismissals } from '@/lib/server/dismissals';
 
 const Tags = z.array(z.string().max(64)).max(50).default([]);
 
@@ -211,7 +213,12 @@ export async function commitImport(
   // statements for a 60-record resume at a quarter of a second each, past the 30-second
   // function limit, leaving some rows written and no summary. The sync measured the same
   // shape at 34s for 150 records before it was batched (lib/server/profile.ts).
-  const { roles, undated } = datedRoles(
+  // What the user has removed is not imported back, from a re-uploaded resume, a LinkedIn
+  // export or a pasted sentence — the same rule the portfolio sync follows
+  // (lib/profile/dismissals.ts). Loaded once: a resume can carry a hundred rows.
+  const wasRemoved = dismissalFilter(await loadDismissals(userId));
+
+  const { roles: allRoles, undated } = datedRoles(
     payload.roles.map((raw) => ({
       ...raw,
       title: tidyText(raw.title),
@@ -224,6 +231,17 @@ export async function commitImport(
         outcome: b.outcome && tidyText(b.outcome),
       })),
     })),
+  );
+
+  // A removed job takes its accomplishments with it: they are that job's claims in
+  // another form, so importing them under a job the user deleted would restore it by
+  // halves.
+  const roles = allRoles.filter(
+    (role) =>
+      !wasRemoved({
+        contentHash: hashContent(['role', role.company, role.title, role.startDate]),
+        identityKey: `role:${roleIdentity(role.company, role.title)}`,
+      }),
   );
 
   // --- Roles first: a bullet's roleId must be a real row id, or the assembler has
@@ -305,7 +323,10 @@ export async function commitImport(
     });
   }
 
-  const created = await insertRecords(userId, rows, source);
+  // Every row, bullets included, checked against the marks before anything is written.
+  const wanted = rows.filter((r) => !wasRemoved(dismissalKeysFor(r.type, r.data, r.contentHash)));
+
+  const created = await insertRecords(userId, wanted, source);
   const contactUpdated = await writeContact(userId, payload.contact ?? null, source);
   const duplicates = rows.length - created;
   const rolesCreated = fresh.length;

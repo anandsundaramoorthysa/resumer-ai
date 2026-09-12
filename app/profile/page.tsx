@@ -13,6 +13,8 @@ import { AddJob, JobHeader } from './role-editor';
 import { EmployerPanel } from './employer-panel';
 import { RecordEditor, type EditableRecord } from './record-editor';
 import { ProfileAssistant } from './profile-assistant';
+import { RemovedItems } from './removed-items';
+import { listDismissed } from '@/lib/server/dismissals';
 import { RECORD_FORMS, describeRecord, formFor } from '@/lib/profile/forms';
 import { findProfileGaps } from '@/lib/profile/gaps';
 import { orderRecords } from '@/lib/profile/ordering';
@@ -84,6 +86,7 @@ export default async function ProfilePage() {
   const proposedRoles = allRoles.filter((r) => r.reviewState === 'pending');
   const reviewCount = proposed.length + proposedRoles.length;
 
+  const removed = await listDismissed(userId);
   const flagged = decided.filter((r) => r.flaggedForRemoval);
   const active = decided.filter((r) => !r.flaggedForRemoval);
 
@@ -538,6 +541,21 @@ export default async function ProfilePage() {
               </section>
             );
           })()}
+
+          <RemovedItems
+            items={removed.map((r) => ({
+              id: r.id,
+              kind: r.kind,
+              type: r.type,
+              label: r.label,
+              source: r.source,
+              removedAt: r.createdAt.toLocaleDateString('en-GB', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              }),
+            }))}
+          />
 
           {/* Anything synced whose type predates the registry still has to be visible,
               even though there is no form for it yet. */}

@@ -6,6 +6,13 @@ import { profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { bulletHash, hashContent } from '@/lib/sync/reconcile';
 import { deriveTags } from '@/lib/sync/tags';
 import { audit } from '@/lib/server/profile';
+import {
+  dismissalKeysFor,
+  dismissBulletRows,
+  dismissRecordRow,
+  dismissRoleRow,
+  forgetDismissalFor,
+} from '@/lib/server/dismissals';
 import { composeBulletText } from './bullet';
 import { tidyDate, tidyRecordData, tidyText } from '../steward/tidy';
 import { roleDateProblem, roleIdentity } from '@/lib/sync/roles';
@@ -123,6 +130,10 @@ async function insertRecord(args: {
       })
       .returning({ id: profileRecords.id });
 
+    // Typed back in after being removed: the block was the earlier answer, and this is
+    // the later one. Left in place, the Removed list would keep offering to restore
+    // something already on the profile.
+    await forgetDismissalFor(args.userId, dismissalKeysFor(args.type, args.data, contentHash));
     await audit(args.userId, row.id, 'create', 'manual', { type: args.type });
     return row.id;
   } catch (err) {
@@ -262,14 +273,14 @@ async function assertNewJob(userId: string, role: { company: string; title: stri
 export async function createRole(userId: string, input: z.infer<typeof RoleInput>): Promise<string> {
   const role = prepareRole(input);
   await assertNewJob(userId, role);
+  const contentHash = hashContent(['role', role.company, role.title, role.startDate]);
+  await forgetDismissalFor(userId, {
+    contentHash,
+    identityKey: `role:${roleIdentity(role.company, role.title)}`,
+  });
   const [row] = await db
     .insert(rolesTable)
-    .values({
-      userId,
-      ...role,
-      source: 'manual',
-      contentHash: hashContent(['role', role.company, role.title, role.startDate]),
-    })
+    .values({ userId, ...role, source: 'manual', contentHash })
     .returning({ id: rolesTable.id });
   await audit(userId, null, 'create', 'manual', { type: 'role', roleId: row.id });
   return row.id;
@@ -304,6 +315,8 @@ export async function updateRole(userId: string, roleId: string, input: z.infer<
 export async function deleteRole(userId: string, roleId: string, moveTo?: string | null): Promise<void> {
   if (moveTo === roleId) throw new Error('Choose a different job to move them to.');
   const target = moveTo ? await assertOwnsRole(userId, moveTo) : null;
+  let removedRole: typeof rolesTable.$inferSelect | null = null;
+  let removedBullets: Array<typeof profileRecords.$inferSelect> = [];
 
   await db.transaction(async (tx) => {
     const bulletsOf = and(
@@ -334,24 +347,44 @@ export async function deleteRole(userId: string, roleId: string, moveTo?: string
         }
       }
     } else {
+      // Kept before the delete so each line can be remembered: a job removed with its
+      // accomplishments must not come back as a job with its accomplishments.
+      removedBullets = await tx.select().from(profileRecords).where(bulletsOf);
       await tx.delete(profileRecords).where(bulletsOf);
     }
     const deleted = await tx
       .delete(rolesTable)
       .where(and(eq(rolesTable.id, roleId), eq(rolesTable.userId, userId)))
-      .returning({ id: rolesTable.id });
+      .returning();
     if (deleted.length === 0) throw new Error('That job no longer exists.');
+    removedRole = deleted[0];
   });
+
+  // After the transaction: a mark is a record of a decision, not part of the delete, and
+  // failing to write one must never roll back the removal the user asked for.
+  if (removedRole) await dismissRoleRow(userId, removedRole);
+  await dismissBulletRows(userId, removedBullets);
   await audit(userId, null, 'delete', 'manual', { type: 'role', roleId, movedTo: moveTo ?? null });
 }
 
-export async function deleteRecord(userId: string, recordId: string): Promise<void> {
+export async function deleteRecord(
+  userId: string,
+  recordId: string,
+  /**
+   * Whether to remember the removal, so no sync or import proposes it again
+   * (lib/server/dismissals.ts). False for the one caller that deletes a row as part of
+   * REPLACING it — `createSummary` — where remembering would block the replacement's own
+   * successor. Every other delete is a person saying "I do not want this".
+   */
+  options: { remember?: boolean } = {},
+): Promise<void> {
   const deleted = await db
     .delete(profileRecords)
     .where(and(eq(profileRecords.id, recordId), eq(profileRecords.userId, userId)))
-    .returning({ id: profileRecords.id, type: profileRecords.type });
+    .returning();
 
   if (deleted.length === 0) throw new Error('That entry no longer exists.');
+  if (options.remember !== false) await dismissRecordRow(userId, deleted[0]);
   await audit(userId, recordId, 'delete', 'manual', { type: deleted[0].type });
 }
 
@@ -430,7 +463,9 @@ export async function createSummary(userId: string, text: string): Promise<strin
     .select({ id: profileRecords.id })
     .from(profileRecords)
     .where(and(eq(profileRecords.userId, userId), eq(profileRecords.type, 'summary')));
-  for (const row of existing) await deleteRecord(userId, row.id);
+  // Replacing, not removing: `remember: false`, or the summary just written would be
+  // blocked the next time the portfolio proposes one.
+  for (const row of existing) await deleteRecord(userId, row.id, { remember: false });
 
   return insertRecord({
     userId,

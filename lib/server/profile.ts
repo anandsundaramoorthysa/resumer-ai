@@ -37,6 +37,7 @@ import { educationIdentity } from '@/lib/sync/education';
 import type { ParseResult } from '@/lib/sync/parse';
 import type { ParsedRecord } from '@/lib/sync/reconcile';
 import { hashContent, reconcile, summarizePlan } from '@/lib/sync/reconcile';
+import { loadDismissals } from '@/lib/server/dismissals';
 import { getRepoAccess } from '@/lib/server/repo-access';
 
 export interface LoadedProfile {
@@ -196,7 +197,8 @@ export async function applyParsedProfile(
     await db.select().from(profileRecords).where(eq(profileRecords.userId, userId))
   ).map(rowToRecord);
 
-  const plan = reconcile(existing, records);
+  // What the user has thrown away is not proposed again, whoever proposed it first.
+  const plan = reconcile(existing, records, await loadDismissals(userId));
 
   // Everything below is batched deliberately. One statement per record measured at
   // 34s for a 150-record portfolio — three times the whole step budget — and almost
