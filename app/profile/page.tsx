@@ -341,15 +341,27 @@ export default async function ProfilePage() {
         {queue.shown.length > 0 || queue.mode !== 'all' ? (
           <section className="mt-7 rounded-xl border border-brand bg-brand-tint/40 p-5">
             <h2 className="font-display text-lg text-brand-dark">
-              {queue.shown.length === 0
+              {/*
+                * Worded by mode, not by emptiness: `current-job` with nothing to ask used
+                * to say the questions were "turned off", which the radio right below
+                * contradicted.
+                */}
+              {queue.mode === 'off'
                 ? 'Questions from your drafts are turned off'
-                : `${queue.total} question${queue.total === 1 ? '' : 's'} from your last draft`}
+                : queue.shown.length === 0
+                  ? 'Nothing to ask about the job you are drafting for'
+                  : `${queue.total} question${queue.total === 1 ? '' : 's'} from your last draft`}
             </h2>
             <p className="mt-1.5 max-w-prose text-sm text-muted">
-              {queue.shown.length === 0 ? (
+              {queue.mode === 'off' ? (
                 <>
                   Nothing is being asked. Drafts still record what they could not evidence,
                   so turning this back on brings the backlog back as it was.
+                </>
+              ) : queue.shown.length === 0 ? (
+                <>
+                  Your last draft found nothing only you could answer. Questions from earlier
+                  drafts are kept; choose &ldquo;Ask me anything&rdquo; to see them.
                 </>
               ) : (
                 <>
