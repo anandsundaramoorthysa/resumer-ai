@@ -38,6 +38,7 @@ import { profileFor } from '../retrieval/categories';
 import { generateStructured } from '../ai/chain';
 import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { acceptRewriteOrFallback } from './grounding';
+import { honorTitleKey } from '../profile/honors';
 import { draftSummary } from './summary';
 
 /**
@@ -401,8 +402,25 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     job,
     3,
   );
-  // Printed in every resume under "Campus and Community Activities".
-  const achievements = all.filter((r) => r.type === 'achievement');
+  const awards = records.filter((r): r is AwardRecord => r.type === 'award');
+  /*
+   * Printed in every resume under "Campus and Community Activities" — minus anything the
+   * Awards section above is already printing.
+   *
+   * This is the bug the owner reported: one fact stored as both an award and an
+   * achievement (a hackathon rank typed once and synced once) produced the same sentence
+   * twice, a few lines apart, because these two sections are built from separate filters
+   * that never looked at each other. The writers and the unique index now stop new pairs
+   * and the steward proposes merging old ones, but a profile that already holds a pair
+   * must not print it twice while the user gets round to the suggestion. Awards wins the
+   * tie: it is the more specific claim and prints the issuer.
+   */
+  const awardKeys = new Set(awards.map((a) => honorTitleKey(a.title)));
+  const achievements = all.filter(
+    (r) =>
+      r.type === 'achievement' &&
+      !awardKeys.has(honorTitleKey((r as Extract<ProfileRecord, { type: 'achievement' }>).title)),
+  );
   const summaries = records.filter((r): r is SummaryRecord => r.type === 'summary');
   // Papers only when they bear on this job; blog posts, the three most relevant.
   const papers = all.filter(
@@ -413,7 +431,6 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     job,
     3,
   );
-  const awards = records.filter((r): r is AwardRecord => r.type === 'award');
   const volunteering = all.filter((r): r is VolunteeringRecord => r.type === 'volunteering');
   const languages = all.filter((r): r is LanguageRecord => r.type === 'language');
   const interests = records.filter((r): r is InterestRecord => r.type === 'interest');

@@ -60,6 +60,7 @@
  */
 
 import { certificationIdentity } from './certifications';
+import { honorTitleKey } from '../profile/honors';
 import { educationIdentity } from './education';
 import { createHash } from 'node:crypto';
 import type { ProfileRecord, RecordSource } from '../types';
@@ -262,10 +263,15 @@ function identityKey(r: ProfileRecord): string {
       // update one over the other; and it did not normalise, so the two spellings of
       // the Udacity nanodegree stayed two.
       return `cert:${certificationIdentity(r.name, r.issuer ?? '')}`;
+    // One key for both honour types, on purpose. Keyed separately, the same hackathon
+    // rank parsed as an award on one sync and an achievement on the next was two records
+    // that both survived — and both printed, because lib/generate/assemble.ts builds the
+    // Awards and Achievements sections from separate filters. The normalisation is
+    // lib/profile/honors.ts, the same one the forms' content hash and the steward's
+    // cross-type rule use, so all three agree on when two honours are one.
     case 'achievement':
-      return `achievement:${r.title.toLowerCase().trim()}`;
     case 'award':
-      return `award:${r.title.toLowerCase().trim()}`;
+      return `honor:${honorTitleKey(r.title)}`;
     case 'publication':
       return `publication:${r.title.toLowerCase().trim()}`;
     case 'writing':

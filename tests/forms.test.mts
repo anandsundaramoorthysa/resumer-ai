@@ -163,11 +163,22 @@ suite('hash consistency with the sync', () => {
   });
 
   test('a type with no override still hashes from its identity fields', () => {
-    // `award` has neither a hashPrefix nor a hashParts override, so it exercises the
-    // default path that every other type still takes.
-    const form = formFor('award')!;
-    const parts = hashInput(form, { title: 'Hackathon winner', issuer: 'Some Org' });
-    assert(parts.join('|') === 'award|Hackathon winner', `got ${parts.join('|')}`);
+    // `publication` has neither a hashPrefix nor a hashParts override, so it exercises
+    // the default path that most types still take.
+    const form = formFor('publication')!;
+    const parts = hashInput(form, { title: 'A Survey of Things', venue: 'NeurIPS' });
+    assert(parts.join('|') === 'publication|A Survey of Things', `got ${parts.join('|')}`);
+  });
+
+  test('an award and the same fact as an achievement hash identically', () => {
+    // Not a detail of the hash: `(userId, contentHash)` is unique, so one shared recipe
+    // is what makes the database itself refuse the second copy of one honour.
+    const award = hashInput(formFor('award')!, { title: 'Hackathon Winner', issuer: 'Some Org' });
+    const achievement = hashInput(formFor('achievement')!, { title: 'hackathon  winner!' });
+    assert(
+      award.join('|') === achievement.join('|'),
+      `one honour, one hash — got ${award.join('|')} vs ${achievement.join('|')}`,
+    );
   });
 });
 

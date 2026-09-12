@@ -7,6 +7,7 @@
  * when the code can show its working.
  */
 
+import { classifyHonor, honorTitleKey } from '../profile/honors';
 import { describeRecord, formFor } from '../profile/forms';
 import { canonicalSkillName, skillIdentity } from '../skills/identity';
 import { ACRONYMS, SKILL_CATEGORY_LABELS, classifySkill } from '../skills/categories';
@@ -219,6 +220,74 @@ function skillCategories(skills: StewardRecord[]): Draft[] {
   return out;
 }
 
+/* ---------------------------------------------------- awards vs achievements -- */
+
+/**
+ * The same honour stored as both an award and an achievement.
+ *
+ * Nothing caught this before, because nothing could: the content hash includes the type,
+ * so one fact filed under both types is two rows with two different hashes and the unique
+ * index sees no conflict. What the user sees is the sentence printed twice on the resume,
+ * once under Awards and once under Achievements — which is the complaint this rule was
+ * written for.
+ *
+ * Built like `duplicateSkills` above: a normalised key, then one group per key. The key is
+ * ../profile/honors.ts `honorTitleKey`, which is also what the assembler now de-duplicates
+ * on, so what this proposes to merge is exactly what the resume currently prints twice.
+ *
+ * Which one is kept is not a preference. `classifyHonor` reads the wording the same way
+ * the forms teach it: a prize, a rank or a named issuer makes it an award, and anything
+ * else is the person's own doing. The group's issuer is taken from whichever row has one,
+ * because a row naming who conferred the honour is evidence about the fact, not the row.
+ */
+function crossTypeHonors(records: StewardRecord[]): Draft[] {
+  const groups = new Map<string, StewardRecord[]>();
+  for (const r of records) {
+    if (r.type !== 'award' && r.type !== 'achievement') continue;
+    const key = honorTitleKey(String(r.data.title ?? ''));
+    if (!key) continue;
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+
+  const out: Draft[] = [];
+  for (const group of groups.values()) {
+    // Only across the two types. One type listing the same title twice is already a
+    // duplicate the unique index refuses, so a group of one type is nothing new.
+    const types = new Set(group.map((r) => r.type));
+    if (group.length < 2 || types.size < 2) continue;
+
+    const want = classifyHonor({
+      title: String(group[0].data.title ?? ''),
+      issuer: group.map((r) => String(r.data.issuer ?? '')).find((i) => i.trim()) ?? '',
+    });
+    // An approved row beats a pending one and a typed row beats a parsed one, exactly as
+    // in `duplicateSkills` — but only among rows of the right type, which decides first.
+    const score = (r: StewardRecord) =>
+      (r.type === want ? 100 : 0) +
+      (r.reviewState === 'approved' ? 2 : 0) +
+      (r.source === 'manual' ? 1 : 0);
+    const [keep, ...rest] = [...group].sort((a, b) => score(b) - score(a));
+
+    out.push({
+      kind: 'merge',
+      section: 'other',
+      recordId: keep.id,
+      recordType: keep.type,
+      label: labelOf(keep),
+      title: want === 'award' ? 'Keep this as an award only' : 'Keep this as an achievement only',
+      reason:
+        want === 'award'
+          ? 'The same thing is stored as an award and as an achievement, so it prints twice. The wording names a prize, a rank or who conferred it, which makes it an award.'
+          : 'The same thing is stored as an award and as an achievement, so it prints twice. Nobody conferred this one — it is something you did, which makes it an achievement.',
+      origin: 'rule',
+      quick: false,
+      removeIds: rest.map((r) => r.id),
+      basis: Object.fromEntries(group.map((r) => [r.id, r.contentHash])),
+    });
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------- bullets -- */
 
 const STOPWORDS = new Set([
@@ -399,6 +468,7 @@ export function ruleSuggestions(
     ...live.map(hygiene).filter((d): d is Draft => d !== null),
     ...duplicateSkills(live.filter((r) => r.type === 'skill')),
     ...skillCategories(live.filter((r) => r.type === 'skill')),
+    ...crossTypeHonors(live),
     ...bulletRules(live.filter((r) => r.type === 'experience-bullet'), profile.roles),
     ...asks({ records: live, roles: profile.roles.filter((r) => r.reviewState !== 'rejected') }),
   ];

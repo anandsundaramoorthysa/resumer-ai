@@ -25,6 +25,7 @@ import { parseCsv, pick, type CsvRow } from './csv';
 import { hashContent } from '@/lib/sync/reconcile';
 import { deriveTags } from '@/lib/sync/tags';
 import { describeRecord } from '@/lib/profile/forms';
+import { asHonorType, classifyHonor, honorHashParts } from '@/lib/profile/honors';
 import { dedupeRoles, type RoleLike } from '@/lib/sync/roles';
 
 export interface LinkedInCandidate {
@@ -386,21 +387,21 @@ export function buildLinkedInPreview(files: Map<string, string>): LinkedInPrevie
     );
   }
 
+  // LinkedIn's "honors" export is not all honours: people list what they shipped there
+  // too. Classified by the shared rule rather than by the section it came from, so one
+  // fact does not arrive as an award here and an achievement from the portfolio sync.
   for (const r of rows('honors')) {
     const title = pick(r, 'Title', 'Name');
     if (!title) continue;
+    const honor = {
+      title,
+      issuer: pick(r, 'Issuer', 'Issued By') || undefined,
+      date: normalizeDate(pick(r, 'Issued On')) || undefined,
+      description: pick(r, 'Description') || undefined,
+    };
+    const type = classifyHonor(honor);
     records.push(
-      candidate(
-        'award',
-        {
-          title,
-          issuer: pick(r, 'Issuer', 'Issued By') || undefined,
-          date: normalizeDate(pick(r, 'Issued On')) || undefined,
-          description: pick(r, 'Description') || undefined,
-        },
-        ['award', title],
-        pick(r, 'Description'),
-      ),
+      candidate(type, asHonorType(type, honor), honorHashParts(honor), pick(r, 'Description')),
     );
   }
 
@@ -430,7 +431,7 @@ export function buildLinkedInPreview(files: Map<string, string>): LinkedInPrevie
     const name = pick(r, 'Name');
     if (!name) continue;
     records.push(
-      candidate('achievement', { title: name, description: 'Coursework' }, ['achievement', name]),
+      candidate('achievement', { title: name, description: 'Coursework' }, honorHashParts({ title: name })),
     );
   }
 

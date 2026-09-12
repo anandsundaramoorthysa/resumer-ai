@@ -14,6 +14,7 @@ import { certificationHashParts, dedupeCertifications } from './certifications';
 import { z } from 'zod';
 import type { ParsedRecord } from './reconcile';
 import { bulletHash, hashContent } from './reconcile';
+import { asHonorType, classifyHonor, honorHashParts, HONOR_RULE } from '../profile/honors';
 import { classifySkill } from '../skills/categories';
 import { generateStructured } from '../ai/chain';
 import type { DraftBudget } from '../ai/budget';
@@ -186,7 +187,7 @@ Rules:
 Category boundaries that are easy to get wrong:
 - A language certificate ("Certification in Hindi Proficiency") is a LANGUAGE, not education. Education means academic degrees and diplomas only.
 - A conference or journal paper is a publication. A blog post or article is writing. Do not merge them.
-- A competition win or formal honour is an award. An achievement is a broader accomplishment that is not a prize.
+- ${HONOR_RULE}
 - "Currently seeking a role", availability notes and career goals are not achievements. Skip them.
 - Record every degree the source mentions, including earlier ones stated only in passing (a "previousDegree" field, or a sentence naming a bachelor's before a master's).
 - Take the summary verbatim from the source if one exists. Never write one yourself.
@@ -537,15 +538,31 @@ export function toRecords(data: ExtractedProfile): ParseResult {
     } as ParsedRecord);
   }
 
-  for (const a of data.achievements) {
+  /*
+   * Awards and achievements, classified once by the shared rule rather than by whichever
+   * array the model happened to put a fact in.
+   *
+   * The model was asked for two lists and answered inconsistently — the same hackathon
+   * rank came back as an award from one file and an achievement from another, and both
+   * were written, because the content hash used to carry the type. `classifyHonor` reads
+   * the wording the profile form teaches (lib/profile/honors.ts), and `honorHashParts`
+   * gives the two types one hash, so a pair like that now collapses to a single record
+   * here instead of printing twice on the resume.
+   */
+  const seenHonors = new Set<string>();
+  for (const h of [...data.achievements, ...(data.awards ?? [])]) {
+    const honor = h as { title: string; description?: string; issuer?: string; date?: string };
+    const type = classifyHonor(honor);
+    const contentHash = hashContent(honorHashParts(honor));
+    if (seenHonors.has(contentHash)) continue;
+    seenHonors.add(contentHash);
     records.push({
-      type: 'achievement',
-      title: a.title,
-      description: a.description,
-      tags: deriveTags(`${a.title} ${a.description}`),
-      contentHash: hashContent(['achievement', a.title]),
+      type,
+      ...asHonorType(type, honor),
+      tags: deriveTags(`${honor.title} ${honor.description ?? ''} ${honor.issuer ?? ''}`),
+      contentHash,
       source: 'github-sync',
-    } as ParsedRecord);
+    } as unknown as ParsedRecord);
   }
 
   if (data.summary?.trim()) {
@@ -581,18 +598,6 @@ export function toRecords(data: ExtractedProfile): ParseResult {
       url: w.url,
       tags: deriveTags(w.title),
       contentHash: hashContent(['writing', w.title]),
-      source: 'github-sync',
-    } as ParsedRecord);
-  }
-
-  for (const a of data.awards ?? []) {
-    records.push({
-      type: 'award',
-      title: a.title,
-      issuer: a.issuer,
-      date: a.date,
-      tags: deriveTags(`${a.title} ${a.issuer ?? ''}`),
-      contentHash: hashContent(['award', a.title]),
       source: 'github-sync',
     } as ParsedRecord);
   }
