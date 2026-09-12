@@ -9,6 +9,7 @@
 import {
   buildSearchQuery,
   findSelfEvidence,
+  isPeopleDirectory,
   quoteOnPage,
   tiesToPerson,
 } from '../lib/profile/self-evidence';
@@ -68,6 +69,47 @@ suite('self-evidence — is this page the same person', () => {
   test('a first name alone is not the person', () => {
     const page = `Anand joined DiffuseAi as an intern.`;
     assert.equal(tiesToPerson(page, NAME, ROLE), null);
+  });
+
+  test('a directory lists one person per entry, so the next entry’s employer is not theirs', () => {
+    const list = `- Anand Sundaramoorthy — Designer, Acme Studio\n- Priya Raman — Engineer, DiffuseAi\n- Karthik V — Analyst, Zoho`;
+    assert.equal(tiesToPerson(list, NAME, ROLE, 'Team directory'), null);
+    const table = `| Name | Company |\n| Anand Sundaramoorthy | Acme |\n| Priya Raman | DiffuseAi |`;
+    assert.equal(tiesToPerson(table, NAME, ROLE, 'Alumni'), null);
+  });
+
+  test('the same entry of a list still ties', () => {
+    const list = `- Priya Raman — Engineer, Zoho\n- Anand Sundaramoorthy — AI Intern, DiffuseAi`;
+    assert(tiesToPerson(list, NAME, ROLE, 'Alumni') !== null);
+  });
+
+  test('on a page titled with their name, the job may sit a paragraph away', () => {
+    const page = `Anand Sundaramoorthy\n\nAbout me\n\nLast summer I interned at DiffuseAi, where the chatbot answered 2,000 applicants.`;
+    assert(tiesToPerson(page, NAME, ROLE, 'Anand Sundaramoorthy — Blog') !== null);
+    assert.equal(tiesToPerson(page, NAME, ROLE, 'Community posts'), null);
+  });
+
+  test('a one-word name needs its initial right beside it', () => {
+    const short = 'Anand S';
+    assert.equal(tiesToPerson('Anand Kumar joined DiffuseAi as an intern.', short, ROLE), null);
+    assert.equal(tiesToPerson('Anandraj S, intern at DiffuseAi.', short, ROLE), null);
+    assert(tiesToPerson('Anand S, AI intern at DiffuseAi.', short, ROLE) !== null);
+    assert(tiesToPerson('S. Anand, AI intern at DiffuseAi.', short, ROLE) !== null);
+  });
+
+  test('a single bare name is everyone called that, so it ties nothing', () => {
+    assert.equal(tiesToPerson('Anand, AI intern at DiffuseAi.', 'Anand', ROLE), null);
+  });
+
+  test('a name inside a longer word is not the name', () => {
+    assert.equal(tiesToPerson('Anandraj Sundaramoorthy, intern at DiffuseAi.', NAME, ROLE), null);
+  });
+
+  test('people-search and data-broker sites are never a source', () => {
+    assert.equal(isPeopleDirectory('https://www.aeroleads.com/in/anand'), true);
+    assert.equal(isPeopleDirectory('https://in.rocketreach.co/anand'), true);
+    assert.equal(isPeopleDirectory('https://notaeroleads.com/'), false);
+    assert.equal(isPeopleDirectory('https://anand.dev/blog'), false);
   });
 
   test('for a self-employed job, the title is the anchor', () => {

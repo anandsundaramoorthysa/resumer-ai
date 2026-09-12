@@ -11,9 +11,11 @@
  *
  * Three things must hold before any of it reaches the screen, each enforced in code:
  *
- *   THE PAGE IS THEIRS       a name search returns other people. A page counts only when
- *                            it puts the user's name near the company or the job title in
- *                            question (`tiesToPerson`), and even then it is shown as
+ *   THE PAGE IS THEIRS       a name search returns other people. People-search and
+ *                            data-broker sites are never read (`isPeopleDirectory`). A page
+ *                            counts only when it puts the user's name beside the company or
+ *                            the job title in question, in the same entry (`tiesToPerson`),
+ *                            and even then it is shown as
  *                            "found on <domain> — confirm this is you", not as fact. Nothing
  *                            it contributes can be added until the user ticks that box.
  *   THE WORDS ARE ON IT      every candidate fact carries a quote, and the quote must occur
@@ -101,35 +103,89 @@ export function buildSearchQuery(fullName: string, role: EmployerRole): string {
 const TIE_WINDOW = 400;
 
 /**
+ * Sites that sell or scrape contact details about people, and people-search engines.
+ *
+ * They are built to put a name beside an employer — that is their product — so they pass
+ * any closeness test while saying nothing the person wrote. aeroleads.com was the live case:
+ * it passed as "found on aeroleads.com — confirm this is you", with its "3 free lookups
+ * remaining" banner shown as the passage tying the page to the user.
+ *
+ * ponytail: a fixed list; a broker not on it still falls to the same-entry rule below.
+ */
+const PEOPLE_DIRECTORIES = [
+  'aeroleads.com', 'rocketreach.co', 'zoominfo.com', 'apollo.io', 'contactout.com',
+  'signalhire.com', 'lusha.com', 'seamless.ai', 'leadiq.com', 'uplead.com', 'hunter.io',
+  'datanyze.com', 'lead411.com', 'adapt.io', 'salesintel.io', 'cognism.com', 'kaspr.io',
+  'getprospect.com', 'snov.io', 'clearbit.com', 'theorg.com', 'crunchbase.com',
+  'pitchbook.com', 'spokeo.com', 'whitepages.com', 'truepeoplesearch.com',
+  'fastpeoplesearch.com', 'peoplefinders.com', 'beenverified.com', 'radaris.com',
+  'clustrmaps.com', 'peekyou.com', 'pipl.com', 'idcrawl.com', 'intelius.com',
+  'instantcheckmate.com', 'truthfinder.com', 'mylife.com', 'nuwber.com', 'thatsthem.com',
+  'peoplelooker.com', 'zabasearch.com', 'anywho.com', 'usphonebook.com',
+];
+
+export function isPeopleDirectory(url: string): boolean {
+  const host = domainOf(url).toLowerCase();
+  return PEOPLE_DIRECTORIES.some((d) => host === d || host.endsWith(`.${d}`));
+}
+
+const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const NOT_LETTER_BEFORE = '(?<![\\p{L}\\p{N}])';
+const NOT_LETTER_AFTER = '(?![\\p{L}\\p{N}])';
+
+/**
+ * The user's name as a pattern, or null when it is too common a shape to identify anyone.
+ *
+ * Every word of three letters or more, in order, close together, and each a whole word — so
+ * "Anand Sundaramoorthy SA" on a profile and "Anand Sundaramoorthy" in the app still meet,
+ * while "Anandraj Sundaramoorthy" does not. A name with only one such word ("Anand S") must
+ * carry its initials right beside it, before or after ("Anand S", "S. Anand"): the one word
+ * alone is everyone called Anand. A single bare word identifies nobody, so it ties nothing.
+ */
+function namePattern(fullName: string): RegExp | null {
+  const words = fullName
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean);
+  const long = words.filter((w) => w.length >= 3);
+  if (long.length >= 2) {
+    const gap = `${NOT_LETTER_AFTER}[\\s\\S]{0,20}?${NOT_LETTER_BEFORE}`;
+    return new RegExp(`${NOT_LETTER_BEFORE}${long.map(escapeRe).join(gap)}${NOT_LETTER_AFTER}`, 'giu');
+  }
+  const initials = words.filter((w) => w.length < 3);
+  if (long.length !== 1 || initials.length === 0) return null;
+  const name = escapeRe(long[0]);
+  const after = initials.map((i) => `\\s+${escapeRe(i)}\\.?`).join('');
+  const before = initials.map((i) => `${escapeRe(i)}(?:\\.\\s*|\\s+)`).join('');
+  return new RegExp(`${NOT_LETTER_BEFORE}(?:${name}${after}|${before}${name})${NOT_LETTER_AFTER}`, 'giu');
+}
+
+/**
+ * Where one entry of a page ends: a blank line, a list item, a heading, a table row. A
+ * directory, an alumni list or a speakers page puts one person per entry.
+ */
+const ENTRY_BREAK = /\n\s*\n|\n(?=\s*(?:[-*+•]\s|\d+[.)]\s|#{1,6}\s|\|))/;
+
+/**
  * Where on this page the user's name sits next to the job in question — or null, and the
  * page is dropped.
  *
- * "Next to" is deliberate. A directory page that lists a hundred people and a hundred
- * companies contains every name and every company somewhere; the same name within a few
- * hundred characters of the same employer (or, for someone self-employed, the same job
- * title) is what a page about THIS person looks like. A name alone never counts: another
+ * "Next to" means within a few hundred characters AND in the same entry. A directory page
+ * lists a hundred people and a hundred companies; the name in one entry and the employer in
+ * the next one down are two different people, however close the characters are. The one
+ * exception is a page whose title names the person — their post, their site, their bio —
+ * where the job may sit a paragraph below the name. A name alone never counts: another
  * Anand Sundaramoorthy at another firm is the ordinary case, not the edge case.
- *
- * The name is matched on every word of it at least three letters long, in order and close
- * together, so "Anand Sundaramoorthy SA" on a profile and "Anand Sundaramoorthy" in the
- * app still meet, and a page that only says "Anand" does not.
  */
 export function tiesToPerson(
   pageText: string,
   fullName: string,
   role: EmployerRole,
+  pageTitle = '',
 ): string | null {
-  const text = pageText.replace(/\s+/g, ' ');
-  const names = fullName
-    .split(/\s+/)
-    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
-    .filter((w) => w.length >= 3);
-  if (names.length === 0) return null;
+  const pattern = namePattern(fullName);
+  if (!pattern) return null;
 
-  const namePattern = new RegExp(
-    names.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]{0,20}?'),
-    'giu',
-  );
   const company = role.company.trim();
   // The title is an anchor ONLY when there is no employer to tie to. It used to be one
   // always, so "Anand Sundaramoorthy, Artificial Intelligence Intern at Google" tied the
@@ -140,11 +196,15 @@ export function tiesToPerson(
     company && !NOT_AN_EMPLOYER.test(company) ? [company] : [role.title.trim()]
   ).filter(Boolean);
 
-  for (const hit of text.matchAll(namePattern)) {
-    const at = hit.index ?? 0;
-    const window = text.slice(Math.max(0, at - TIE_WINDOW), at + hit[0].length + TIE_WINDOW);
-    const norm = normalizeForMatch(window);
-    if (anchors.some((a) => keywordMatches(norm, a))) return window.trim().slice(0, 300);
+  const aboutThem = new RegExp(pattern.source, 'iu').test(pageTitle);
+  for (const entry of aboutThem ? [pageText] : pageText.split(ENTRY_BREAK)) {
+    const text = entry.replace(/\s+/g, ' ');
+    for (const hit of text.matchAll(pattern)) {
+      const at = hit.index ?? 0;
+      const window = text.slice(Math.max(0, at - TIE_WINDOW), at + hit[0].length + TIE_WINDOW);
+      const norm = normalizeForMatch(window);
+      if (anchors.some((a) => keywordMatches(norm, a))) return window.trim().slice(0, 300);
+    }
   }
   return null;
 }
@@ -256,8 +316,13 @@ export async function findSelfEvidence(args: {
   // result comes back titled correctly and with no text at all — without text there is
   // nothing to check a quote against, so it is left out rather than trusted on its title.
   const pages = searched.hits
-    .filter((h) => !isBlockedDomain(h.url) && h.markdown.trim().length >= MIN_PAGE_CHARS)
-    .map((h) => ({ hit: h, tie: tiesToPerson(h.markdown, fullName, role) }))
+    .filter(
+      (h) =>
+        !isBlockedDomain(h.url) &&
+        !isPeopleDirectory(h.url) &&
+        h.markdown.trim().length >= MIN_PAGE_CHARS,
+    )
+    .map((h) => ({ hit: h, tie: tiesToPerson(h.markdown, fullName, role, h.title) }))
     .filter((p): p is { hit: typeof p.hit; tie: string } => p.tie !== null)
     .slice(0, MAX_PAGES);
 
