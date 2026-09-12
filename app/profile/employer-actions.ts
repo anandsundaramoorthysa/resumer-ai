@@ -30,6 +30,7 @@ import { DraftBudget } from '@/lib/ai/budget';
 import { assertDailyBudget, recordDailyUsage } from '@/lib/ai/daily-budget';
 import {
   researchEmployer,
+  rewriteAsParts,
   type EmployerContext,
   type EmployerRole,
   type RewriteProposal,
@@ -41,6 +42,7 @@ import { recordEnrichmentQuestions } from '@/lib/server/enrichment';
 import { missingBulletParts } from '@/lib/profile/enrichment';
 import { updateBullet } from '@/lib/profile/records';
 import type { ProfileRecord } from '@/lib/types';
+import { userMessage } from '@/lib/server/user-message';
 import type { Result } from './record-actions';
 
 /** Two model calls' worth of room: one is used, the second covers a chain fallback. */
@@ -79,7 +81,10 @@ async function loadRoleBullets(userId: string, roleId: string): Promise<Loaded> 
 
   const bullets: RoleBullet[] = rows
     .filter((r) => String((r.data as Record<string, unknown>).roleId ?? '') === roleId)
-    .filter((r) => !r.flaggedForRemoval)
+    // Only the lines the profile page shows (approved, not flagged). Pending and rejected
+    // rows used to come too: a line the user had already rejected was sent to the model,
+    // offered back as a proposal, and "Added" to a row that stays rejected and never shows.
+    .filter((r) => r.reviewState === 'approved' && !r.flaggedForRemoval)
     .map((r) => {
       const data = r.data as Record<string, unknown>;
       return {
@@ -114,10 +119,11 @@ async function withinBudget<T extends { proposals: RewriteProposal[] }>(
     revalidatePath('/profile');
     return { ok: true, value };
   } catch (err) {
-    return {
-      ok: false,
-      message: err instanceof Error ? err.message : 'That did not work. Try again in a moment.',
-    };
+    // Through userMessage, like every other AI path: the raw message of an
+    // AllProvidersFailedError lists each provider's own error text, and it was being put
+    // on the profile page verbatim.
+    console.warn('[employer-context] research failed:', err instanceof Error ? err.message.slice(0, 300) : err);
+    return { ok: false, message: userMessage(err, 'That did not work. Try again in a moment.') };
   } finally {
     await recordDailyUsage(userId, budget.snapshot());
   }
@@ -200,9 +206,9 @@ async function fileQuestions(userId: string, proposals: RewriteProposal[]): Prom
 /**
  * Applies one proposal, on one explicit click.
  *
- * The rewrite replaces the bullet's `action` and leaves `scale` and `outcome` exactly as
- * stored: those are the two fields the evidence grader reads and the user typed, and a
- * rewrite has no business touching them. `updateBullet` does the rest — it recomposes the
+ * The rewrite becomes the bullet's `action`; a stored `scale` or `outcome` it already
+ * states is dropped so it is not printed twice, and one it left out is kept, because the
+ * user typed it (rewriteAsParts). `updateBullet` does the rest — it recomposes the
  * text, rehashes it, promotes the row to `manual` so no sync competes with the edit, and
  * writes the audit entry.
  *
@@ -218,7 +224,14 @@ export async function applyEmployerRewrite(recordId: string, text: string): Prom
   const [row] = await db
     .select({ data: profileRecords.data })
     .from(profileRecords)
-    .where(and(eq(profileRecords.id, recordId), eq(profileRecords.userId, userId)))
+    .where(
+      and(
+        eq(profileRecords.id, recordId),
+        eq(profileRecords.userId, userId),
+        eq(profileRecords.type, 'experience-bullet'),
+        eq(profileRecords.reviewState, 'approved'),
+      ),
+    )
     .limit(1);
   if (!row) return { ok: false, message: 'That entry no longer exists.' };
 
@@ -226,9 +239,12 @@ export async function applyEmployerRewrite(recordId: string, text: string): Prom
   try {
     await updateBullet(userId, recordId, {
       roleId: String(data.roleId ?? ''),
-      action,
-      scale: data.scale ? String(data.scale) : undefined,
-      outcome: data.outcome ? String(data.outcome) : undefined,
+      // Not "action = rewrite, scale and outcome as stored": the rewrite is of the whole
+      // sentence, so that printed the scale and outcome twice (see rewriteAsParts).
+      ...rewriteAsParts(action, {
+        scale: data.scale ? String(data.scale) : undefined,
+        outcome: data.outcome ? String(data.outcome) : undefined,
+      }),
     });
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : 'Could not save that.' };

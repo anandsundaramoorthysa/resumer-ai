@@ -6,7 +6,8 @@
  * feature would break it if the guard were not there.
  */
 
-import { groundEmployerRewrite, safeQuestion } from '../lib/profile/employer-context';
+import { groundEmployerRewrite, rewriteAsParts, safeQuestion } from '../lib/profile/employer-context';
+import { composeBulletText } from '../lib/profile/bullet';
 import { suite, test, assert } from './harness.mjs';
 
 const BULLET = 'Built the ingestion service for the carrier portal';
@@ -94,5 +95,22 @@ suite('employer research — questions never suggest the answer', () => {
       'How many carriers used it?',
     );
     assert.equal(safeQuestion('Why?', BULLET), null);
+  });
+});
+
+suite('employer research — saving an accepted rewrite', () => {
+  const stored = { scale: 'serving 200K daily requests', outcome: 'cutting p95 latency 40%' };
+
+  test('a scale and outcome the rewrite already says are not printed twice', () => {
+    // Regression: the rewrite (of the whole sentence) was saved as the action with the old
+    // scale and outcome kept, and the composed text repeated both.
+    const rewrite = 'Optimized PostgreSQL queries at Acme serving 200K daily requests, cutting p95 latency 40%';
+    assert.equal(composeBulletText(rewriteAsParts(rewrite, stored)), `${rewrite}.`);
+  });
+
+  test('a part the rewrite dropped is kept, because the user typed it', () => {
+    const parts = rewriteAsParts('Optimized PostgreSQL queries at Acme serving 200K daily requests', stored);
+    assert.equal(parts.scale, undefined);
+    assert.equal(parts.outcome, 'cutting p95 latency 40%');
   });
 });

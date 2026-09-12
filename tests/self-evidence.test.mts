@@ -53,6 +53,13 @@ suite('self-evidence — is this page the same person', () => {
     assert.equal(tiesToPerson(page, NAME, ROLE), null);
   });
 
+  test('the same name with the same job title at another company is someone else', () => {
+    // Regression: the title used to be an anchor even when the job had an employer, so a
+    // page about a namesake with a common title at a different firm tied on the title alone.
+    const page = `Anand Sundaramoorthy, Artificial Intelligence Intern at Google, shared his launch notes.`;
+    assert.equal(tiesToPerson(page, NAME, ROLE), null);
+  });
+
   test('a directory with the name at one end and the company at the other ties nothing', () => {
     const page = `Anand Sundaramoorthy, Chennai.${filler} Companies hiring: DiffuseAi, Acme.`;
     assert.equal(tiesToPerson(page, NAME, ROLE), null);

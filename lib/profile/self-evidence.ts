@@ -131,10 +131,14 @@ export function tiesToPerson(
     'giu',
   );
   const company = role.company.trim();
-  const anchors = [
-    ...(company && !NOT_AN_EMPLOYER.test(company) ? [company] : []),
-    role.title.trim(),
-  ].filter(Boolean);
+  // The title is an anchor ONLY when there is no employer to tie to. It used to be one
+  // always, so "Anand Sundaramoorthy, Artificial Intelligence Intern at Google" tied the
+  // page to the user's DiffuseAi internship on the title alone — the same name with the
+  // same common job title somewhere else, which is exactly the other person this exists to
+  // drop, then offered as "found on … confirm this is you".
+  const anchors = (
+    company && !NOT_AN_EMPLOYER.test(company) ? [company] : [role.title.trim()]
+  ).filter(Boolean);
 
   for (const hit of text.matchAll(namePattern)) {
     const at = hit.index ?? 0;

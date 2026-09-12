@@ -159,6 +159,26 @@ export function safeQuestion(question: string, bullet: string): string | null {
   return q.slice(0, 240);
 }
 
+/**
+ * The stored parts for a rewrite the user accepted.
+ *
+ * A rewrite is of the whole sentence — action, scale and outcome together — but a bullet is
+ * stored as three parts and its text is re-composed from them (../profile/bullet.ts). Saving
+ * the rewrite as the action and keeping the other two as they were printed them twice:
+ * "…serving 200K requests, cutting p95 latency 40% serving 200K requests, cutting p95
+ * latency 40%." A part the rewrite already says is dropped; a part it left out is kept,
+ * because those are the user's own words and a rewrite may not lose them.
+ */
+export function rewriteAsParts(
+  rewrite: string,
+  stored: { scale?: string; outcome?: string },
+): { action: string; scale?: string; outcome?: string } {
+  const said = normalizeForMatch(rewrite);
+  const keep = (part?: string) =>
+    part?.trim() && !said.includes(normalizeForMatch(part)) ? part.trim() : undefined;
+  return { action: rewrite.trim(), scale: keep(stored.scale), outcome: keep(stored.outcome) };
+}
+
 /* ------------------------------------------------------------- the model -- */
 
 const ResearchSchema = z.object({
