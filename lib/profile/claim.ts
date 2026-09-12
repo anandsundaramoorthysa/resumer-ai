@@ -282,9 +282,11 @@ export function groundClaims(claim: ClaimOutput, text: string): GroundedClaims {
     /*
      * The type the rules say it is, not the one the prompt picked — ./record-type.ts.
      *
-     * The prompt is a good router and an unreviewable one: it put "AWS Certified
-     * Solutions Architect" under `skill` on a real run, where it prints in the Skills
-     * section as a tool. A record the rules cannot place at all, whose proposed type
+     * The prompt is a good router and an unreviewable one: nothing checked its choice,
+     * so a certification it filed as `skill` would print in the Skills section as a
+     * tool. The same class of error was measured on the enrichment queue's skill path,
+     * which filed a posting keyword as a skill whatever it was — the owner's "2027
+     * Passing Out Batch" became one. A record the rules cannot place at all, whose proposed type
      * asserts that somebody ELSE gave them something, is not stored on a guess — it goes
      * back as unplaced text for the user to file, which is what `unplaced` is already for.
      */

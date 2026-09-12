@@ -375,8 +375,9 @@ suite('enrichment — one question per subject', () => {
  * A question is unnecessary when answering it cannot change a draft, and there are exactly
  * three ways that happens: the record never reaches a resume, the thing being asked about
  * is not something a person can have, or the user has already declined to answer it three
- * times by ignoring it. Each is pinned here, and each one was measured on the real profile
- * before being written — see the numbers in scripts/enrichment-before-after.mts.
+ * times by ignoring it. Each is pinned here. On the owner's real profile the skill-shape
+ * rule is the one that removed questions; scripts/enrichment-before-after.mts prints which
+ * rule removes what for any account.
  */
 
 function job(over: Partial<JobRequirement> = {}): JobRequirement {
