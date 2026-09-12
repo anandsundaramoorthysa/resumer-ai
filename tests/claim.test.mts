@@ -215,3 +215,52 @@ suite('handing it to the importer', () => {
     assert.equal(out.records[0].issuer, '');
   });
 });
+
+suite('a record is filed where the rules say, not where the prompt put it', () => {
+  // lib/profile/record-type.ts. The prompt routes; these pin that its routing is checked.
+  const said = 'I am an AWS Certified Solutions Architect and I did SEO for ferventers.com.';
+
+  test('a certification the model filed as a skill is re-filed as a certification', () => {
+    const out = groundClaims(
+      claim({
+        records: [record({ type: 'skill', name: 'AWS Certified Solutions Architect', category: 'tool' })],
+      }),
+      said,
+    );
+    assert.equal(out.records.length, 1);
+    assert.equal(out.records[0].type, 'certification');
+  });
+
+  test('a certification with nothing certificate-shaped is handed back, not stored', () => {
+    // "I did SEO" must never come back as a certificate. The grounding check stops an
+    // invented issuer; this stops the type itself being the invention.
+    const out = groundClaims(
+      claim({ records: [record({ type: 'certification', name: 'ferventers', issuer: '' })] }),
+      said,
+    );
+    assert.equal(out.records.length, 0);
+    assert.equal(out.unplaced.length, 1);
+    assert.match(out.unplaced[0], /ferventers/);
+  });
+
+  test('an award with nothing won in it is kept as an achievement', () => {
+    const text = 'I shipped the billing rewrite for ferventers.com.';
+    const out = groundClaims(
+      claim({ records: [record({ type: 'award', title: 'shipped the billing rewrite' })] }),
+      text,
+    );
+    assert.equal(out.records.length, 1);
+    assert.equal(out.records[0].type, 'achievement');
+  });
+
+  test('what the model already put in unplaced is kept alongside', () => {
+    const out = groundClaims(
+      claim({
+        records: [record({ type: 'certification', name: 'ferventers' })],
+        unplaced: ['mostly technical audits'],
+      }),
+      said,
+    );
+    assert.equal(out.unplaced.length, 2);
+  });
+});

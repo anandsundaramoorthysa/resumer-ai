@@ -37,6 +37,7 @@ import { generateStructured } from '../ai/chain';
 import { draftCallOptions, type DraftBudget } from '../ai/budget';
 import { normalizeForMatch } from '../quality/keywords';
 import { formFor } from './forms';
+import { fileRecord } from './record-type';
 
 /** What a person can usefully say in one go; past this it is profile editing. */
 export const MAX_CLAIM_CHARS = 2_000;
@@ -275,7 +276,31 @@ export function groundClaims(claim: ClaimOutput, text: string): GroundedClaims {
   const dropped: string[] = [];
   const records: ClaimRecord[] = [];
 
-  for (const record of claim.records) {
+  const unplaced = claim.unplaced.filter((u) => u.trim());
+
+  for (const proposed of claim.records) {
+    /*
+     * The type the rules say it is, not the one the prompt picked — ./record-type.ts.
+     *
+     * The prompt is a good router and an unreviewable one: nothing checked its choice,
+     * so a certification it filed as `skill` would print in the Skills section as a
+     * tool. The same class of error was measured on the enrichment queue's skill path,
+     * which filed a posting keyword as a skill whatever it was — the owner's "2027
+     * Passing Out Batch" became one. A record the rules cannot place at all, whose proposed type
+     * asserts that somebody ELSE gave them something, is not stored on a guess — it goes
+     * back as unplaced text for the user to file, which is what `unplaced` is already for.
+     */
+    const filing = fileRecord(proposed.type, proposed as unknown as Record<string, unknown>);
+    if (filing.confirm) {
+      unplaced.push(
+        `${proposed.name || proposed.title || proposed.type} — ${filing.why}, so say which it is`,
+      );
+      continue;
+    }
+    const record: ClaimRecord = filing.moved
+      ? ({ ...proposed, type: filing.type } as ClaimRecord)
+      : proposed;
+
     const form = formFor(record.type);
     if (!form) {
       dropped.push(`"${record.name || record.title || record.type}" — no such record type`);
@@ -336,7 +361,7 @@ export function groundClaims(claim: ClaimOutput, text: string): GroundedClaims {
     roles.push({ ...role, bullets });
   }
 
-  return { records, roles, dropped, unplaced: claim.unplaced.filter((u) => u.trim()) };
+  return { records, roles, dropped, unplaced };
 }
 
 /**

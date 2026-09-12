@@ -314,6 +314,8 @@ export const enrichmentQuestions = pgTable(
     reason: text('reason').notNull().default(''),
     /** Impact, highest first — see IMPACT in lib/profile/enrichment.ts. */
     priority: integer('priority').notNull().default(0),
+    /** Drafts that re-derived this while it stayed open — see MAX_TIMES_ASKED. */
+    askedCount: integer('asked_count').notNull().default(0),
     state: text('state').notNull().default('open'), // open | answered | dismissed
     /** What the answer became, so a fact can be traced back to the question. */
     answerRecordId: text('answer_record_id'),
@@ -328,6 +330,29 @@ export const enrichmentQuestions = pgTable(
     uniqueIndex('enrichment_user_subject_idx').on(t.userId, t.subjectKey),
   ],
 );
+
+/**
+ * Whether this person wants to be asked draft questions at all — REQ-5.5's off switch.
+ *
+ * The enrichment queue was unconditional: every draft added to it and /profile always
+ * showed the top of it. The owner's complaint was not that the questions were wrong but
+ * that there was no way to stop them, and a prompt you cannot turn off is one you learn to
+ * scroll past — which costs the questions you would otherwise have answered.
+ *
+ * One row per person, written only when they change it. Absent means `all` — see
+ * `loadEnrichmentMode` in lib/server/enrichment.ts.
+ *
+ * Per-question refusal is NOT here. That has always been `enrichment_question.state =
+ * 'dismissed'`, a tombstone the unique index on (user_id, subject_key) makes permanent.
+ */
+export const enrichmentPreferences = pgTable('enrichment_preference', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** all | current-job | off — see ENRICHMENT_MODES in lib/server/enrichment.ts. */
+  mode: text('mode').notNull().default('all'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
 
 /** REQ-1.3 — reserved for Phase 10 autofill. Nothing reads these yet. */
 export const applicationFormFields = pgTable('application_form_fields', {

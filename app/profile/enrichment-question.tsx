@@ -21,7 +21,7 @@
  */
 
 import { useState, useTransition } from 'react';
-import { answerQuestion, skipQuestion } from './actions';
+import { answerQuestion, chooseEnrichmentMode, skipQuestion } from './actions';
 
 export interface QuestionView {
   id: string;
@@ -151,13 +151,21 @@ export function EnrichmentQuestion({ question }: { question: QuestionView }) {
         >
           {pending ? 'Saving…' : 'Add to my profile'}
         </button>
+        {/*
+          * Says what it does. The button always wrote a permanent tombstone — the unique
+          * index on (user_id, subject_key) means a dismissed subject is never queued
+          * again, whatever a later draft finds — but it was labelled "Skip this one",
+          * which reads as "not now". The owner asked for a "don't ask me this again" and
+          * it already existed; it was only ever described wrongly.
+          */}
         <button
           type="button"
           disabled={pending}
+          title="This question will not be asked again."
           onClick={() => startTransition(() => skipQuestion(question.id))}
           className="min-h-11 rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:text-ink disabled:opacity-50"
         >
-          {question.kind === 'skill' ? "I haven't used it" : 'Skip this one'}
+          {question.kind === 'skill' ? "I haven't used it" : "Don't ask me this again"}
         </button>
       </div>
 
@@ -167,5 +175,48 @@ export function EnrichmentQuestion({ question }: { question: QuestionView }) {
         </p>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * The off switch for the whole queue.
+ *
+ * Three radios rather than a checkbox, because "stop asking" and "only ask about the job I
+ * am drafting for" are different requests and the owner made both. Rendered whenever the
+ * section is — and, in app/profile/page.tsx, on its own when the queue is off, so a
+ * decision made once is reversible without finding a settings page that does not exist.
+ *
+ * Nothing is destroyed by any of these. The backlog keeps refreshing underneath; `off` and
+ * `current-job` only decide what is shown, so switching back to `all` brings it back whole.
+ */
+export function EnrichmentControls({ mode }: { mode: 'all' | 'current-job' | 'off' }) {
+  const [pending, startTransition] = useTransition();
+
+  const OPTIONS: Array<[typeof mode, string]> = [
+    ['all', 'Ask me anything the drafts find'],
+    ['current-job', 'Only about the job I am drafting for'],
+    ['off', "Don't ask me questions"],
+  ];
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line pt-3 text-xs">
+      <span className="font-medium text-muted">Questions:</span>
+      {OPTIONS.map(([value, label]) => (
+        // min-h-11: at 390px each option was a 16px-tall row beside 44px buttons, and a
+        // thumb aimed at "only this job" could land on "don't ask me questions".
+        <label key={value} className="flex min-h-11 items-center gap-1.5">
+          <input
+            type="radio"
+            name="enrichment-mode"
+            checked={mode === value}
+            disabled={pending}
+            onChange={() => startTransition(() => chooseEnrichmentMode(value))}
+          />
+          <span className={mode === value ? 'font-semibold text-ink' : 'text-muted'}>
+            {label}
+          </span>
+        </label>
+      ))}
+    </div>
   );
 }
