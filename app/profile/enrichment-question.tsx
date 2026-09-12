@@ -202,7 +202,9 @@ export function EnrichmentControls({ mode }: { mode: 'all' | 'current-job' | 'of
     <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line pt-3 text-xs">
       <span className="font-medium text-muted">Questions:</span>
       {OPTIONS.map(([value, label]) => (
-        <label key={value} className="flex items-center gap-1.5">
+        // min-h-11: at 390px each option was a 16px-tall row beside 44px buttons, and a
+        // thumb aimed at "only this job" could land on "don't ask me questions".
+        <label key={value} className="flex min-h-11 items-center gap-1.5">
           <input
             type="radio"
             name="enrichment-mode"
