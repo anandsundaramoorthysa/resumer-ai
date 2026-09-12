@@ -293,9 +293,10 @@ async function assertFresh(userId: string, s: Suggestion): Promise<void> {
   }
 }
 
-/** A stored value as the string a form field holds. */
-function asFormValue(v: unknown): string {
-  return Array.isArray(v) ? v.join(', ') : v == null ? '' : String(v);
+/** A stored value as the string a form field holds — one per line for a `lines` field. */
+function asFormValue(v: unknown, kind?: string): string {
+  if (!Array.isArray(v)) return v == null ? '' : String(v);
+  return v.join(kind === 'lines' ? String.fromCharCode(10) : ', ');
 }
 
 export async function applySuggestion(userId: string, raw: unknown, answer?: string): Promise<string> {
@@ -344,7 +345,7 @@ export async function applySuggestion(userId: string, raw: unknown, answer?: str
       }
       const form = formFor(s.moveTo.type);
       if (!form) throw new Error('That record type does not exist.');
-      const values = Object.fromEntries(form.fields.map((f) => [f.name, asFormValue(data[f.name])]));
+      const values = Object.fromEntries(form.fields.map((f) => [f.name, asFormValue(data[f.name], f.kind)]));
       try {
         await createTypedRecord(userId, s.moveTo.type, values);
       } catch (err) {

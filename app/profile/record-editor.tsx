@@ -49,12 +49,13 @@ export interface EditableRecord {
   data: Record<string, unknown>;
 }
 
-/** Lists round-trip through the comma-separated text the form shows. */
+/** Lists round-trip through the text the form shows — commas, or one per line. */
 function toFormValues(form: RecordForm, data: Record<string, unknown>): Record<string, string> {
   const values: Record<string, string> = {};
   for (const field of form.fields) {
     const v = data[field.name];
-    values[field.name] = Array.isArray(v) ? v.join(', ') : v == null ? '' : String(v);
+    const separator = field.kind === 'lines' ? String.fromCharCode(10) : ', ';
+    values[field.name] = Array.isArray(v) ? v.join(separator) : v == null ? '' : String(v);
   }
   return values;
 }
@@ -361,7 +362,7 @@ function Field({
         {field.required ? <span className="text-danger"> *</span> : null}
       </span>
 
-      {field.kind === 'textarea' ? (
+      {field.kind === 'textarea' || field.kind === 'lines' ? (
         <textarea
           value={value}
           rows={3}
@@ -398,6 +399,11 @@ function Field({
 
       {field.kind === 'list' ? (
         <span className="mt-1 block text-xs text-muted">Separate with commas.</span>
+      ) : null}
+      {field.kind === 'lines' ? (
+        <span className="mt-1 block text-xs text-muted">
+          One per line. A comma inside a line is kept, so &ldquo;1,200 downloads&rdquo; stays one entry.
+        </span>
       ) : null}
       {field.hint ? <span className="mt-1 block text-xs text-muted">{field.hint}</span> : null}
     </label>

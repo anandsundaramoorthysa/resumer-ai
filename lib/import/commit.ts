@@ -74,7 +74,7 @@ function sanitize(
   const data: Record<string, unknown> = {};
   for (const field of form.fields) {
     const value = raw[field.name];
-    if (field.kind === 'list') {
+    if (field.kind === 'list' || field.kind === 'lines') {
       data[field.name] = Array.isArray(value)
         ? value.filter((v) => typeof v === 'string' && v.trim()).map((v) => String(v).trim())
         : [];

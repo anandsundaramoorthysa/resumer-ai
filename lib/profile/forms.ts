@@ -15,7 +15,13 @@ import type { ProfileRecord } from '../types';
 import { educationHashParts } from '../sync/education';
 import { withoutRepeatedParts } from '../generate/display-text';
 
-export type FieldKind = 'text' | 'textarea' | 'list' | 'select';
+/**
+ * `lines` is a list written one entry per line, and it exists because `list` splits on
+ * commas: "Downloaded 1,200 times by 40 teams" was silently stored as two entries, and
+ * "10k downloads, 300 stars" as two more. Numbers are exactly what these fields are for,
+ * and any number past a thousand carries a comma.
+ */
+export type FieldKind = 'text' | 'textarea' | 'list' | 'lines' | 'select';
 
 export interface FieldDef {
   name: string;
@@ -86,15 +92,22 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
     plural: 'Projects',
     fields: [
       { name: 'name', label: 'Project', kind: 'text', required: true, maxLength: 120 },
-      { name: 'description', label: 'What is it?', kind: 'textarea', maxLength: 600 },
+      {
+        name: 'description',
+        label: 'What is it?',
+        kind: 'textarea',
+        maxLength: 600,
+        placeholder: 'An open-source CLI that turns a chess game into a GIF.',
+        hint: 'Optional. What it does and who it is for, in a sentence or two.',
+      },
       { name: 'stack', label: 'Built with', kind: 'list', placeholder: 'React, PostgreSQL' },
       { name: 'links', label: 'Links', kind: 'list', placeholder: 'github.com/you/repo' },
       {
         name: 'impactMetrics',
-        label: 'What it achieved',
-        kind: 'list',
-        placeholder: 'Cut page load 40%',
-        hint: 'A measurable result. This is what the evidence score reads — a project with none scores nothing.',
+        label: 'What came of it',
+        kind: 'lines',
+        placeholder: '1,200 downloads on PyPI\n240 GitHub stars\nUsed by 3 college teams',
+        hint: 'Optional, one per line — downloads, users, stars, anything measurable. This is what the evidence score reads, so a project with none scores nothing there.',
       },
     ],
     identityFields: ['name', 'description', 'stack'],
@@ -308,9 +321,10 @@ export function coerceFormValues(
   const data: Record<string, unknown> = {};
   for (const field of form.fields) {
     const value = (raw[field.name] ?? '').trim();
-    if (field.kind === 'list') {
+    if (field.kind === 'list' || field.kind === 'lines') {
+      // `lines` splits on newlines so a comma inside one entry survives — see FieldKind.
       data[field.name] = value
-        .split(',')
+        .split(field.kind === 'lines' ? '\n' : ',')
         .map((v) => v.trim())
         .filter(Boolean);
       continue;

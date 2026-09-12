@@ -179,3 +179,29 @@ suite('education summary line', () => {
     );
   });
 });
+
+suite('a list written one entry per line', () => {
+  const project = RECORD_FORMS.project;
+
+  test('a comma inside an entry is kept — "1,200 downloads" is one result, not two', () => {
+    const data = coerceFormValues(project, {
+      name: 'ChessToGIF',
+      impactMetrics: '1,200 downloads on PyPI\n240 GitHub stars',
+    });
+    assert.deepEqual(data.impactMetrics, ['1,200 downloads on PyPI', '240 GitHub stars']);
+  });
+
+  test('blank lines and stray spacing are dropped', () => {
+    const data = coerceFormValues(project, { name: 'X', impactMetrics: '  10k users \n\n\n 3 teams  ' });
+    assert.deepEqual(data.impactMetrics, ['10k users', '3 teams']);
+  });
+
+  test('the fields that are genuinely comma-separated still are', () => {
+    const data = coerceFormValues(project, { name: 'X', stack: 'React, PostgreSQL' });
+    assert.deepEqual(data.stack, ['React', 'PostgreSQL']);
+  });
+
+  test('nothing typed is no result, not an empty one', () => {
+    assert.deepEqual(coerceFormValues(project, { name: 'X', impactMetrics: '' }).impactMetrics, []);
+  });
+});
