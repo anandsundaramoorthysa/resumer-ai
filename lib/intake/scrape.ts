@@ -49,6 +49,85 @@ export function normalizeUrl(input: string): string {
  */
 export const MAX_SCRAPE_MS = 12_000;
 
+/* ------------------------------------------------------------------ search -- */
+
+export interface SearchHit {
+  url: string;
+  title: string;
+  description: string;
+  /** The page's own text, when the search was asked to fetch it. '' when it was blocked. */
+  markdown: string;
+}
+
+export type SearchOutcome =
+  | { ok: true; hits: SearchHit[] }
+  | { ok: false; reason: 'not-configured' | 'search-failed'; message: string };
+
+/**
+ * The same Firecrawl key, its other endpoint: a web search that can return each result's
+ * text in the same round trip.
+ *
+ * One request rather than a search followed by N scrapes, because the function has 30
+ * seconds and a scrape alone is allowed 12 of them. A result whose text comes back empty
+ * was blocked at the source (LinkedIn answers a scraper with nothing) — callers must treat
+ * an empty `markdown` as "nothing verifiable here", never as "the title is good enough".
+ *
+ * Unauthenticated search is not offered: unlike `scrapeJobUrl`, there is no keyless tier
+ * worth attempting, so a missing key degrades immediately rather than after a round trip.
+ */
+export async function searchWeb(
+  query: string,
+  options: { limit?: number; timeoutMs?: number } = {},
+): Promise<SearchOutcome> {
+  const apiKey = process.env.FIRECRAWL_API_KEY;
+  if (!apiKey) {
+    return {
+      ok: false,
+      reason: 'not-configured',
+      message: 'Searching the web needs a Firecrawl API key, which is not set.',
+    };
+  }
+
+  try {
+    const res = await fetch('https://api.firecrawl.dev/v2/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        query,
+        limit: Math.min(options.limit ?? 4, 8),
+        scrapeOptions: { formats: ['markdown'], onlyMainContent: true },
+      }),
+      signal: AbortSignal.timeout(Math.min(options.timeoutMs ?? MAX_SCRAPE_MS, MAX_SCRAPE_MS)),
+    });
+
+    if (!res.ok) {
+      return { ok: false, reason: 'search-failed', message: `The search came back ${res.status}.` };
+    }
+
+    const json = (await res.json()) as {
+      data?: { web?: Array<{ url?: string; title?: string; description?: string; markdown?: string }> };
+    };
+    const hits = (json.data?.web ?? [])
+      .filter((h): h is { url: string } & typeof h => Boolean(h.url))
+      .map((h) => ({
+        url: h.url,
+        title: h.title ?? '',
+        description: h.description ?? '',
+        markdown: h.markdown ?? '',
+      }));
+    return { ok: true, hits };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'search-failed',
+      message:
+        err instanceof Error && err.name === 'TimeoutError'
+          ? 'The search took too long.'
+          : 'The search could not be reached.',
+    };
+  }
+}
+
 export async function scrapeJobUrl(rawUrl: string, timeoutMs = MAX_SCRAPE_MS): Promise<ScrapeOutcome> {
   const url = normalizeUrl(rawUrl);
 

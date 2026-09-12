@@ -10,6 +10,7 @@ import { EnrichmentQuestion } from './enrichment-question';
 import { loadEnrichmentQueue } from '@/lib/server/enrichment';
 import { BulletEditor, type ExistingBullet } from './bullet-editor';
 import { AddJob, JobHeader } from './role-editor';
+import { EmployerPanel } from './employer-panel';
 import { RecordEditor, type EditableRecord } from './record-editor';
 import { ProfileAssistant } from './profile-assistant';
 import { RECORD_FORMS, describeRecord, formFor } from '@/lib/profile/forms';
@@ -417,6 +418,12 @@ export default async function ProfilePage() {
                       roleLabel={role.company}
                       bullets={bullets}
                     />
+                    {/* Only where there is something to sharpen: the panel reads the
+                        employer's page to make existing lines legible, and has nothing to
+                        say about a role with no lines yet. */}
+                    {bullets.length > 0 ? (
+                      <EmployerPanel roleId={role.id} company={role.company} />
+                    ) : null}
                   </div>
                 );
               })}
