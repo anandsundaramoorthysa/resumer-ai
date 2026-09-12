@@ -14,7 +14,8 @@ Checkable work items grouped by phase (matching `PLAN.md`'s roadmap). Each task 
 - [x] 0.3 Add email/password fallback sign-in — *REQ-7.2*
 - [x] 0.4 Set up Postgres (Neon) + Drizzle schema for all tables in design.md §3, with `userId` on every table — *NFR-6*
 - [ ] 0.5 Enable `pgvector` extension for embedding search
-- [ ] 0.6 Deploy skeleton app to Vercel, register `resumeraiapp.vercel.app` (fallbacks: `resumeraihq`, `tryresumerai`) — *PLAN.md §9*
+- [x] 0.6 Deploy skeleton app to Vercel, register `resumeraiapp.vercel.app` (fallbacks: `resumeraihq`, `tryresumerai`) — *PLAN.md §9*
+  - **Changed from the spec:** deployed on Netlify at `resumeraiapp.netlify.app`, where every build since has shipped.
 - [x] 0.7 Wire Tailwind + shadcn/ui with the Tidewater design tokens (light + dark) — *REQ-8.4 / design.md §7*
 - [x] 0.8 Load Instrument Serif, General Sans, Spline Sans Mono — *REQ-8.4*
 
@@ -48,7 +49,8 @@ Checkable work items grouped by phase (matching `PLAN.md`'s roadmap). Each task 
 - [x] 3.7 Add daily scheduled sync job
   - **Changed from the spec:** a Netlify scheduled function (`netlify/functions/daily-sync.mts`), matching where this actually deploys. It only pings `/api/cron/sync`, which does the cheap half — one commit-SHA call per repo, clearing the cached SHA where it moved. Starting a real sync from a cron would strand a stepped job nobody can advance.
 - [x] 3.8 Add optional GitHub push webhook route to invalidate cached SHA — *REQ-2.5*
-- [ ] 3.9 Write reconciliation fixture tests (before/after mock repo content) — *design.md §6*
+- [x] 3.9 Write reconciliation fixture tests (before/after mock repo content) — *design.md §6*
+  - `tests/sync-review.test.mts` runs `reconcile()` on before/after profiles, including the honour re-key case.
 
 ## Phase 4 — Job Intake
 
@@ -65,9 +67,12 @@ Checkable work items grouped by phase (matching `PLAN.md`'s roadmap). Each task 
 - [x] 5.2 Implement per-category relevance floor with user-editable tag mappings — *REQ-4.2*
 - [x] 5.3 Implement hybrid retrieval (keyword overlap + embedding similarity) — *REQ-4.3*
 - [x] 5.4 Implement grounded-rewrite prompt + post-hoc named-entity/number validation against source — *REQ-4.4*
-- [ ] 5.5 Implement cover letter generation reusing the same retrieved data — *REQ-4.5*
-- [ ] 5.6 Implement interview-question generation reusing the same retrieved data — *REQ-4.5*
-- [ ] 5.7 Build editable preview UI with per-bullet source trace (links back to source record)
+- [x] 5.5 Implement cover letter generation reusing the same retrieved data — *REQ-4.5*
+  - `lib/generate/cover-letter.ts`, offered from the draft page's extras panel.
+- [x] 5.6 Implement interview-question generation reusing the same retrieved data — *REQ-4.5*
+  - `lib/generate/interview.ts`, same panel.
+- [x] 5.7 Build editable preview UI with per-bullet source trace (links back to source record)
+  - `app/resume/[snapshotId]/resume-editor.tsx`; every line keeps its `sourceRecordId`.
 - [x] 5.8 Write grounded-rewrite property tests (entities/numbers subset check) — *design.md §6*
   - `tests/grounding.test.mts`, 3,000 generated source/candidate pairs checked with an independently written token scanner. Found and closed a real hole: an unanchored substring test accepted an invented "9x" because the source said "p95" (7 escapes in 1,439 fabrications).
 
@@ -83,7 +88,8 @@ Checkable work items grouped by phase (matching `PLAN.md`'s roadmap). Each task 
   - `<Path>` geometry, never an icon font. The DOCX renderer throws on `renderMode: 'presentation'` and the export route refuses `format=docx&mode=presentation`, so PDF-only is enforced rather than intended.
 - [x] 6.8 Integrate `mammoth`/`pdf-parse` + self-hosted OpenResume round-trip check — *REQ-6.6*
 - [ ] 6.9 Integrate Affinda or RChilli API for final-pass validation — *REQ-6.6*
-- [ ] 6.10 Implement baseline/master resume export (no job input) — *REQ-6.7*
+- [x] 6.10 Implement baseline/master resume export (no job input) — *REQ-6.7*
+  - `app/api/baseline/route.ts`.
 - [x] 6.11 Write "known-bad template" integration tests (table, rasterized PDF, icon-font glyph) — *design.md §6*
   - `tests/render.test.mts`. PDF rendering still can't run under tsx (`@react-pdf` ESM export conditions), so the PDF path is verified in the Next runtime via `/api/dev/selftest`, which now also renders and round-trips the presentation variant.
 
@@ -105,17 +111,22 @@ Checkable work items grouped by phase (matching `PLAN.md`'s roadmap). Each task 
 
 ## Phase 8 — Application Tracker
 
-- [ ] 8.1 Build application log CRUD (resume version, job info, status) — *REQ-9.1*
+- [x] 8.1 Build application log CRUD (resume version, job info, status) — *REQ-9.1*
+  - `/applications`.
 - [x] 8.2 Implement immutable snapshot on export (Resume JSON + source-record hashes) — *REQ-9.2*
-- [ ] 8.3 Link tracker entries to snapshots, never the live profile — *REQ-9.2*
-- [ ] 8.4 Build status-update UI (applied → interview → rejected/offer)
+- [x] 8.3 Link tracker entries to snapshots, never the live profile — *REQ-9.2*
+  - `application.resume_snapshot_id`.
+- [x] 8.4 Build status-update UI (applied → interview → rejected/offer)
+  - `app/applications/status-select.tsx`.
 
 ## Phase 9 — Polish, Security & Observability
 
 - [x] 9.1 Implement audit-log entries on all profile record changes — *REQ-10.1*
-- [ ] 9.2 Add uptime/error alerting on the sync job and AI-provider fallback chain — *REQ-10.2*
+- [x] 9.2 Add uptime/error alerting on the sync job and AI-provider fallback chain — *REQ-10.2*
+  - Hourly email of failed runs (`netlify/functions/draft-alerts.mts`), the `/activity` page, and Sentry for errors.
 - [x] 9.3 Surface failed pipeline stages as visible errors in the live panel, never a silent hang — *REQ-10.2*
-- [ ] 9.4 Encrypt PII and GitHub OAuth token at rest; audit minimum-scope token usage — *REQ-10.3, NFR-5*
+- [~] 9.4 Encrypt PII and GitHub OAuth token at rest; audit minimum-scope token usage — *REQ-10.3, NFR-5*
+  - Done: GitHub tokens are AES-256-GCM encrypted (`lib/auth/secret-box.ts`), and repository access moved to a GitHub App with read-only, selected-repo installs. Not done: profile personal details are stored in plain columns.
 - [ ] 9.5 Add additional resume templates per role category (visual variety within `ats-strict` constraints)
 - [x] 9.6 Full WCAG AA contrast audit across all implemented screens (not just the token table) — *NFR-4*
   - Measured on rendered text with composited backgrounds, 7 pages x light/dark: 0 failures after fixing four real ones (gold/warning/danger on their own tints, and white-on-brand in dark mode, which was 2.93:1 on every primary button).
@@ -132,9 +143,11 @@ Checkable work items grouped by phase (matching `PLAN.md`'s roadmap). Each task 
 
 ## Open Items Before Starting (from `PLAN.md` §12)
 
-- [ ] Confirm the `owner/name` of the private GitHub repo behind anandsundaramoorthy.com (needed by Phase 3, not Phase 0)
-- [ ] Decide application-tracker scope for v1 (Phase 8 now vs. deferred)
-- [ ] Set up or confirm a Firecrawl account/API key (needed by Phase 4)
+- [x] Confirm the `owner/name` of the private GitHub repo behind anandsundaramoorthy.com (needed by Phase 3, not Phase 0)
+  - `anandsundaramoorthysa/Anand-Portfolio`.
+- [x] Decide application-tracker scope for v1 (Phase 8 now vs. deferred)
+  - Built in v1.
+- [x] Set up or confirm a Firecrawl account/API key (needed by Phase 4)
 - [ ] Set up or confirm an Affinda or RChilli developer account (needed by Phase 6)
 
 ---
