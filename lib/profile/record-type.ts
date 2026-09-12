@@ -25,13 +25,14 @@
  * Pure and model-free on purpose. A prompt's opinion about a type is unreviewable and
  * different on every run; these rules can be read, tested and argued with.
  *
- * MERGE NOTE for Engineer A: the award-vs-achievement line is drawn in one place here
- * (`AWARD_CUE` plus the downgrade in `fileRecord`). When your helper in
- * ./forms.ts lands, delete the cue and call it instead — nothing else in this file cares
- * which of the two it is.
+ * Two questions, two rules. `AWARD_CUE` answers "does this record, whatever it was filed
+ * as, name something won?" — narrow on purpose, because it runs against project and skill
+ * names too. Which of award or achievement an honour is, is ./honors.ts's `classifyHonor`,
+ * the same rule the portfolio sync and the LinkedIn import use, so the three writers agree.
  */
 
 import { classifySkill } from '../skills/categories';
+import { classifyHonor } from './honors';
 
 /** The types these rules can positively name. Everything else stays the caller's. */
 export type SettledRecordType =
@@ -160,8 +161,8 @@ export function classifyRecordType(data: Record<string, unknown>): RecordTypeVer
  *             decided something about an institution.
  *
  * `award` never reaches `confirm`, because it has a safe downgrade: when nothing says a
- * thing was won, it is a thing they did. A claim about a jury is never inferred, and the
- * reverse direction — achievement promoted to award — is not available on purpose.
+ * thing was won, it is a thing they did. An achievement becomes an award only when its own
+ * wording or an issuer says someone conferred it — `classifyHonor`, never a guess.
  */
 export interface RecordFiling {
   type: string;
@@ -176,11 +177,15 @@ export function fileRecord(proposed: string, data: Record<string, unknown>): Rec
   if (verdict.type && verdict.type !== proposed) {
     return { type: verdict.type, why: verdict.why, moved: true, confirm: false };
   }
-  if (!verdict.type && proposed === 'award') {
+  if (proposed === 'award' || proposed === 'achievement') {
+    const type = classifyHonor(data);
     return {
-      type: 'achievement',
-      why: 'nothing says it was won, so it is a thing you did',
-      moved: true,
+      type,
+      why:
+        type === 'award'
+          ? 'it names who gave it or what was won'
+          : 'nothing says it was won, so it is a thing you did',
+      moved: type !== proposed,
       confirm: false,
     };
   }

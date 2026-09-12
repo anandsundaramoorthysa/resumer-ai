@@ -131,6 +131,13 @@ suite('what happens when the rules cannot tell', () => {
     assert.equal(filing.confirm, false);
   });
 
+  test('an achievement naming who gave it is an award, by the shared rule', () => {
+    const filing = fileRecord('achievement', { title: 'Best Speaker', issuer: 'IEEE' });
+    assert.equal(filing.type, 'award');
+    assert.equal(filing.moved, true);
+    assert.equal(fileRecord('achievement', { title: 'College topper' }).type, 'award');
+  });
+
   test('a type that asserts nothing about anyone else is left alone', () => {
     for (const type of ['project', 'interest', 'summary', 'volunteering', 'writing']) {
       const filing = fileRecord(type, { name: 'Tidewater', title: 'Tidewater' });

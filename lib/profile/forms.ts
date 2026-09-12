@@ -12,6 +12,7 @@
 
 import { certificationHashParts } from '../sync/certifications';
 import type { ProfileRecord } from '../types';
+import { ACHIEVEMENT_HINT, AWARD_HINT, honorHashParts } from './honors';
 import { educationHashParts } from '../sync/education';
 import { withoutRepeatedParts } from '../generate/display-text';
 
@@ -192,17 +193,23 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
     describe: (d) => joined([str(d, 'title'), str(d, 'venue')]),
   },
 
+  // Awards and achievements are not the same thing, and the forms have to say so: the
+  // same fact typed into both prints twice on a resume. ./honors.ts holds the one
+  // definition these hints, the parsers and the steward's duplicate rule all read.
   award: {
     type: 'award',
     singular: 'award',
     plural: 'Awards',
     fields: [
-      { name: 'title', label: 'Award', kind: 'text', required: true },
-      { name: 'issuer', label: 'Awarded by', kind: 'text' },
+      { name: 'title', label: 'Award someone gave you', kind: 'text', required: true, placeholder: '1st of 120 teams, XYZ Hackathon', hint: AWARD_HINT },
+      { name: 'issuer', label: 'Awarded by', kind: 'text', hint: 'Who conferred it. Naming them is what makes it an award rather than an achievement.' },
       { name: 'date', label: 'Date', kind: 'text' },
       { name: 'description', label: 'What for', kind: 'textarea', maxLength: 400 },
     ],
     identityFields: ['title'],
+    // One hash for both honour types, so the unique index itself refuses the same prize
+    // typed once here and once under Achievements — see ./honors.ts `honorHashParts`.
+    hashParts: (d) => honorHashParts({ title: str(d, 'title') }),
     describe: (d) => joined([str(d, 'title'), str(d, 'issuer')]),
   },
 
@@ -211,11 +218,12 @@ export const RECORD_FORMS: Record<string, RecordForm> = {
     singular: 'achievement',
     plural: 'Achievements',
     fields: [
-      { name: 'title', label: 'Achievement', kind: 'text', required: true },
+      { name: 'title', label: 'Something you did yourself', kind: 'text', required: true, placeholder: 'Shipped the admissions chatbot to 2,000 applicants', hint: ACHIEVEMENT_HINT },
       { name: 'description', label: 'Detail', kind: 'textarea', maxLength: 400 },
       { name: 'date', label: 'Date', kind: 'text' },
     ],
     identityFields: ['title'],
+    hashParts: (d) => honorHashParts({ title: str(d, 'title') }),
     describe: (d) => joined([str(d, 'title'), str(d, 'description')], ' — '),
   },
 

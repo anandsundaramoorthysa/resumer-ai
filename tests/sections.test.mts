@@ -279,6 +279,27 @@ await suiteAsync('new sections render', async () => {
     });
   }
 
+  await testAsync('one honour stored as both types prints once, under Awards', async () => {
+    // The owner's complaint: the same prize typed under Awards and synced under
+    // Achievements printed twice, a few lines apart. The writers and the unique index
+    // stop new pairs; this is the guarantee for a profile that already holds one.
+    const { document } = await build([
+      ...fullProfile(),
+      { ...base(), type: 'award', title: 'Best Innovation Award', issuer: 'XYZ Hackathon' },
+      { ...base(), type: 'achievement', title: 'Best Innovation', description: 'At the XYZ hackathon' },
+    ]);
+    const awards = section(document, 'awards')!.items.map((i) => i.text);
+    const achievements = section(document, 'achievements')?.items.map((i) => i.text) ?? [];
+    assert(
+      awards.some((t) => t.includes('Best Innovation')),
+      'the award itself must still print',
+    );
+    assert(
+      !achievements.some((t) => t.includes('Best Innovation')),
+      `printed twice: ${achievements.join(' | ')}`,
+    );
+  });
+
   await testAsync('volunteering is laid out like experience: role, organisation, dates', async () => {
     const { document } = await build(fullProfile());
     const [g] = section(document, 'volunteering')!.groups!;
