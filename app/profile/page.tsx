@@ -14,6 +14,8 @@ import { RecordEditor, type EditableRecord } from './record-editor';
 import { ProfileAssistant } from './profile-assistant';
 import { RECORD_FORMS, describeRecord, formFor } from '@/lib/profile/forms';
 import { findProfileGaps } from '@/lib/profile/gaps';
+import { orderRecords } from '@/lib/profile/ordering';
+import { rolesByRecency } from '@/lib/generate/assemble';
 import type { ProfileRecord, RoleRecord } from '@/lib/types';
 
 export const metadata = { title: 'Profile' };
@@ -77,7 +79,7 @@ export default async function ProfilePage() {
    */
   const proposed = records.filter((r) => r.reviewState === 'pending');
   const decided = records.filter((r) => r.reviewState === 'approved');
-  const roles = allRoles.filter((r) => r.reviewState === 'approved');
+  const roles = rolesByRecency(allRoles.filter((r) => r.reviewState === 'approved') as never) as typeof allRoles;
   const proposedRoles = allRoles.filter((r) => r.reviewState === 'pending');
   const reviewCount = proposed.length + proposedRoles.length;
 
@@ -170,6 +172,11 @@ export default async function ProfilePage() {
     list.push(r);
     grouped.set(r.type, list);
   }
+  // Rows arrive in whatever order Postgres returns them, which is the order they were
+  // written: Experience read oldest-job-first and a school certificate sat above a
+  // degree. Each section now uses the order its own kind is read in — see
+  // lib/profile/ordering.ts, and rolesByRecency for the jobs themselves.
+  for (const [type, list] of grouped) grouped.set(type, orderRecords(type, list));
 
   return (
     <div className="min-h-screen min-h-dvh">
