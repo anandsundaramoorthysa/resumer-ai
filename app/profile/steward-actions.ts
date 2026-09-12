@@ -19,6 +19,7 @@ import {
   extractForProfile,
   reviewSection,
   type AssistantExtraction,
+  type ReviewDepth,
   type ReviewPage,
   type SaveCheck,
 } from '@/lib/server/steward';
@@ -59,12 +60,15 @@ const SECTIONS = new Set<StewardSection>(['skills', 'experience', 'projects', 'c
 export async function reviewSectionAction(
   section: StewardSection,
   batch: number,
+  /** 'deep' also asks about entries that already look complete — see ReviewDepth. */
+  depth: ReviewDepth = 'normal',
 ): Promise<ActionResult<ReviewPage>> {
   try {
     if (!SECTIONS.has(section) || !Number.isInteger(batch) || batch < 0 || batch > 50) {
       throw new UserFacingError('Unknown section.');
     }
-    return { ok: true, data: await reviewSection(await userId(), section, batch) };
+    if (depth !== 'normal' && depth !== 'deep') throw new UserFacingError('Unknown depth.');
+    return { ok: true, data: await reviewSection(await userId(), section, batch, depth) };
   } catch (err) {
     return { ok: false, message: sentence(err) };
   }

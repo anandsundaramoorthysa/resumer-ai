@@ -11,6 +11,7 @@ import { describeRecord, formFor } from '../profile/forms';
 import { canonicalSkillName, skillIdentity } from '../skills/identity';
 import { ACRONYMS, SKILL_CATEGORY_LABELS, classifySkill } from '../skills/categories';
 import { tidyRecordData, tidyText } from './tidy';
+import { duplicateRecords } from './duplicates';
 import {
   sectionOf,
   suggestionId,
@@ -400,6 +401,8 @@ export function ruleSuggestions(
     ...duplicateSkills(live.filter((r) => r.type === 'skill')),
     ...skillCategories(live.filter((r) => r.type === 'skill')),
     ...bulletRules(live.filter((r) => r.type === 'experience-bullet'), profile.roles),
+    // Every other section's duplicates — see ./duplicates.ts for why they occur at all.
+    ...duplicateRecords(live, (r) => labelOf(r), sectionOf),
     ...asks({ records: live, roles: profile.roles.filter((r) => r.reviewState !== 'rejected') }),
   ];
   return drafts.filter((d) => !section || d.section === section).map(done);

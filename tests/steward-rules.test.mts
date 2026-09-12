@@ -6,6 +6,7 @@
 import { isDatesOnly, ruleSuggestions, skillKeys } from '../lib/steward/rules';
 import type { StewardRecord, StewardRole } from '../lib/steward/types';
 import { suite, test, assert } from './harness.mjs';
+import { duplicateRecords } from '@/lib/steward/duplicates';
 
 let n = 0;
 const rec = (type: string, data: Record<string, unknown>, extra: Partial<StewardRecord> = {}): StewardRecord => ({
@@ -135,5 +136,61 @@ suite('steward rules — hygiene and asks', () => {
   test('rejected records are ignored', () => {
     const s = ruleSuggestions({ records: [skill('ML', { reviewState: 'rejected' }), skill('Machine Learning')], roles: [] });
     assert.equal(s.filter((x) => x.kind === 'merge').length, 0);
+  });
+});
+
+suite('the same fact stored twice, in any section', () => {
+  const record = (over: Record<string, unknown>): StewardRecord =>
+    ({ id: 'x', type: 'project', source: 'manual', reviewState: 'approved', contentHash: 'h', data: {}, ...over }) as StewardRecord;
+  const label = (r: StewardRecord) => {
+    const d = r.data as Record<string, unknown>;
+    return String(d.name ?? d.title ?? '');
+  };
+  const run = (records: StewardRecord[]) => duplicateRecords(records, label, () => 'other');
+
+  test('two projects with genuinely different names are two projects', () => {
+    const out = run([
+      record({ id: 'p1', contentHash: 'a', data: { name: 'ChessToGIF' } }),
+      record({ id: 'p2', contentHash: 'b', data: { name: 'Tamil Lyrics Analysis' } }),
+    ]);
+    assert.equal(out.length, 0, 'nothing merged');
+  });
+
+  test('the same name punctuated differently is one project, and the fuller copy is kept', () => {
+    const thin = record({ id: 'p1', contentHash: 'a', data: { name: 'ChessToGIF' }, source: 'github-sync' });
+    const full = record({
+      id: 'p2',
+      contentHash: 'b',
+      data: { name: 'chess to gif!', description: 'Renders a game as a GIF', impactMetrics: ['1,200 downloads'] },
+    });
+    const [s] = run([thin, full]);
+    assert.ok(s, 'a duplicate is reported');
+    assert.equal(s.recordId, 'p2', 'keeps the fuller copy');
+    assert.deepEqual(s.removeIds, ['p1']);
+    assert.deepEqual(Object.keys(s.basis).sort(), ['p1', 'p2'], 'both in the basis, so either changing invalidates it');
+  });
+
+  test('a certification from an import and the same one from the sync are one', () => {
+    const out = run([
+      record({ id: 'c1', type: 'certification', contentHash: 'a', data: { name: 'Google Data Analytics', issuer: 'Coursera' } }),
+      record({ id: 'c2', type: 'certification', contentHash: 'b', data: { name: 'google data analytics ', issuer: 'coursera' } }),
+    ]);
+    assert.equal(out.length, 1, 'one merge proposed');
+  });
+
+  test('an award and an achievement of the same title are left alone by this rule', () => {
+    const out = run([
+      record({ id: 'a1', type: 'award', contentHash: 'a', data: { title: 'Smart India Hackathon Winner' } }),
+      record({ id: 'a2', type: 'achievement', contentHash: 'b', data: { title: 'Smart India Hackathon Winner' } }),
+    ]);
+    assert.equal(out.length, 0, 'across types is a different question');
+  });
+
+  test('a rejected copy is not proposed for merging: it is already a no', () => {
+    const out = run([
+      record({ id: 'p1', contentHash: 'a', data: { name: 'Portfolio' } }),
+      record({ id: 'p2', contentHash: 'b', data: { name: 'Portfolio' }, reviewState: 'rejected' }),
+    ]);
+    assert.equal(out.length, 0, 'nothing to merge');
   });
 });

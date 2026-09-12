@@ -118,15 +118,38 @@ const MODEL_TYPES_OTHER = new Set(['summary', 'achievement', 'award', 'volunteer
  * which is noise for the reader and, at a hundred skills, five model calls of the dozen a
  * review makes. It is the cheapest call to not make.
  */
-function modelCandidates(profile: StewardProfile, section: StewardSection): StewardRecord[] {
+function modelCandidates(
+  profile: StewardProfile,
+  section: StewardSection,
+  depth: ReviewDepth = 'normal',
+): StewardRecord[] {
+  // Skills stay out even at depth: the model's answers there were category quibbles, and
+  // the classifier (lib/skills/classify-ai.ts) already asks about the names nothing knows.
   if (section === 'skills') return [];
   return profile.records.filter((r) => {
     if (sectionOf(r.type) !== section) return false;
+    if (depth === 'deep') return true;
     if (r.type === 'experience-bullet') return !r.data.scale && !r.data.outcome;
     if (section === 'other') return MODEL_TYPES_OTHER.has(r.type);
     return true;
   });
 }
+
+/** Everything in a section, whether or not the model is asked about it. */
+function sectionRecords(profile: StewardProfile, section: StewardSection): StewardRecord[] {
+  return profile.records.filter((r) => sectionOf(r.type) === section);
+}
+
+/**
+ * 'normal' asks the model only about entries that look unfinished — a bullet with no scale
+ * and no outcome, a type in `other` worth rewriting. 'deep' asks about everything in the
+ * section, including entries that already look complete.
+ *
+ * The distinction used to be invisible, and that is what made a thorough review feel like
+ * a partial one: 63 entries in, 14 questions out, and nothing saying the other 49 were
+ * deliberately left alone.
+ */
+export type ReviewDepth = 'normal' | 'deep';
 
 export interface ReviewPage {
   section: StewardSection;
@@ -135,6 +158,17 @@ export interface ReviewPage {
   suggestions: Suggestion[];
   /** 'failed' when the model could not be reached; the rule suggestions still stand. */
   model: 'ok' | 'none' | 'failed';
+  /** How much of the section this request covered, so the page can say so honestly. */
+  coverage: {
+    /** Records in the section, whatever their state. Only meaningful on batch 0. */
+    total: number;
+    /** Of those, how many this depth would ever send to the model. Batch 0 only. */
+    candidates: number;
+    /** Records the model actually judged in this batch. */
+    looked: number;
+    /** Records this batch meant to judge and could not, because the call failed. */
+    unchecked: number;
+  };
 }
 
 async function dismissedFor(userId: string): Promise<Set<string>> {
@@ -159,10 +193,12 @@ export async function reviewSection(
   userId: string,
   section: StewardSection,
   batch: number,
+  depth: ReviewDepth = 'normal',
 ): Promise<ReviewPage> {
   const [profile, dismissed] = await Promise.all([loadStewardProfile(userId), dismissedFor(userId)]);
   const rules = ruleSuggestions(profile, section);
-  const candidates = modelCandidates(profile, section);
+  const candidates = modelCandidates(profile, section, depth);
+  const inSection = sectionRecords(profile, section).length;
   const size = BATCH_SIZE[section];
   const batches = Math.max(1, Math.ceil(candidates.length / size));
 
@@ -206,6 +242,8 @@ export async function reviewSection(
     }
   }
 
+  let looked = 0;
+  let unchecked = 0;
   const slice = candidates.slice(batch * size, (batch + 1) * size);
   if (slice.length > 0) {
     await assertDailyBudget(userId);
@@ -218,9 +256,11 @@ export async function reviewSection(
       }
       suggestions.push(...verified.suggestions);
       model = 'ok';
+      looked = slice.length;
     } catch (err) {
       console.error(`[steward] ${section} batch ${batch} model call failed:`, err instanceof Error ? err.message.slice(0, 300) : err);
       model = 'failed';
+      unchecked = slice.length;
     } finally {
       await recordDailyUsage(userId, budget.snapshot());
     }
@@ -232,6 +272,7 @@ export async function reviewSection(
     batches,
     suggestions: suggestions.filter((s) => !dismissed.has(s.id)),
     model,
+    coverage: { total: inSection, candidates: candidates.length, looked, unchecked },
   };
 }
 

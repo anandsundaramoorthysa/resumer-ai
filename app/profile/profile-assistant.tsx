@@ -15,7 +15,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { STEWARD_SECTIONS, type StewardSection, type Suggestion } from '@/lib/steward/types';
-import type { AssistantExtraction } from '@/lib/server/steward';
+import type { AssistantExtraction, ReviewDepth } from '@/lib/server/steward';
 import {
   applyQuickFixesAction,
   applySuggestionAction,
@@ -81,8 +81,16 @@ export function ProfileAssistant({ empty }: { empty: boolean }) {
 
 type RunState =
   | { phase: 'idle' }
-  | { phase: 'running'; done: number; total: number; current: string }
-  | { phase: 'done'; failedSections: string[] };
+  | { phase: 'running'; done: number; total: number; current: string; depth: ReviewDepth }
+  | { phase: 'done'; failedSections: string[]; coverage: Coverage; depth: ReviewDepth };
+
+/** What the run actually looked at, totalled over its sections — see ReviewDepth. */
+interface Coverage {
+  total: number;
+  candidates: number;
+  looked: number;
+  unchecked: number;
+}
 
 function ReviewTool() {
   const [run, setRun] = useState<RunState>({ phase: 'idle' });
@@ -91,16 +99,17 @@ function ReviewTool() {
   const [bulkPending, startBulk] = useTransition();
   const router = useRouter();
 
-  const start = async () => {
+  const start = async (depth: ReviewDepth = 'normal') => {
     setSuggestions([]);
     setNotice(null);
+    const coverage: Coverage = { total: 0, candidates: 0, looked: 0, unchecked: 0 };
     const found: Suggestion[] = [];
     const failed = new Set<string>();
     // Every section's first batch is known up front; later batches are learnt from it.
     const queue: Array<{ section: StewardSection; batch: number; retried?: boolean }> = STEWARD_SECTIONS.map((s) => ({ section: s.id, batch: 0 }));
     let total = queue.length;
     let done = 0;
-    setRun({ phase: 'running', done, total, current: STEWARD_SECTIONS[0].label });
+    setRun({ phase: 'running', done, total, current: STEWARD_SECTIONS[0].label, depth });
 
     const retry: Array<{ section: StewardSection; batch: number; retried?: boolean }> = [];
 
@@ -108,12 +117,20 @@ function ReviewTool() {
       while (queue.length > 0) {
         const job = queue.shift()!;
         const label = STEWARD_SECTIONS.find((s) => s.id === job.section)?.label ?? job.section;
-        setRun({ phase: 'running', done, total, current: label });
+        setRun({ phase: 'running', done, total, current: label, depth });
         // A request can fail outright — a dropped connection, a deploy mid-review. That is
         // a failed batch, not a stuck page: it goes the same way as a model that timed out.
-        const res = await reviewSectionAction(job.section, job.batch).catch(
-          () => ({ ok: true as const, data: { section: job.section, batch: job.batch, batches: 1, suggestions: [], model: 'failed' as const } }),
-        );
+        const res = await reviewSectionAction(job.section, job.batch, depth).catch(() => ({
+          ok: true as const,
+          data: {
+            section: job.section,
+            batch: job.batch,
+            batches: 1,
+            suggestions: [],
+            model: 'failed' as const,
+            coverage: { total: 0, candidates: 0, looked: 0, unchecked: 0 },
+          },
+        }));
         done++;
         if (!res.ok) {
           failed.add(label);
@@ -122,7 +139,13 @@ function ReviewTool() {
           if (job.batch === 0) {
             for (let b = 1; b < res.data.batches; b++) queue.push({ section: job.section, batch: b });
             total += res.data.batches - 1;
+            // Section totals arrive once, on its first batch; the per-batch counts below
+            // add up across all of them.
+            coverage.total += res.data.coverage.total;
+            coverage.candidates += res.data.coverage.candidates;
           }
+          coverage.looked += res.data.coverage.looked;
+          coverage.unchecked += res.data.coverage.unchecked;
           if (res.data.model === 'failed') {
             if (!job.retried) retry.push({ ...job, retried: true });
             else failed.add(label);
@@ -130,7 +153,7 @@ function ReviewTool() {
           found.push(...res.data.suggestions);
           setSuggestions(order(dedupe(found)));
         }
-        setRun({ phase: 'running', done, total, current: label });
+        setRun({ phase: 'running', done, total, current: label, depth });
       }
     };
     // Two at a time. Each request is one model call against a shared provider chain, and
@@ -139,12 +162,16 @@ function ReviewTool() {
     // One more pass at whatever the providers could not serve. A failed batch is usually a
     // busy provider, not a broken request, and a retry costs seconds where re-running the
     // whole review costs minutes.
+    let retried = 0;
     if (retry.length > 0) {
+      retried = retry.length;
       queue.push(...retry.splice(0, retry.length));
       total += queue.length;
       await worker();
     }
-    setRun({ phase: 'done', failedSections: [...failed] });
+    // A batch that failed and then succeeded on the retry is no longer unchecked.
+    coverage.unchecked = Math.max(0, coverage.unchecked - retried);
+    setRun({ phase: 'done', failedSections: [...failed], coverage, depth });
   };
 
   /** Drops suggestions made against records an applied one just changed. */
@@ -169,7 +196,7 @@ function ReviewTool() {
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={start}
+            onClick={() => start('normal')}
             className="min-h-11 rounded-lg bg-brand px-5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
           >
             Review my profile
@@ -182,6 +209,7 @@ function ReviewTool() {
         <div role="status" aria-live="polite">
           <p className="text-sm">
             Checking {run.current}… <span className="text-muted tabular">({run.done} of {run.total} steps)</span>
+            {run.depth === 'deep' ? <span className="text-muted"> · everything, including what looks complete</span> : null}
           </p>
           <div className="mt-2 h-2 w-full max-w-md overflow-hidden rounded-full bg-line" aria-hidden>
             <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${Math.round((run.done / Math.max(1, run.total)) * 100)}%` }} />
@@ -243,13 +271,49 @@ function ReviewTool() {
               {bulkPending ? 'Applying…' : `Apply ${quick.length} quick fix${quick.length === 1 ? '' : 'es'}`}
             </button>
           ) : null}
-          <button type="button" onClick={start} className="min-h-11 rounded-lg px-3 text-sm font-semibold text-muted hover:text-ink">
+          <button
+            type="button"
+            onClick={() => start(run.depth)}
+            className="min-h-11 rounded-lg px-3 text-sm font-semibold text-muted hover:text-ink"
+          >
             Review again
           </button>
           {run.failedSections.length > 0 ? (
             <p className="w-full text-xs text-muted">
-              The AI part could not run for {run.failedSections.join(', ')}; the checks that need no AI are still shown.
+              The AI part could not run for {run.failedSections.join(', ')}
+              {run.coverage.unchecked > 0
+                ? ` — ${run.coverage.unchecked} ${run.coverage.unchecked === 1 ? 'entry was' : 'entries were'} left unchecked`
+                : ''}
+              . The checks that need no AI are still shown; “Review again” retries just the model part.
             </p>
+          ) : null}
+
+          {/*
+            The honest account of what was looked at.
+
+            Every entry is checked by the rules. The model is the expensive half, and in a
+            normal review it is only asked about entries that look unfinished — which is
+            why a review of sixty entries can come back with four questions and feel like
+            it skipped everything. Now it says so, and offers the pass that does ask about
+            all of them.
+          */}
+          <p className="w-full text-xs text-muted">
+            Checked all {run.coverage.total} {run.coverage.total === 1 ? 'entry' : 'entries'} against the
+            rules{run.coverage.looked > 0 ? `, and asked the AI about ${run.coverage.looked}` : ''}.
+            {run.depth === 'deep'
+              ? ' That was everything.'
+              : run.coverage.candidates < run.coverage.total
+                ? ` ${run.coverage.total - run.coverage.candidates} already look complete, so the AI was not asked about them. Skills are checked by the rules and the classifier — the AI adds nothing there.`
+                : ''}
+          </p>
+          {run.depth === 'normal' && run.coverage.candidates < run.coverage.total ? (
+            <button
+              type="button"
+              onClick={() => start('deep')}
+              className="min-h-11 rounded-lg border border-line px-4 text-sm font-semibold hover:bg-paper"
+            >
+              Review everything, including what looks complete
+            </button>
           ) : null}
         </div>
       ) : null}
