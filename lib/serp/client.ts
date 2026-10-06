@@ -7,7 +7,7 @@
  * fixtures/serpapi and labels the result mode:'replay'.
  */
 
-import { budgetBlocked, cacheKey, deps, scrub } from './budget';
+import { budgetBlocked, cacheKey, deps, noteAttempt, scrub } from './budget';
 import { loadFixture, recordFixture } from './fixtures';
 import { dedupePostings, normalizeJobs, parseListing, parseNews } from './normalize';
 import type { EmployerIntel, Posting, SerpResult } from './types';
@@ -19,6 +19,7 @@ export { parseSalaryLpa } from './salary';
 const ENDPOINT = 'https://serpapi.com/search.json';
 const HOUR = 3_600_000;
 const TTL = { google_jobs: HOUR, google_news: 24 * HOUR, google_jobs_listing: 24 * HOUR } as const;
+const EMPTY_TTL = 10 * 60_000;
 type Engine = keyof typeof TTL;
 
 const RESTRICTOR: Record<Engine, string> = {
@@ -42,10 +43,11 @@ async function call(
   const q = params.q ?? '';
 
   const replay = (): Raw | Fail => {
-    const json = loadFixture(engine, q);
-    return json
-      ? { ok: true, json, cached: false, mode: 'replay', credits: 0 }
-      : { ok: false, reason: 'not-configured', message: 'No SerpApi key is set and no sample data is available.' };
+    try {
+      return { ok: true, json: loadFixture(engine, q), cached: false, mode: 'replay', credits: 0 };
+    } catch {
+      return { ok: false, reason: 'not-configured', message: 'No SerpApi key is set and no sample data is available.' };
+    }
   };
 
   if (!key || sm === 'replay') return replay();
@@ -54,7 +56,8 @@ async function call(
   if (!refresh && sm !== 'record') {
     try {
       const hit = await deps.store.get(ck);
-      if (hit && deps.now() - hit.fetchedAt.getTime() < TTL[engine]) {
+      const empty = (hit?.payload as { _empty?: unknown } | undefined)?._empty === true;
+      if (hit && deps.now() - hit.fetchedAt.getTime() < (empty ? EMPTY_TTL : TTL[engine])) {
         return { ok: true, json: hit.payload, cached: true, mode: 'live', credits: 0 };
       }
     } catch {
@@ -68,16 +71,31 @@ async function call(
   if (refresh) qs.set('no_cache', 'true');
   if (RESTRICTOR[engine]) qs.set('json_restrictor', RESTRICTOR[engine]);
 
+  // Counted before the call: a failure or timeout may still have been billed. NO auto-retry anywhere.
+  await noteAttempt();
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), deps.timeoutMs);
+  const timer = setTimeout(() => ctrl.abort(), deps.searchTimeoutMs(engine));
   try {
     const res = await deps.fetch(`${ENDPOINT}?${qs.toString()}`, { signal: ctrl.signal });
     const json = (await res.json().catch(() => null)) as { error?: unknown } | null;
     if (!res.ok || !json || json.error) {
       const msg = scrub(typeof json?.error === 'string' ? json.error : `SerpApi answered ${res.status}.`);
-      // "hasn't returned any results" is an empty answer, not a failure.
-      if (json && /hasn't returned any results/i.test(msg)) return { ok: true, json: {}, cached: false, mode: 'live', credits: 1 };
-      const reason = res.status === 429 ? 'rate' : /run out|searches left|plan/i.test(msg) ? 'budget' : 'failed';
+      // "hasn't returned any results" is an empty answer, not a failure, and costs no credit.
+      // Cached briefly so the same empty query is not paid for again.
+      if (json && /hasn't returned any results/i.test(msg)) {
+        try {
+          await deps.store.put(ck, engine, { _empty: true });
+        } catch {
+          // caching is an optimisation
+        }
+        return { ok: true, json: {}, cached: false, mode: 'live', credits: 0 };
+      }
+      // Out-of-credits is often a 429 too: read the message before the status.
+      const reason = /run out|out of (?:searches|credits)|searches left|plan/i.test(msg)
+        ? 'budget'
+        : res.status === 429
+          ? 'rate'
+          : 'failed';
       return { ok: false, reason, message: msg };
     }
     if (sm === 'record') recordFixture(engine, q, json);
@@ -86,6 +104,9 @@ async function call(
     } catch {
       // caching is an optimisation
     }
+    // Always 1: SerpApi bills a fresh search one credit and serves its own server-side cache
+    // free, but the response carries no documented, reliable marker for which one we got
+    // (search_metadata.status is "Success" either way). Reported spend is therefore an upper bound.
     return { ok: true, json, cached: false, mode: 'live', credits: 1 };
   } catch (err) {
     const timedOut = err instanceof Error && err.name === 'AbortError';
@@ -113,7 +134,11 @@ export async function searchJobs(
   opts: { userId: string; refresh?: boolean; fromQuery?: number } = { userId: '' },
 ): Promise<SerpResult<Posting[]>> {
   const r = await call('google_jobs', { q, gl: 'in', hl: 'en', google_domain: 'google.co.in' }, !!opts.refresh);
-  return r.ok ? done(r, dedupePostings(normalizeJobs(r.json, opts.fromQuery ?? 0))) : r;
+  if (!r.ok) return r;
+  let postings = dedupePostings(normalizeJobs(r.json, opts.fromQuery ?? 0));
+  // Replay data is hand-written: label every posting so the UI can show SAMPLE.
+  if (r.mode === 'replay') postings = postings.map((p) => ({ ...p, via: 'Sample data' }));
+  return done(r, postings);
 }
 
 export async function companyNews(
@@ -133,7 +158,10 @@ export async function companyIntel(
 ): Promise<SerpResult<EmployerIntel>> {
   const [listing, news] = await Promise.all([
     serpJobId
-      ? call('google_jobs_listing', { q: serpJobId, gl: 'in', hl: 'en', google_domain: 'google.co.in' }, false)
+      ? // SerpApi docs: q "defines the job_id string which can be obtained from Google Jobs API"
+        // (the page's example is a base64 JSON blob, which is what google_jobs returns as job_id).
+        // UNVERIFIED live: smoke test. A failure here is non-fatal: ratings just degrade to none.
+        call('google_jobs_listing', { q: serpJobId, gl: 'in', hl: 'en', google_domain: 'google.co.in' }, false)
       : Promise.resolve<Fail>({ ok: false, reason: 'failed', message: 'No job id to look ratings up with.' }),
     companyNews(company, userId),
   ]);

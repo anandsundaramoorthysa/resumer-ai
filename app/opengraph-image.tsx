@@ -14,7 +14,7 @@ const line = (w: number, bg = '#D9D0BD') => (
 export default function Image() {
   return new ImageResponse(
     (
-      <div style={{ width: '100%', height: '100%', display: 'flex', background: '#F3EDE0', padding: 64, color: INK }}>
+      <div style={{ width: '100%', height: '100%', display: 'flex', background: '#FFFFFF', padding: 64, color: INK }}>
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'center', paddingRight: 48 }}>
           <div style={{ display: 'flex', fontSize: 24, letterSpacing: 4, color: '#5E574A', fontFamily: 'monospace' }}>
             RESUMER AI
@@ -28,8 +28,9 @@ export default function Image() {
             display: 'flex',
             flexDirection: 'column',
             width: 400,
-            background: '#FBF8F1',
+            background: '#FFFFFF',
             border: '2px solid #D9D0BD',
+            boxShadow: '10px 12px 0 rgba(27,26,23,0.12)',
             padding: 36,
             transform: 'rotate(0.8deg)',
             position: 'relative',

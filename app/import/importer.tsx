@@ -347,6 +347,14 @@ export function Importer() {
           for (const k of dupes) next.delete(k);
           return next;
         });
+        // Open every section holding a duplicate warning so it is not hidden when collapsed.
+        const dupSet = new Set(dupes);
+        setOpened((prev) => {
+          const next = new Set(prev);
+          for (const r of data.roles) if (r.bullets.some((b) => dupSet.has(b.key))) next.add('role:' + r.key);
+          for (const c of data.records) if (dupSet.has(c.key)) next.add('type:' + c.type);
+          return next;
+        });
       }
     } finally {
       setChecking(false);
@@ -624,6 +632,7 @@ export function Importer() {
 
   /* --------------------------------------------------------------- review -- */
   const selectedCount = allKeys.filter((k) => selected.has(k)).length;
+  const dupCount = allKeys.filter((k) => notes[k]?.duplicateOf).length;
 
   return (
     <div>
@@ -655,6 +664,9 @@ export function Importer() {
             <p className="mt-1 text-sm text-muted">
               Untick anything that is wrong or out of date. Nothing is saved until you
               press the button.
+            </p>
+            <p className="mt-1 text-sm font-semibold">
+              {selectedCount} selected · {dupCount} possible duplicate{dupCount === 1 ? '' : 's'}
             </p>
             {checking ? (
               <p className="mt-1 text-xs text-muted" role="status">

@@ -77,7 +77,8 @@ await suiteAsync('searchJobs', async () => {
     assert.ok(r.ok);
     assert.equal(r.mode, 'replay');
     assert.equal(r.credits, 0);
-    assert.ok(r.data.some((j) => j.company === 'Freshworks'));
+    assert.ok(r.data.some((j) => j.company === 'Demo Analytics'));
+    assert.ok(r.data.every((j) => j.via === 'Sample data'));
     assert.equal(s.urls.length, 0);
   });
 
@@ -98,7 +99,7 @@ await suiteAsync('searchJobs', async () => {
 
   await testAsync('budget block (45 searches this hour) => replay', async () => {
     const s = setup({ SERPAPI_API_KEY: KEY }, (u) => accountOk(u) ?? ok(jobsJson));
-    for (let i = 0; i < 45; i++) await s.store.put(`k${i}`, 'google_jobs', {});
+    for (let i = 0; i < 45; i++) await s.store.put(`k${i}`, 'attempt', {});
     const r = await searchJobs('fresh developer', { userId: 'u1' });
     assert.ok(r.ok && r.mode === 'replay');
     assert.equal(s.searches().length, 0);
@@ -139,7 +140,7 @@ await suiteAsync('searchJobs', async () => {
 
     setup({ SERPAPI_API_KEY: KEY }, () => new Response('{}'));
     setSerpDeps({
-      timeoutMs: 20,
+      searchTimeoutMs: () => 20,
       fetch: ((_u: unknown, init?: RequestInit) =>
         new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(Object.assign(new Error('x'), { name: 'AbortError' }))))) as typeof fetch,
     });
@@ -148,10 +149,53 @@ await suiteAsync('searchJobs', async () => {
   });
 });
 
+await suiteAsync('budget and errors', async () => {
+  await testAsync('failed and timed-out attempts count towards the hour', async () => {
+    const s = setup({ SERPAPI_API_KEY: KEY }, (u) => accountOk(u) ?? ok({ error: 'boom' }, 500));
+    for (let i = 0; i < 45; i++) await searchJobs(`fail ${i} developer`, { userId: 'u1' });
+    const r = await searchJobs('one more developer', { userId: 'u1' });
+    assert.ok(r.ok && r.mode === 'replay');
+    assert.equal(s.searches().length, 45);
+  });
+
+  await testAsync('a DB error on the hour count fails closed to replay', async () => {
+    const s = setup({ SERPAPI_API_KEY: KEY }, (u) => accountOk(u) ?? ok(jobsJson));
+    s.store.countSince = async () => {
+      throw new Error('db down');
+    };
+    const r = await searchJobs('closed developer', { userId: 'u1' });
+    assert.ok(r.ok && r.mode === 'replay');
+    assert.equal(s.searches().length, 0);
+  });
+
+  await testAsync('out-of-credits 429 is budget, a bare 429 is rate', async () => {
+    setup({ SERPAPI_API_KEY: KEY }, (u) =>
+      accountOk(u) ?? ok({ error: 'Your account has run out of searches.' }, 429),
+    );
+    const r = await searchJobs('credit developer', { userId: 'u1' });
+    assert.ok(!r.ok && r.reason === 'budget');
+  });
+
+  await testAsync('empty results cost 0 credits and are cached briefly', async () => {
+    const s = setup({ SERPAPI_API_KEY: KEY }, (u) =>
+      accountOk(u) ?? ok({ error: "Google hasn't returned any results for this query." }),
+    );
+    const r = await searchJobs('nothing developer', { userId: 'u1' });
+    assert.ok(r.ok && r.credits === 0 && r.data.length === 0);
+    const again = await searchJobs('nothing developer', { userId: 'u1' });
+    assert.ok(again.ok && again.cached);
+    assert.equal(s.searches().length, 1);
+    const now = Date.now() + 11 * 60_000;
+    setSerpDeps({ now: () => now });
+    await searchJobs('nothing developer', { userId: 'u1' });
+    assert.equal(s.searches().length, 2);
+  });
+});
+
 await suiteAsync('companyIntel and helpers', async () => {
   await testAsync('replay intel merges rating and headlines', async () => {
     setup({}, () => ok({}));
-    const r = await companyIntel('Zoho', 'job123', 'u1');
+    const r = await companyIntel('Sample Systems', 'job123', 'u1');
     assert.ok(r.ok && r.mode === 'replay');
     assert.equal(r.data.rating, 4.2);
     assert.equal(r.data.headlines.length, 3);

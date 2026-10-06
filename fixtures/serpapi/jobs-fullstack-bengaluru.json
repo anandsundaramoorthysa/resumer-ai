@@ -1,4 +1,6 @@
 {
+  "_synthetic": true,
+  "_note": "Hand-written sample data. Not real postings, companies or links.",
   "search_metadata": {
     "status": "Success",
     "google_domain": "google.co.in"
@@ -13,10 +15,10 @@
   "jobs_results": [
     {
       "title": "Full Stack Developer",
-      "company_name": "Zoho Corporation",
+      "company_name": "Sample Systems Pvt Ltd",
       "location": "Bengaluru, Karnataka",
       "via": "via Naukri",
-      "share_link": "https://www.google.com/search?q=sample-1",
+      "share_link": "https://example.com/sample/9",
       "extensions": [
         "3 days ago",
         "12–18 LPA",
@@ -46,21 +48,21 @@
       "apply_options": [
         {
           "title": "Apply on Naukri",
-          "link": "https://www.naukri.com/job-listings-full-stack-developer-zoho-1"
+          "link": "https://example.com/sample/10"
         },
         {
-          "title": "Apply on Zoho Careers",
-          "link": "https://careers.zohocorp.com/jobs/full-stack-developer"
+          "title": "Apply on Sample Systems Careers",
+          "link": "https://example.com/sample/11"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=2016"
     },
     {
       "title": "Full Stack Developer",
-      "company_name": "Zoho Corporation",
+      "company_name": "Sample Systems Pvt Ltd",
       "location": "Bengaluru, Karnataka",
       "via": "via LinkedIn",
-      "share_link": "https://www.google.com/search?q=sample-2",
+      "share_link": "https://example.com/sample/12",
       "extensions": [
         "5 days ago",
         "Full-time"
@@ -74,17 +76,17 @@
       "apply_options": [
         {
           "title": "Apply on LinkedIn",
-          "link": "https://www.linkedin.com/jobs/view/1001"
+          "link": "https://example.com/sample/13"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=2016"
     },
     {
       "title": "Software Engineer - Full Stack",
-      "company_name": "Razorpay",
+      "company_name": "Demo Payments",
       "location": "Bengaluru, Karnataka",
-      "via": "via Razorpay Careers",
-      "share_link": "https://www.google.com/search?q=sample-3",
+      "via": "via Demo Payments Careers",
+      "share_link": "https://example.com/sample/14",
       "extensions": [
         "1 week ago",
         "Full-time"
@@ -111,18 +113,18 @@
       ],
       "apply_options": [
         {
-          "title": "Apply on Razorpay Careers",
-          "link": "https://razorpay.com/jobs/software-engineer-full-stack"
+          "title": "Apply on Demo Payments Careers",
+          "link": "https://example.com/sample/15"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=308"
     },
     {
       "title": "Junior Web Developer",
-      "company_name": "Pixel Foundry Studio",
+      "company_name": "Example Studio",
       "location": "Bengaluru, Karnataka",
       "via": "via Indeed",
-      "share_link": "https://www.google.com/search?q=sample-4",
+      "share_link": "https://example.com/sample/16",
       "extensions": [
         "Today",
         "Internship"
@@ -149,21 +151,21 @@
       "apply_options": [
         {
           "title": "Apply on Indeed",
-          "link": "https://in.indeed.com/viewjob?jk=sample4"
+          "link": "https://example.com/sample/17"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=2020"
     },
     {
       "title": "Frontend Engineer",
-      "company_name": "Swiggy",
+      "company_name": "Demo Foods",
       "location": "Bengaluru, Karnataka",
-      "via": "via Swiggy Careers",
+      "via": "via Demo Foods Careers",
       "description": "Build fast mobile web experiences with React and TypeScript. Salary range 18 to 26 lakhs per annum.",
       "apply_options": [
         {
           "title": "Apply directly",
-          "link": "https://careers.swiggy.com/frontend-engineer"
+          "link": "https://example.com/sample/18"
         }
       ],
       "job_id": "eyJzYW1wbGUiOjV9"

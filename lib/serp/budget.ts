@@ -12,7 +12,7 @@ import type { SerpMode } from './types';
 export interface CacheStore {
   get(key: string): Promise<{ payload: unknown; fetchedAt: Date } | null>;
   put(key: string, engine: string, payload: unknown): Promise<void>;
-  /** Live searches stored since `since` (account memo excluded). */
+  /** Search attempts (rows with engine 'attempt') since `since`: successes, failures and timeouts alike. */
   countSince(since: Date): Promise<number>;
 }
 
@@ -30,19 +30,20 @@ export function memoryStore(): CacheStore & { rows: Map<string, Row> } {
       rows.set(key, { engine, payload, fetchedAt: new Date() });
     },
     async countSince(since) {
-      return [...rows.values()].filter((r) => r.engine !== 'account' && r.fetchedAt >= since).length;
+      return [...rows.values()].filter((r) => r.engine === 'attempt' && r.fetchedAt >= since).length;
     },
   };
 }
 
-export function drizzleStore(): CacheStore {
+// dbOverride is a test seam (scripts/verify-radar-db.mts); production passes nothing.
+export function drizzleStore(dbOverride?: typeof import('@/lib/db').db): CacheStore {
   const load = async () => {
-    const [{ db }, { serpCache }, orm] = await Promise.all([
+    const [{ db: realDb }, { serpCache }, orm] = await Promise.all([
       import('@/lib/db'),
       import('@/lib/db/schema-radar'),
       import('drizzle-orm'),
     ]);
-    return { db, serpCache, ...orm };
+    return { db: dbOverride ?? realDb, serpCache, ...orm };
   };
   return {
     async get(key) {
@@ -58,11 +59,16 @@ export function drizzleStore(): CacheStore {
         .onConflictDoUpdate({ target: serpCache.key, set: { engine, payload, fetchedAt: new Date() } });
     },
     async countSince(since) {
-      const { db, serpCache, and, gte, ne, sql } = await load();
+      const { db, serpCache, and, gte, eq, lt, sql } = await load();
+      // attempt rows are one-hour bookkeeping: drop the stale ones as we count
+      void db
+        .delete(serpCache)
+        .where(and(eq(serpCache.engine, 'attempt'), lt(serpCache.fetchedAt, new Date(since.getTime() - 3_600_000))))
+        .catch(() => {});
       const [row] = await db
         .select({ n: sql<number>`count(*)::int` })
         .from(serpCache)
-        .where(and(gte(serpCache.fetchedAt, since), ne(serpCache.engine, 'account')));
+        .where(and(gte(serpCache.fetchedAt, since), eq(serpCache.engine, 'attempt')));
       return row?.n ?? 0;
     },
   };
@@ -74,7 +80,10 @@ export interface SerpDeps {
   fetch: typeof fetch;
   env: () => Record<string, string | undefined>;
   now: () => number;
+  /** account.json timeout. */
   timeoutMs: number;
+  /** Per-search timeout by engine. No automatic retry: a retry is a second credit. */
+  searchTimeoutMs: (engine: string) => number;
 }
 
 const defaults = (): SerpDeps => ({
@@ -83,9 +92,13 @@ const defaults = (): SerpDeps => ({
   env: () => process.env,
   now: () => Date.now(),
   timeoutMs: 6_000,
+  searchTimeoutMs: (engine) => (engine === 'google_news' ? 10_000 : 15_000),
 });
 
-const mg = globalThis as unknown as { __serpMemo?: { at: number; left: number } | null };
+const mg = globalThis as unknown as {
+  __serpMemo?: { at: number; left: number } | null;
+  __serpAttempts?: number[];
+};
 
 // Mutated in place, never reassigned: other modules hold this object, and a reassigned
 // `export let` is not seen through every module format.
@@ -95,10 +108,12 @@ export const deps: SerpDeps = (g.__serpDeps ??= defaults());
 export const setSerpDeps = (d: Partial<SerpDeps>): void => {
   Object.assign(deps, d);
   mg.__serpMemo = null;
+  mg.__serpAttempts = [];
 };
 export const resetSerpDeps = (): void => {
   Object.assign(deps, defaults());
   mg.__serpMemo = null;
+  mg.__serpAttempts = [];
 };
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -167,12 +182,34 @@ async function searchesLeft(): Promise<number> {
   }
 }
 
-// ponytail: hour usage = cache rows written in the last hour; a forced refresh of one key counts once. Add a counter table if that undercount matters.
-export async function hourUsed(): Promise<number> {
+/**
+ * Record that a billable search is about to be sent. Counts failures, timeouts and forced
+ * refreshes too (SerpApi may bill them). Best-effort: an 'attempt' row in serp_cache (shared
+ * across instances) plus an in-memory list (survives a DB write failure, per instance only).
+ */
+export async function noteAttempt(): Promise<void> {
+  const now = deps.now();
+  (mg.__serpAttempts ??= []).push(now);
   try {
-    return await deps.store.countSince(new Date(deps.now() - 3_600_000));
+    await deps.store.put(`attempt:${now}:${Math.random().toString(36).slice(2)}`, 'attempt', {});
   } catch {
-    return 0;
+    // the in-memory count still binds
+  }
+}
+
+/**
+ * Searches attempted in the last hour: max(DB attempt rows, this instance's memory list).
+ * FAILS CLOSED: if the DB count cannot be read the answer is "limit reached", so the guard
+ * drops to replay mode (fixtures, zero credits) rather than spending blind. Replay itself
+ * never touches the DB, so it keeps working.
+ */
+export async function hourUsed(): Promise<number> {
+  const since = deps.now() - 3_600_000;
+  const mem = (mg.__serpAttempts = (mg.__serpAttempts ?? []).filter((t) => t >= since)).length;
+  try {
+    return Math.max(mem, await deps.store.countSince(new Date(since)));
+  } catch {
+    return MAX_PER_HOUR;
   }
 }
 

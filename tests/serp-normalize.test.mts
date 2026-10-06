@@ -22,11 +22,11 @@ suite('normalizeJobs', () => {
     assert.equal(z.via, 'Naukri');
     assert.equal(z.postedAt, '3 days ago');
     assert.equal(z.applyLinks.length, 2);
-    assert.equal(z.key, postingKey('Full Stack Developer', 'Zoho Corporation'));
+    assert.equal(z.key, postingKey('Full Stack Developer', 'Sample Systems Pvt Ltd'));
     assert.deepEqual(z.salaryLpa, { min: 12, max: 18, source: 'regex' });
   });
   test('tolerates missing detected_extensions and job_highlights', () => {
-    const swiggy = jobs.find((j) => j.company === 'Swiggy')!;
+    const swiggy = jobs.find((j) => j.company === 'Demo Foods')!;
     assert.equal(swiggy.postedAt, '');
     assert.equal(swiggy.scheduleType, '');
     assert.deepEqual(swiggy.highlights, []);
@@ -49,7 +49,7 @@ suite('dedupePostings', () => {
     assert.equal(deduped.length, 4);
   });
   test('keeps the richest description and merges apply links', () => {
-    const z = deduped.find((j) => j.company === 'Zoho Corporation')!;
+    const z = deduped.find((j) => j.company === 'Sample Systems Pvt Ltd')!;
     assert.ok(z.description.length > 100);
     assert.equal(z.applyLinks.length, 3);
     assert.equal(new Set(z.applyLinks.map((l) => l.link)).size, 3);
@@ -61,8 +61,8 @@ suite('dedupePostings', () => {
 
 suite('parseListing / parseNews', () => {
   test('best rating, reviews like "5.3K" parsed', () => {
-    const i = parseListing(fx('listing-sample'), 'Zoho');
-    assert.deepEqual(i, { company: 'Zoho', rating: 4.2, ratingSource: 'AmbitionBox', reviewsCount: 5300, headlines: [] });
+    const i = parseListing(fx('listing-sample'), 'Sample Systems');
+    assert.deepEqual(i, { company: 'Sample Systems', rating: 4.2, ratingSource: 'Sample Reviews', reviewsCount: 5300, headlines: [] });
   });
   test('rating 0 when the listing has none', () => {
     const i = parseListing({}, 'Acme');
@@ -73,7 +73,62 @@ suite('parseListing / parseNews', () => {
   test('news capped at 3, source name flattened', () => {
     const n = parseNews(fx('news-sample'));
     assert.equal(n.length, 3);
-    assert.equal(n[0].source, 'The Hindu BusinessLine');
+    assert.equal(n[0].source, 'Sample Business Daily');
     assert.deepEqual(parseNews({}), []);
+  });
+});
+
+suite('untrusted input', () => {
+  const job = (extra: Record<string, unknown>) => ({
+    jobs_results: [{ title: 'Dev', company_name: 'Acme', ...extra }],
+  });
+  test('only absolute http(s) apply links survive', () => {
+    const [p] = normalizeJobs(
+      job({
+        apply_options: [
+          { title: 'a', link: 'javascript:alert(1)' },
+          { title: 'b', link: 'data:text/html,<script>alert(1)</script>' },
+          { title: 'c', link: '/relative/path' },
+          { title: 'd', link: '' },
+          { title: 'e', link: 'https://example.com/ok' },
+          { title: 'f', link: 'http://example.com/ok2' },
+        ],
+      }),
+    );
+    assert.deepEqual(p.applyLinks.map((l) => l.link), ['https://example.com/ok', 'http://example.com/ok2']);
+  });
+  test('news links are http(s) only; the item is dropped otherwise', () => {
+    const n = parseNews({
+      news_results: [
+        { title: 'bad', link: 'javascript:alert(1)', source: 'x' },
+        { title: 'good', link: 'https://example.com/n', source: 'x' },
+      ],
+    });
+    assert.deepEqual(n.map((x) => x.title), ['good']);
+  });
+  test('lengths are capped', () => {
+    const long = 'x'.repeat(1000);
+    const [p] = normalizeJobs({
+      jobs_results: [
+        {
+          title: long,
+          company_name: long,
+          via: `via ${long}`,
+          apply_options: Array.from({ length: 10 }, (_, i) => ({ title: long, link: `https://example.com/${i}` })).concat([
+            { title: 'long', link: `https://example.com/${long}` },
+          ]),
+          job_highlights: [{ items: Array.from({ length: 30 }, () => long) }],
+        },
+      ],
+    });
+    assert.equal(p.title.length, 200);
+    assert.equal(p.company.length, 120);
+    assert.equal(p.via.length, 60);
+    assert.equal(p.applyLinks.length, 6);
+    assert.ok(p.applyLinks.every((l) => l.title.length <= 120 && l.link.length <= 500));
+    assert.equal(p.highlights.length, 12);
+    assert.ok(p.highlights.every((h) => h.length === 300));
+    const news = parseNews({ news_results: Array.from({ length: 9 }, (_, i) => ({ title: 't', link: `https://e.com/${i}` })) }, 99);
+    assert.equal(news.length, 5);
   });
 });

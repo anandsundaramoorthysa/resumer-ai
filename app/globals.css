@@ -2,14 +2,14 @@
 
 /**
  * "Ink on paper, red-pen edit" tokens (docs/hackathon/UI-PLAN.md section 1). Contrast ratios
- * were computed: ink/paper 14.9, muted/paper 6.1, brand/paper 5.2, blue/paper 9.8,
- * rule/paper 4.1. Brand and blue carry text only on paper/surface, never on tints.
+ * were computed on white: ink/paper 17.4, muted/paper 7.2, brand/paper 6.0, blue/paper 11.5,
+ * rule/paper 4.8. Brand and blue carry text only on paper/surface, never on tints.
  * `--color-line` is decorative hairlines only; controls use `--color-rule` (>=3:1).
  * `--color-hl` is a BACKGROUND behind ink text, never a text color.
  */
 @theme {
-  --color-paper: #f3ede0;
-  --color-surface: #fbf8f1;
+  --color-paper: #ffffff;
+  --color-surface: #ffffff;
   --color-ink: #1b1a17;
   --color-muted: #5e574a;
   --color-line: #d9d0bd;
@@ -17,21 +17,19 @@
 
   --color-brand: #b8301a;
   --color-brand-dark: #8f2412;
-  --color-brand-tint: #f2ddd2;
+  --color-brand-tint: #f9e7df;
   --color-on-brand: #ffffff;
 
   --color-blue: #1f3a5f;
   --color-hl: #f2d95c;
-  /* gold is a legacy alias of blue; stop using it in new code. */
-  --color-gold: var(--color-blue);
   --color-gold-tint: #e6e9ee;
 
   --color-success: #1e6b39;
-  --color-success-tint: #dde9d6;
+  --color-success-tint: #e4f0de;
   --color-warning: #85500a;
-  --color-warning-tint: #f3e2c0;
+  --color-warning-tint: #f8eacb;
   --color-danger: #a3281a;
-  --color-danger-tint: #f4dad0;
+  --color-danger-tint: #f9e1d8;
 
   --font-display: var(--font-fraunces), Georgia, serif;
   --font-sans: var(--font-instrument), ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -47,7 +45,6 @@
 /**
  * The dark palette, as plain CSS rather than a second `@theme`.
  *
- * This was `/*
  * Which palette applies, in three cases:
  *
  *   no `data-theme`          follow the device, as it always has.

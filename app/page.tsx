@@ -6,6 +6,7 @@ import { hasAnyProvider, availableProviders } from '@/lib/ai/models';
 import { AppHeader } from '@/components/app-header';
 import { DraftConsole } from '@/components/draft-console';
 import { Landing } from '@/components/landing/landing';
+import { ClearRadarHandoff } from '@/components/radar/clear-handoff';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { getDashboardData } from '@/lib/server/dashboard';
 import { approvalFor } from '@/lib/server/approval';
@@ -51,6 +52,7 @@ export default async function HomePage() {
     return (
       <Shell userName={session.user.name ?? undefined}>
         <div className="mx-auto max-w-2xl">
+          <ClearRadarHandoff />
           <p className="eyebrow">§ 1 Get started</p>
           <h1 className="mt-2 font-display text-3xl tracking-tight">
             Let&apos;s get your profile in, {firstName}

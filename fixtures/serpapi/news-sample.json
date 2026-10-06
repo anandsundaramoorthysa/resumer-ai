@@ -1,47 +1,49 @@
 {
+  "_synthetic": true,
+  "_note": "Hand-written sample data. Not real postings, companies or links.",
   "search_metadata": {
     "status": "Success"
   },
   "search_parameters": {
     "engine": "google_news",
-    "q": "Zoho",
+    "q": "Sample Systems",
     "so": "1",
     "gl": "in"
   },
   "news_results": [
     {
       "position": 1,
-      "title": "Zoho opens a new campus to hire 1,000 engineers",
-      "link": "https://example.com/news/zoho-campus",
+      "title": "Sample Systems opens a new campus to hire 1,000 engineers",
+      "link": "https://example.com/sample/27",
       "source": {
-        "name": "The Hindu BusinessLine"
+        "name": "Sample Business Daily"
       },
       "date": "10/02/2026, 08:00 AM, +0000 UTC"
     },
     {
       "position": 2,
-      "title": "Zoho launches new AI features across its suite",
-      "link": "https://example.com/news/zoho-ai",
+      "title": "Sample Systems launches new AI features across its suite",
+      "link": "https://example.com/sample/28",
       "source": {
-        "name": "Economic Times"
+        "name": "Sample Times"
       },
       "date": "09/28/2026, 05:30 AM, +0000 UTC"
     },
     {
       "position": 3,
       "title": "Why Chennai remains a hub for product companies",
-      "link": "https://example.com/news/chennai-product",
+      "link": "https://example.com/sample/29",
       "source": {
-        "name": "Moneycontrol"
+        "name": "Demo Markets"
       },
       "date": "09/20/2026, 11:10 AM, +0000 UTC"
     },
     {
       "position": 4,
       "title": "A fourth story that the top-3 limit should cut",
-      "link": "https://example.com/news/extra",
+      "link": "https://example.com/sample/30",
       "source": {
-        "name": "Mint"
+        "name": "Example Mint"
       },
       "date": "09/10/2026, 11:10 AM, +0000 UTC"
     }

@@ -19,7 +19,7 @@ export function MarketCard({ market }: { market: MarketSignal }) {
 
       {s.n > 0 ? (
         <>
-          <dl className="mt-4 grid grid-cols-3 gap-3 border-y border-line py-3">
+          <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 border-y border-line py-3">
             {pcts.map(([l, v]) => (
               <div key={l}>
                 <dt className="eyebrow">{l}</dt>

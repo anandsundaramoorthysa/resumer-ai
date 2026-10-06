@@ -128,6 +128,9 @@ export function ResumeEditor({
       });
     if (edits.length === 0) return;
 
+    inFlight.current = Object.fromEntries(
+      edits.map((e) => [keyOf(e.sectionKey, e.groupIndex, e.itemIndex), e.text]),
+    );
     setSaving(true);
     setSaveError(null);
     try {
@@ -157,9 +160,37 @@ export function ResumeEditor({
     } catch {
       setSaveError('Your changes could not be saved. Check your connection and try again.');
     } finally {
+      inFlight.current = {};
       setSaving(false);
     }
   }, [drafts, saved, snapshotId]);
+
+  // Client-side navigation never fires beforeunload, so flush on unmount. Lines already
+  // carried by an in-flight save (same text) are left out so nothing is sent twice.
+  const latest = useRef({ drafts, saved, sent });
+  const inFlight = useRef<Record<string, string>>({});
+  useEffect(() => {
+    latest.current = { drafts, saved, sent };
+  });
+  useEffect(() => {
+    return () => {
+      const { drafts: d, saved: s, sent: ro } = latest.current;
+      if (ro) return;
+      const edits = Object.keys(d)
+        .filter((k) => s.has(k) && d[k] !== s.get(k)!.text && inFlight.current[k] !== d[k])
+        .map((k) => {
+          const f = s.get(k)!;
+          return { sectionKey: f.sectionKey, groupIndex: f.groupIndex, itemIndex: f.itemIndex, text: d[k] };
+        });
+      if (edits.length === 0) return;
+      void fetch(`/api/resume/${snapshotId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ edits }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+  }, [snapshotId]);
 
   // Debounced autosave. After a failure it waits for the next edit (or "Try saving
   // again") instead of hammering a server that just said no.
@@ -196,7 +227,7 @@ export function ResumeEditor({
 
   const exportLink = (href: string, label: string, primary: boolean) =>
     unsaved ? (
-      <button type="button" disabled className={`btn ${primary ? 'btn-primary' : ''}`}>
+      <button type="button" disabled aria-describedby="export-locked" className={`btn ${primary ? 'btn-primary' : ''}`}>
         {label}
       </button>
     ) : (
@@ -314,7 +345,7 @@ export function ResumeEditor({
           </div>
         </div>
         {unsaved ? (
-          <p className="mt-3 text-xs text-warning">
+          <p id="export-locked" className="mt-3 text-xs text-warning">
             Exports use the saved version, so downloads unlock once your changes are saved.
           </p>
         ) : null}

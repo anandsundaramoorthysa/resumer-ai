@@ -1,4 +1,6 @@
 {
+  "_synthetic": true,
+  "_note": "Hand-written sample data. Not real postings, companies or links.",
   "search_metadata": {
     "status": "Success",
     "google_domain": "google.co.in"
@@ -13,10 +15,10 @@
   "jobs_results": [
     {
       "title": "Data Analyst",
-      "company_name": "Freshworks",
+      "company_name": "Demo Analytics",
       "location": "Chennai, Tamil Nadu",
       "via": "via Naukri",
-      "share_link": "https://www.google.com/search?q=sample-1",
+      "share_link": "https://example.com/sample/1",
       "extensions": [
         "2 days ago",
         "₹6–10 LPA",
@@ -46,17 +48,17 @@
       "apply_options": [
         {
           "title": "Apply on Naukri",
-          "link": "https://www.naukri.com/job-listings-data-analyst-freshworks-2"
+          "link": "https://example.com/sample/2"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=1210"
     },
     {
       "title": "Business Data Analyst",
-      "company_name": "Zoho Corporation",
+      "company_name": "Sample Systems Pvt Ltd",
       "location": "Chennai, Tamil Nadu",
       "via": "via LinkedIn",
-      "share_link": "https://www.google.com/search?q=sample-2",
+      "share_link": "https://example.com/sample/3",
       "extensions": [
         "4 days ago",
         "Full-time"
@@ -83,17 +85,17 @@
       "apply_options": [
         {
           "title": "Apply on LinkedIn",
-          "link": "https://www.linkedin.com/jobs/view/2002"
+          "link": "https://example.com/sample/4"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=2116"
     },
     {
       "title": "Junior Data Analyst",
-      "company_name": "Chargebee",
+      "company_name": "Sample Billing",
       "location": "Chennai, Tamil Nadu",
-      "via": "via Chargebee Careers",
-      "share_link": "https://www.google.com/search?q=sample-3",
+      "via": "via Sample Billing Careers",
+      "share_link": "https://example.com/sample/5",
       "extensions": [
         "1 week ago",
         "Full-time"
@@ -106,18 +108,18 @@
       "job_highlights": [],
       "apply_options": [
         {
-          "title": "Apply on Chargebee Careers",
-          "link": "https://www.chargebee.com/careers/junior-data-analyst"
+          "title": "Apply on Sample Billing Careers",
+          "link": "https://example.com/sample/6"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=199"
     },
     {
       "title": "Analytics Intern",
-      "company_name": "Kissflow",
+      "company_name": "Example Flow",
       "location": "Chennai, Tamil Nadu",
       "via": "via Internshala",
-      "share_link": "https://www.google.com/search?q=sample-4",
+      "share_link": "https://example.com/sample/7",
       "extensions": [
         "Today",
         "Internship"
@@ -144,7 +146,7 @@
       "apply_options": [
         {
           "title": "Apply on Internshala",
-          "link": "https://internshala.com/job/detail/analytics-intern-kissflow"
+          "link": "https://example.com/sample/8"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=168"

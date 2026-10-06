@@ -56,12 +56,11 @@ export function Landing() {
         </ol>
       </section>
 
-      <p className="mt-10 max-w-prose text-sm text-muted">
-        It is a drafting tool, not a guarantee: scores are the model&apos;s estimate and you
-        approve what goes on the page.
-      </p>
-
       <footer className="mt-10 border-t border-line py-6 text-xs text-muted">
+        <p className="mb-3 max-w-prose text-sm">
+          It is a drafting tool, not a guarantee: scores are the model&apos;s estimate and you
+          approve what goes on the page.
+        </p>
         Resumer AI · Read-only access to your repositories · Access by owner approval
       </footer>
     </>

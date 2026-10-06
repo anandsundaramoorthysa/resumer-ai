@@ -105,7 +105,7 @@ export default async function ActivityPage() {
                   </div>
 
                   {status === 'failed' || status === 'killed' ? (
-                    <p className="mt-2 bg-danger-tint px-3 py-2 text-ink font-mono text-xs text-danger [overflow-wrap:anywhere]">
+                    <p className="mt-2 bg-danger-tint px-3 py-2 font-mono text-xs text-danger [overflow-wrap:anywhere]">
                       {status === 'killed'
                         ? 'Stopped at the time limit before it could finish.'
                         : `${r.errorKind ?? 'unknown'}${operator && r.errorDetail ? ` — ${r.errorDetail}` : ''}`}

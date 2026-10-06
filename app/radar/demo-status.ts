@@ -7,7 +7,8 @@
 import type { RadarStatus, RadarEvent } from '@/lib/radar/events';
 import type { Posting, RankedPosting, EmployerIntel, MarketSignal } from '@/lib/serp/types';
 
-const STAGES = ['plan', 'awaiting-queries', 'search:q0', 'search:q1', 'rank', 'intel:0', 'market', 'select', 'done'];
+// Same phase names as lib/radar/runs.ts: plan -> awaiting-queries -> search -> rank -> intel -> select -> done.
+const STAGES = ['plan', 'awaiting-queries', 'search', 'rank', 'intel', 'select', 'done'];
 const STEP_MS = 1500;
 
 const QUERIES = [
@@ -55,11 +56,9 @@ const MARKET: MarketSignal = {
 const LOG: [string, RadarEvent['level'], string, string?][] = [
   ['plan', 'info', 'Planned 2 searches from your profile', 'groq'],
   ['awaiting-queries', 'info', 'Waiting for you to approve the searches'],
-  ['search:q0', 'info', 'Found 3 postings for "junior full stack developer…"', 'serpapi:google_jobs'],
-  ['search:q1', 'info', 'Found 2 postings for "software engineer typescript…"', 'serpapi:google_jobs'],
-  ['rank', 'info', 'Ranked 4 postings against your resume', 'local'],
-  ['intel:0', 'info', 'Looked up Lumen Labs', 'serpapi:google_maps'],
-  ['market', 'info', 'Summarised pay and skills across 4 postings', 'local'],
+  ['search', 'info', 'Found 5 postings across 2 searches', 'serpapi:google_jobs'],
+  ['rank', 'info', 'Ranked 4 postings and summarised pay and skills', 'local'],
+  ['intel', 'info', 'Looked up Lumen Labs', 'serpapi:google_maps'],
   ['select', 'info', 'Pick the posting to tailor your resume for'],
   ['done', 'info', 'Done'],
 ];
@@ -70,16 +69,17 @@ export function demoStatus(phase: string, intelOn: boolean, base: number, edited
     .filter(([p]) => intelOn || !p.startsWith('intel'))
     .map(([p, level, message, source], n) => ({ at: new Date(base + n * STEP_MS).toISOString(), level, phase: p, message, ...(source ? { source } : {}) }));
   const gate = phase === 'awaiting-queries' ? 'queries' : phase === 'select' ? 'select' : '';
+  const steps = intelOn ? 6 : 5;
   return {
-    runId: 'demo', mode: 'replay', error: '', phase, step: i, totalSteps: STAGES.length - 1,
+    runId: 'demo', mode: 'replay', error: '', phase, step: intelOn || i < 5 ? i : i - 1, totalSteps: steps,
     status: gate ? 'awaiting' : phase === 'done' ? 'done' : 'running',
     gate, message: LOG[i][2], events, creditsUsed: i >= 3 ? (intelOn && i >= 5 ? 3 : 2) : 0,
     state: {
       intelOn, gate, plan: i >= 0 ? { queries: QUERIES, location: 'India', seniority: 'entry', rationale: 'Sample plan' } : null,
       queries: i >= 1 ? edited ?? QUERIES : [],
-      postings: i >= 3 ? POSTINGS : [], okQueries: Math.min(2, Math.max(0, i - 1)),
+      postings: i >= 3 ? POSTINGS : [], okQueries: i >= 3 ? 2 : 0,
       ranked: i >= 4 ? RANKED : [], intelTargets: [], intel: i >= 5 && intelOn ? INTEL : [],
-      market: i >= 6 ? MARKET : null, selectedKey: '',
+      market: i >= 4 ? MARKET : null, selectedKey: '', retries: 0,
     },
   };
 }
@@ -88,14 +88,15 @@ export const demoStart = (intel: boolean) => demoStatus('plan', intel, Date.now(
 
 /** One advance step; `queries` carried from the approval so edits survive. */
 export function demoAdvance(run: RadarStatus): RadarStatus {
-  const next = STAGES[Math.min(STAGES.indexOf(run.phase) + 1, STAGES.length - 1)];
+  let next = STAGES[Math.min(STAGES.indexOf(run.phase) + 1, STAGES.length - 1)];
+  if (next === 'intel' && !run.state.intelOn) next = 'select';
   const base = run.events.length ? Date.parse(run.events[0].at) : Date.now();
   return demoStatus(next, run.state.intelOn, base, run.state.queries);
 }
 
 export function demoApprove(run: RadarStatus, queries: { q: string; why: string }[]): RadarStatus {
   const base = Date.parse(run.events[0]?.at ?? '') || Date.now();
-  return demoStatus('search:q0', run.state.intelOn, base, queries);
+  return demoStatus('search', run.state.intelOn, base, queries);
 }
 
 export function demoSelect(run: RadarStatus, key: string): RadarStatus & { jobText: string } {

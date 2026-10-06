@@ -1,4 +1,6 @@
 {
+  "_synthetic": true,
+  "_note": "Hand-written sample data. Not real postings, companies or links.",
   "search_metadata": {
     "status": "Success",
     "google_domain": "google.co.in"
@@ -13,10 +15,10 @@
   "jobs_results": [
     {
       "title": "Machine Learning Engineer",
-      "company_name": "Microsoft India",
+      "company_name": "Sample Cloud India",
       "location": "Hyderabad, Telangana",
-      "via": "via Microsoft Careers",
-      "share_link": "https://www.google.com/search?q=sample-1",
+      "via": "via Sample Cloud Careers",
+      "share_link": "https://example.com/sample/19",
       "extensions": [
         "2 days ago",
         "Full-time"
@@ -43,18 +45,18 @@
       ],
       "apply_options": [
         {
-          "title": "Apply on Microsoft Careers",
-          "link": "https://careers.microsoft.com/jobs/ml-engineer-hyd"
+          "title": "Apply on Sample Cloud Careers",
+          "link": "https://example.com/sample/20"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=2515"
     },
     {
       "title": "ML Engineer",
-      "company_name": "Darwinbox",
+      "company_name": "Example Labs",
       "location": "Hyderabad, Telangana",
       "via": "via Naukri",
-      "share_link": "https://www.google.com/search?q=sample-2",
+      "share_link": "https://example.com/sample/21",
       "extensions": [
         "6 days ago",
         "25–40 LPA",
@@ -84,17 +86,17 @@
       "apply_options": [
         {
           "title": "Apply on Naukri",
-          "link": "https://www.naukri.com/job-listings-ml-engineer-darwinbox-3"
+          "link": "https://example.com/sample/22"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=119"
     },
     {
       "title": "Associate Data Scientist",
-      "company_name": "Amazon Development Centre",
+      "company_name": "Demo Commerce Centre",
       "location": "Hyderabad, Telangana",
-      "via": "via Amazon Jobs",
-      "share_link": "https://www.google.com/search?q=sample-3",
+      "via": "via Demo Commerce Jobs",
+      "share_link": "https://example.com/sample/23",
       "extensions": [
         "1 week ago",
         "Full-time"
@@ -120,8 +122,8 @@
       ],
       "apply_options": [
         {
-          "title": "Apply on Amazon Jobs",
-          "link": "https://www.amazon.jobs/en/jobs/associate-data-scientist-hyd"
+          "title": "Apply on Demo Commerce Jobs",
+          "link": "https://example.com/sample/24"
         }
       ],
       "job_id": "eyJzYW1wbGUiOiR7aX0=2425"

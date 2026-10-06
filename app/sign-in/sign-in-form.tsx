@@ -165,7 +165,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
         </p>
       ) : null}
 
-      <div className="mt-3 flex flex-wrap justify-between gap-3 text-xs">
+      <div className="mt-3 flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs">
         <Link
           href="/forgot-password"
           className="inline-flex min-h-11 items-center text-muted underline hover:text-ink"
@@ -179,7 +179,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
           type="button"
           onClick={resend}
           disabled={pending || email.trim().length < 4}
-          className="inline-flex min-h-11 items-center text-muted underline hover:text-ink disabled:opacity-50"
+          className="inline-flex min-h-11 items-center text-ink underline hover:text-brand disabled:text-muted disabled:no-underline"
         >
           Resend the confirmation email
         </button>

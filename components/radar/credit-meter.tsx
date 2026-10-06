@@ -1,7 +1,8 @@
 import type { Credits } from './use-radar';
 
 /** SerpApi credits left and this hour's use. -1 means the server could not tell. */
-export function CreditMeter({ credits, used }: { credits: Credits | null; used: number }) {
+export function CreditMeter({ credits, used, sample = false }: { credits: Credits | null; used: number; sample?: boolean }) {
+  if (sample) return <p className="font-mono text-xs text-muted">Sample data — no credits used</p>;
   if (!credits) return <p className="font-mono text-xs text-muted">Credits: checking…</p>;
   return (
     <dl className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-xs">

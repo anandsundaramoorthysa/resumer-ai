@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { EmployerIntel, Posting, RankedPosting } from '@/lib/serp/types';
 import { KeywordHighlight } from '@/components/keyword-highlight';
 import { ScoreStamp } from '@/components/score-stamp';
@@ -14,6 +15,8 @@ export function ResultRow({
   busy,
   chosen,
   onSelect,
+  sample = false,
+  signInToTailor = false,
 }: {
   posting: Posting;
   rank: RankedPosting;
@@ -22,6 +25,10 @@ export function ResultRow({
   busy: boolean;
   chosen: boolean;
   onSelect: () => void;
+  /** Synthetic demo posting: its links go nowhere real, so they are not navigable. */
+  sample?: boolean;
+  /** Public demo: tailoring needs an account, so link to sign-in instead of selecting. */
+  signInToTailor?: boolean;
 }) {
   const sal = posting.salaryLpa;
   const news = intel?.headlines[0];
@@ -69,22 +76,38 @@ export function ResultRow({
             Rating {intel.rating.toFixed(1)}/5 · {intel.ratingSource}
           </Chip>
         )}
-        {news && (
+        {news && sample && (
+          <span aria-disabled="true" className={`${linkChip} no-underline opacity-70`}>
+            <span className="truncate">Sample news: {news.title}</span>
+          </span>
+        )}
+        {news && !sample && (
           <a href={news.link} target="_blank" rel="noopener noreferrer" className={linkChip}>
             <span className="truncate">News: {news.title}</span>
             <span className="sr-only"> (opens in a new tab)</span>
           </a>
         )}
-        {posting.applyLinks.slice(0, 3).map((l) => (
-          <a key={l.link} href={l.link} target="_blank" rel="noopener noreferrer" className={linkChip}>
-            Listed on {l.title.replace(/^Apply (on|at|via)\s+/i, '')}
-            <span className="sr-only"> (opens in a new tab)</span>
-          </a>
-        ))}
+        {posting.applyLinks.slice(0, 3).map((l) =>
+          sample ? (
+            <span key={l.link} aria-disabled="true" className={`${linkChip} no-underline opacity-70`}>
+              Sample posting · {l.title.replace(/^Apply (on|at|via)\s+/i, '')}
+            </span>
+          ) : (
+            <a key={l.link} href={l.link} target="_blank" rel="noopener noreferrer" className={linkChip}>
+              Listed on {l.title.replace(/^Apply (on|at|via)\s+/i, '')}
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          ),
+        )}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-3">
-        {canSelect && (
+        {canSelect && signInToTailor && (
+          <Link href="/sign-in" className="btn btn-primary">
+            Sign in to tailor with your own profile
+          </Link>
+        )}
+        {canSelect && !signInToTailor && (
           <button type="button" className="btn btn-primary" disabled={busy} onClick={onSelect}>
             Tailor my resume
             <span className="sr-only">
@@ -94,7 +117,12 @@ export function ResultRow({
           </button>
         )}
         {chosen && !canSelect && <Chip>Selected</Chip>}
-        {apply && (
+        {apply && sample && (
+          <span aria-disabled="true" className="btn opacity-60">
+            Sample posting
+          </span>
+        )}
+        {apply && !sample && (
           <a href={apply.link} target="_blank" rel="noopener noreferrer" className="btn">
             Apply on {posting.via || apply.title}
             <span className="sr-only"> (opens in a new tab)</span>

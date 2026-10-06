@@ -1,15 +1,20 @@
-/** Job Radar tables. Re-exported by schema.ts; apply with `npm run db:push`. */
+/** Job Radar tables. Re-exported by schema.ts; apply with `npm run db:push` (or scripts/2026-10-06-job-radar.sql). */
 
-import { index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { users } from './schema';
 
 /** SerpApi responses, keyed by sha256(engine + sorted params minus api_key). Also holds the account.json memo. */
-export const serpCache = pgTable('serp_cache', {
-  key: text('key').primaryKey(),
-  engine: text('engine').notNull(),
-  payload: jsonb('payload').$type<unknown>().notNull(),
-  fetchedAt: timestamp('fetched_at').defaultNow().notNull(),
-});
+export const serpCache = pgTable(
+  'serp_cache',
+  {
+    key: text('key').primaryKey(),
+    engine: text('engine').notNull(),
+    payload: jsonb('payload').$type<unknown>().notNull(),
+    fetchedAt: timestamp('fetched_at').defaultNow().notNull(),
+  },
+  (t) => [index('serp_cache_fetched_idx').on(t.fetchedAt)],
+);
 
 export interface RadarEventRow {
   at: string;
@@ -44,6 +49,14 @@ export const agentRuns = pgTable(
     error: text('error').notNull().default(''),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    /** Step lease: one worker owns the current step until this passes. Null = unclaimed. */
+    leasedUntil: timestamp('leased_until', { withTimezone: true }),
   },
-  (t) => [index('agent_run_user_created_idx').on(t.userId, t.createdAt)],
+  (t) => [
+    index('agent_run_user_created_idx').on(t.userId, t.createdAt),
+    // At most one active run per user, enforced by the database.
+    uniqueIndex('agent_run_one_active_idx')
+      .on(t.userId)
+      .where(sql`${t.status} in ('running', 'awaiting')`),
+  ],
 );

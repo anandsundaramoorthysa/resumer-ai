@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Timeline } from './timeline';
@@ -10,15 +11,30 @@ import { CreditMeter } from './credit-meter';
 import { Chip, SampleChip } from './chip';
 import { useRadar } from './use-radar';
 
-export function RunView({ demo }: { demo: boolean }) {
+export function RunView({
+  demo,
+  publicDemo = false,
+  hasProfile,
+}: {
+  demo: boolean;
+  /** Signed-out sample page: no tailoring, no credit lookups, no real apply links. */
+  publicDemo?: boolean;
+  hasProfile: boolean;
+}) {
   const router = useRouter();
   const r = useRadar(demo);
   const [intel, setIntel] = useState(false);
+  const [needProfile, setNeedProfile] = useState(false);
   const { run } = r;
 
   async function tailor(key: string) {
+    setNeedProfile(false);
     const out = await r.select(key);
     if (!out) return;
+    if (!hasProfile) {
+      setNeedProfile(true);
+      return;
+    }
     const p = out.state.postings.find((x) => x.key === key);
     try {
       sessionStorage.setItem('radar:jobText', out.jobText);
@@ -38,12 +54,25 @@ export function RunView({ demo }: { demo: boolean }) {
     <div className="mt-8">
       {demo && (
         <p className="mb-4 border border-dashed border-rule p-3 text-sm">
-          <SampleChip /> <span className="ml-1">Demo mode: a scripted run with invented postings. Nothing is searched or spent.</span>
+          <SampleChip />{' '}
+          <span className="ml-1">
+            {publicDemo
+              ? 'Sample data — a scripted demo. No live search is running.'
+              : 'Demo mode: a scripted run with invented postings. Nothing is searched or spent.'}
+          </span>
         </p>
       )}
       <div className="mb-6 border-y border-line py-3">
-        <CreditMeter credits={r.credits} used={run?.creditsUsed ?? 0} />
+        <CreditMeter credits={r.credits} used={run?.creditsUsed ?? 0} sample={demo} />
       </div>
+      {needProfile && (
+        <p role="status" className="mb-4 border border-warning bg-warning-tint p-3 text-sm">
+          Add your profile first so the tailored resume has real facts to use.{' '}
+          <Link href="/import" className="font-semibold underline">
+            Import your resume
+          </Link>
+        </p>
+      )}
 
       <div role="status" aria-live="polite" className="sr-only">
         {run ? `Step ${run.step} of ${run.totalSteps}: ${run.message}` : ''}
@@ -148,6 +177,8 @@ export function RunView({ demo }: { demo: boolean }) {
                         busy={r.busy}
                         chosen={run.state.selectedKey === rk.key}
                         onSelect={() => tailor(rk.key)}
+                        sample={demo}
+                        signInToTailor={publicDemo}
                       />
                     );
                   })}

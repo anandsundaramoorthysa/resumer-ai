@@ -110,7 +110,7 @@ export function DesktopSidebar({
                   href={link.href}
                   aria-current={active ? 'page' : undefined}
                   title={collapsed ? link.label : undefined}
-                                    className={`${ROW} ${pad} ${
+                  className={`${ROW} ${pad} ${
                     active
                       ? 'font-semibold text-ink'
                       : 'font-medium text-muted hover:bg-paper hover:text-ink'

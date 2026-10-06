@@ -73,7 +73,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F3EDE0' },
+    { media: '(prefers-color-scheme: light)', color: '#FFFFFF' },
     { media: '(prefers-color-scheme: dark)', color: '#17150F' },
   ],
   width: 'device-width',
@@ -106,7 +106,7 @@ const structuredData = {
  * effect would paint the system theme first and flip after hydration. Nothing else writes
  * this attribute, so React never has to agree with it.
  */
-const APPLY_THEME = `(function(){try{var m=document.cookie.match(/(?:^|; )theme=(light|dark)/);if(m){document.documentElement.setAttribute('data-theme',m[1]);[].forEach.call(document.querySelectorAll('meta[name="theme-color"]'),function(e){e.setAttribute('content',m[1]==='dark'?'#17150F':'#F3EDE0');e.removeAttribute('media')})}}catch(e){}})()`;
+const APPLY_THEME = `(function(){try{var m=document.cookie.match(/(?:^|; )theme=(light|dark)/);if(m){document.documentElement.setAttribute('data-theme',m[1]);[].forEach.call(document.querySelectorAll('meta[name="theme-color"]'),function(e){e.setAttribute('content',m[1]==='dark'?'#17150F':'#FFFFFF');e.removeAttribute('media')})}}catch(e){}})()`;
 
 const STRIP_HOST_INJECTIONS = `(function(){var h=document.head;if(!h)return;[].slice.call(h.childNodes).forEach(function(n){if((n.nodeType===3&&!n.textContent.trim())||(n.nodeType===8&&/Netlify/.test(n.textContent))||(n.nodeType===1&&n.matches('meta[name="hosting-provider"],meta[name="netlify-deploy"],script[src^="/.netlify/scripts/"]')))h.removeChild(n)})})()`;
 
@@ -114,7 +114,10 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${fraunces.variable} ${instrument.variable} ${plexMono.variable}`}>
+    // suppressHydrationWarning: APPLY_THEME sets data-theme on <html> before hydration, so
+    // React sees an attribute the server markup lacks. Applies to this element's own
+    // attributes only, not its children.
+    <html lang="en" suppressHydrationWarning className={`${fraunces.variable} ${instrument.variable} ${plexMono.variable}`}>
       <head>
         {/*
           Netlify's edge writes a comment, two <meta> tags and a HUD script into every

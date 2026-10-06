@@ -7,19 +7,26 @@ import { Chip, SampleChip } from './chip';
 const AGENTS = [
   { id: 'plan', name: 'Planner' },
   { id: 'search', name: 'Searcher' },
-  { id: 'rank', name: 'Ranker' },
+  { id: 'rank', name: 'Ranker + Market Signal' },
   { id: 'intel', name: 'Employer Intel' },
-  { id: 'market', name: 'Market Signal' },
 ] as const;
 
-const kind = (phase: string) => phase.split(':')[0];
+const kind = (phase: string) => phase;
 
-/** Index of the agent doing (or next to do) the work; AGENTS.length when all are done. */
-function current(phase: string): number {
-  if (phase === 'awaiting-queries') return 1;
-  const i = AGENTS.findIndex((a) => a.id === kind(phase));
-  return i < 0 ? AGENTS.length : i;
-}
+/**
+ * Index of the agent doing (or next to do) the work; AGENTS.length when all are done.
+ * Every phase is listed: an unknown one is -1, which marks nothing as done or current.
+ */
+const PHASE_AGENT: Record<string, number> = {
+  plan: 0,
+  'awaiting-queries': 1,
+  search: 1,
+  rank: 2,
+  intel: 3,
+  select: AGENTS.length,
+  done: AGENTS.length,
+};
+const current = (phase: string): number => PHASE_AGENT[phase] ?? -1;
 
 type RowState = 'done' | 'running' | 'pending' | 'failed' | 'skipped';
 const STATE_WORD: Record<RowState, string> = { done: 'Done', running: 'Running', pending: 'Waiting', failed: 'Stopped', skipped: 'Skipped' };
@@ -43,7 +50,7 @@ export function Timeline({ run }: { run: RadarStatus }) {
       {AGENTS.map((a, i) => {
         const ev = byAgent[i];
         const skipped = a.id === 'intel' && !run.state.intelOn && cur > i;
-        let state: RowState = skipped ? 'skipped' : i < cur ? 'done' : i === cur ? 'pending' : 'pending';
+        let state: RowState = skipped ? 'skipped' : i < cur ? 'done' : 'pending';
         if (i === cur) {
           if (run.status === 'running') state = 'running';
           else if (run.status === 'error' || run.status === 'cancelled') state = 'failed';

@@ -9,6 +9,147 @@ resume until it clears a quality bar — before you ever see it.
 
 ---
 
+## Job Radar (SerpApi)
+
+Job Radar finds openings for you instead of waiting for a pasted posting. It reads your
+verified profile, plans a few Google Jobs searches, runs them through
+[SerpApi](https://serpapi.com), ranks every posting against what your resume can actually
+prove, adds employer and market context, and hands the posting you pick to the existing
+grounded resume tailor.
+
+- **Profile-grounded discovery.** A planner proposes 1-3 searches from your roles, skills
+  and city (one fast model call; a rules-only plan from your role titles if the call fails).
+  You can edit or remove them before any credit is spent.
+- **Deterministic ranking.** Code scores each posting against your profile (skill lexicon
+  plus the same keyword matcher the quality gate uses). No per-result model call, and it
+  shows matched and missing skills per posting.
+- **Employer intel.** Ratings via `google_jobs_listing` and recent headlines via
+  `google_news` for the top companies.
+- **Market and salary signal.** Salary band (p25 / median / p75 in LPA, detected from SerpApi
+  or estimated from the description and labelled as such), most-requested skills, and the
+  ones you do not yet show.
+- **Two human gates.** You approve the queries, then you pick the posting. Nothing is
+  applied automatically; Apply opens the posting's own link in a new tab.
+- **One-click handoff.** The chosen posting's text goes into the normal draft flow
+  (fit check, grounded rewrite, critic loop), skipping URL scraping.
+
+### SerpApi usage
+
+| Engine | Parameters | Used for |
+| --- | --- | --- |
+| `google_jobs` | `q="<role> <city>"`, `gl=in`, `hl=en`, `google_domain=google.co.in`, `json_restrictor`; page 1 only | Posting discovery |
+| `google_jobs_listing` | `q=<job_id>`, `gl=in`, `hl=en`, `google_domain=google.co.in` | Employer ratings (absence tolerated) |
+| `google_news` | `q=<company>`, `so=1`, `gl=in`, `hl=en` | Recent employer headlines |
+| `account.json` | free endpoint | Guard: remaining monthly searches, memoized 5 min |
+
+### Credit budgeting
+
+SerpApi's free plan is 250 searches a month (and 50 an hour), so the radar is built to spend
+very little:
+
+- **Cache:** identical requests are served from the `serp_cache` table, 1 hour for jobs and
+  24 hours for news and listings. Cache hits cost nothing.
+- **Per-user limits:** 3 runs per day and at most 12 credits per run (a default run is
+  roughly 4-7).
+- **Account guards:** searches are blocked when `account.json` reports fewer than 10 left, or
+  when 45 live searches were stored in the past hour.
+- **Replay fallback:** when blocked, or when no key is set, results come from the bundled
+  fixtures, and the run shows a visible "showing sample data" banner. It never falls back
+  silently.
+
+### Modes
+
+| `SERP_MODE` | Behaviour |
+| --- | --- |
+| `live` (or unset, with a key) | Real SerpApi calls through the cache and guards. |
+| `replay` (or no `SERPAPI_API_KEY`) | Answers from `fixtures/serpapi/*.json`. **These fixtures are synthetic sample data, not live results**, and every replay run is labelled as such. |
+| `record` | Live calls that also save each response into `fixtures/serpapi/`. Use it once to capture real data for a demo, then review the files before committing them. |
+
+### Architecture
+
+Netlify's free plan kills a function at 30 seconds, so a radar run is not one long request.
+It is a state machine stored in Postgres (`agent_run`); the browser calls the API once per
+step, each step does one short unit of work, and a refresh or a second tab resumes the same
+run.
+
+```
+POST /api/radar ─► plan ─► [gate 1: approve queries] ─► search (all queries, parallel)
+                                                          │
+          done ◄─ [gate 2: pick a posting] ◄─ intel (parallel) ◄─ rank (+ market signal)
+            │
+            └─► draft console (grounded tailor, critic loop)
+```
+
+Each step commits with `UPDATE ... WHERE step = expectStep`, so two tabs cannot both advance
+a run. A failed query or company is a warning and is skipped; only a failed plan or every
+search failing ends the run in error. Details: [`docs/hackathon/ARCHITECTURE.md`](./docs/hackathon/ARCHITECTURE.md).
+
+### Privacy and security
+
+- Only role, skill and city text is sent to SerpApi. Name, email, phone and links are not.
+- `SERPAPI_API_KEY` is server-only (no `NEXT_PUBLIC_` variant), is never logged, and is
+  scrubbed from every error string before it can reach the browser or Sentry.
+- Every run is read and written under the signed-in user's id; another user's run looks
+  like a missing one.
+- Messages shown in the browser are authored by the app, never upstream error text.
+
+### Tests
+
+Offline, no key needed (`npm test`): `radar-planner`, `radar-ranker`, `radar-market`,
+`radar-state` (transitions, cancel, stale `expectStep`), `serp-client` (stubbed fetch:
+request params, cache hit, budget block, missing key, key never in errors),
+`serp-normalize`, `serp-salary`.
+
+### Judge quickstart (no keys)
+
+```bash
+git clone <this repo> && cd resumer-ai
+npm install
+cp .env.example .env        # then set SERP_MODE=replay (the example value)
+npm run dev
+```
+
+Open <http://localhost:3000/radar?demo=1>. This is a public, scripted demo that runs in the
+browser on sample data: no login, database or API key. It works in dev; in production it
+needs `RADAR_PUBLIC_DEMO=1`.
+
+### Full setup (real accounts, real runs)
+
+1. Postgres (`DATABASE_URL`), GitHub OAuth (`AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET`),
+   `AUTH_SECRET`, `TOKEN_ENC_KEY`, and at least one AI provider key (see Setup below).
+2. Create the tables: `npm run db:push` (or apply `scripts/2026-10-06-job-radar.sql` by hand).
+3. Put your address in `OWNER_EMAILS` so your account is approved (new accounts wait for
+   owner approval).
+4. Leave `SERPAPI_API_KEY` blank for replay on sample data, or set it with `SERP_MODE=live`
+   for real searches. Then open `/radar`.
+
+### Built for the SerpApi India Hackathon 2026
+
+**What existed before the hackathon.** Resumer AI itself: profile import and sync, the
+grounded resume tailor, the quality-gate loop, PDF/DOCX rendering, cover letters,
+application tracker, auth and cost guardrails. That is the history up to commit `14fcb20`
+(12 Sep 2026, 167 commits).
+
+**What was built during the hackathon window.** Job Radar (SerpApi layer, cache and credit
+budget, planner / ranker / market agents, stepped run orchestrator, `/radar` UI with approval
+gates and handoff, tests) and the ink-on-paper UI redesign, starting from `14fcb20`.
+
+**AI tools.** Built with Claude Code (Anthropic). At runtime the app calls Groq, Fireworks AI,
+Together AI, DeepInfra and Gemini (whichever keys you configure) for planning, rewriting and
+critique.
+
+More: [`docs/hackathon/SUBMISSION.md`](./docs/hackathon/SUBMISSION.md) ·
+[`docs/hackathon/ARCHITECTURE.md`](./docs/hackathon/ARCHITECTURE.md) ·
+[`docs/hackathon/RADAR-PLAN.md`](./docs/hackathon/RADAR-PLAN.md) ·
+[`docs/hackathon/UI-PLAN.md`](./docs/hackathon/UI-PLAN.md) ·
+[`docs/hackathon/FINDINGS.md`](./docs/hackathon/FINDINGS.md)
+
+### License
+
+License: to be added by the owner before the repo is made public.
+
+---
+
 ## What makes it different
 
 **It never invents anything.** Every generated bullet is checked against its source
@@ -67,6 +208,8 @@ what's still needed when you load it, so you can do this one piece at a time.
 | `MAX_DRAFT_SECONDS` / `MAX_ASSESS_SECONDS` / `AI_ATTEMPT_TIMEOUT_MS` | Host time limits | Optional. Defaults suit a 30-second function; see `lib/ai/budget.ts`. |
 | `APP_DAILY_MAX_CALLS` / `APP_DAILY_MAX_TOKENS` | Cost ceiling for everyone together | Optional; defaults 2,000 calls and 20M tokens a day. |
 | `OWNER_EMAILS` | The owner's account | Your own address. No daily quota and outside the shared pool; still bound by a burst limit of 240 AI requests per 10 minutes (60 for every other account), and a separate one for connecting and syncing a portfolio: 600 per 10 minutes (300 for everyone else), 1,200 per connection (600), with a Sentry alert past `OWNER_ALERT_CALLS` (1,000) a day. |
+| `SERPAPI_API_KEY` / `SERP_MODE` | Job Radar | Optional. Blank key = replay mode on synthetic sample data. [serpapi.com](https://serpapi.com) free plan for live. |
+| `RADAR_PUBLIC_DEMO` | Public `/radar?demo=1` in production | `1` to allow the scripted demo without login. |
 | `FIRECRAWL_API_KEY` | Optional | Only needed to paste job *links*. Pasting job *text* always works. |
 
 `.env.example` documents the rest, including the tuning variables for the sync and the
@@ -89,8 +232,8 @@ npm run dev
 ## Verifying it works
 
 ```bash
-npm test                      # 49 suites: scorers, grounding property tests, known-bad
-                              # documents, importer chunking and merge
+npm test                      # offline suites: scorers, grounding property tests, known-bad
+                              # documents, importer chunking and merge, Job Radar and SerpApi
 npm run typecheck             # the app, and the tests and scripts (both run in CI)
 npx tsx scripts/smoke.mts     # 18 checks: scorers, grounding guard, retrieval, sync, DOCX round-trip
 npx tsx scripts/ai-check.mts  # confirms your AI provider chain actually responds

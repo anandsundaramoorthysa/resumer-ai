@@ -2,19 +2,19 @@
 
 ## 1. Tokens (replace @theme block and both dark blocks in app/globals.css; keep token NAMES, data-theme cookie mechanism, and duplicated dark blocks — a browser test needs both lists to match)
 Light / Dark:
-- paper #F3EDE0 / #17150F
-- surface #FBF8F1 / #201D16
+- paper #FFFFFF / #17150F
+- surface #FFFFFF (white-on-white; depth from hairline + offset shadow) / #201D16
 - ink #1B1A17 / #EFE8D8
 - muted #5E574A / #A89F8C
 - line (decorative hairline only) #D9D0BD / #3A352A
 - rule (NEW, control borders, >=3:1) #7A7262 / #8A8171
-- brand (vermilion) #B8301A / #FF6A4D ; brand-dark #8F2412 / #FF8A6E ; brand-tint #F2DDD2 / #3A1F17 ; on-brand #FFFFFF / #17150F
+- brand (vermilion) #B8301A / #FF6A4D ; brand-dark #8F2412 / #FF8A6E ; brand-tint #F9E7DF / #3A1F17 ; on-brand #FFFFFF / #17150F
 - blue (ink-blue secondary, focus ring) #1F3A5F / #9DB8E3 ; gold = alias of blue (drop gold usage)
 - hl (highlighter, BACKGROUND only behind ink text) #F2D95C / #5A4A12
-- success #1E6B39 / #7CC48F ; success-tint #DDE9D6 / #1E2A1C
-- warning #85500A / #E5A24A ; warning-tint #F3E2C0 / #33260F
-- danger #A3281A / #FF8A75 ; danger-tint #F4DAD0 / #3A1D16
-Contrast (computed): ink/paper 14.92/14.95; muted/paper 6.13/6.96; brand/paper 5.18/6.45; on-brand/brand 6.04/6.45; blue/paper 9.84/9.04; ink/hl 12.31/7.10; rule/paper 4.08/4.74.
+- success #1E6B39 / #7CC48F ; success-tint #E4F0DE / #1E2A1C
+- warning #85500A / #E5A24A ; warning-tint #F8EACB / #33260F
+- danger #A3281A / #FF8A75 ; danger-tint #F9E1D8 / #3A1D16
+Contrast (computed, light on white): ink/paper 17.40; muted/paper 7.15; brand/paper 6.04; on-brand/brand 6.04; blue/paper 11.48; ink/hl 12.31; rule/paper 4.76; success/paper 6.53; warning/paper 6.67; danger/paper 7.30; ink on every tint >=13.9. Dark unchanged: 14.95 / 6.96 / 6.45 / 9.04. Light mode switched from cream #F3EDE0 to white; blue vs brand is 1.9 so the focus ring relies on its 2px offset gap.
 Rules: brand and blue carry text only on paper/surface, never on tints (use ink on brand-tint). Inputs/buttons use --color-rule, never --color-line. Focus ring: 2px solid var(--color-blue), offset 2px, :focus-visible.
 
 ## 2. Type (next/font/google in app/layout.tsx; delete Fontshare/Google <link> tags)

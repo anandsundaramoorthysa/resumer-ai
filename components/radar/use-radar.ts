@@ -3,7 +3,7 @@
 /**
  * Client loop for a Job Radar run. One request in flight at a time: while the run is
  * 'running' it POSTs an advance carrying `expectStep`; it pauses at 'awaiting' (a gate) and
- * stops at a terminal status. 429 backs off exponentially; any other failure stops the
+ * stops at a terminal status. 429 backs off exponentially; a 502/503/504 or dropped connection is retried once; any other failure stops the
  * loop and offers a retry. `demo` swaps the network for app/radar/demo-status.ts.
  */
 
@@ -65,6 +65,8 @@ export function useRadar(demo: boolean) {
   const credits = demo ? DEMO_CREDITS : liveCredits;
   const [tick, setTick] = useState(0);
   const attempt = useRef(0);
+  // One automatic retry for a transient failure (502/503/504, dropped connection).
+  const retried = useRef(false);
   // Actions share one controller that is aborted on unmount.
   const life = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -121,6 +123,19 @@ export function useRadar(demo: boolean) {
           }
           return;
         }
+        const transient = e instanceof TypeError || (e instanceof ApiError && [502, 503, 504].includes(e.status));
+        if (transient && !retried.current) {
+          retried.current = true;
+          setNotice('Connection hiccup. Retrying… Your run is safe.');
+          try {
+            await sleep(1500, ac.signal);
+            setTick((t) => t + 1);
+          } catch {
+            /* unmounted */
+          }
+          return;
+        }
+        setNotice('');
         setError(e instanceof Error ? e.message : 'The run stopped unexpectedly.');
       }
     })();

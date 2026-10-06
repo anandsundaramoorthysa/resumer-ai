@@ -16,12 +16,12 @@ export type Plan = z.infer<typeof PlanSchema>;
 export const PostingSchema = z.object({
   /** sha1(lower(title)|lower(company)) — SerpApi's job_id is unstable and never identity. */
   key: z.string(),
-  title: z.string(),
-  company: z.string(),
-  location: z.string(),
-  via: z.string(),
+  title: z.string().max(200),
+  company: z.string().max(120),
+  location: z.string().max(120),
+  via: z.string().max(60),
   description: z.string(),
-  applyLinks: z.array(z.object({ title: z.string(), link: z.string() })),
+  applyLinks: z.array(z.object({ title: z.string().max(120), link: z.string().max(500) })).max(6),
   postedAt: z.string(),
   scheduleType: z.string(),
   salaryLpa: z.object({
@@ -29,7 +29,7 @@ export const PostingSchema = z.object({
     max: z.number(),
     source: z.enum(['serp', 'regex', 'none']),
   }),
-  highlights: z.array(z.string()),
+  highlights: z.array(z.string().max(300)).max(12),
   serpJobId: z.string(),
   fromQuery: z.number(),
 });
@@ -51,9 +51,11 @@ export const EmployerIntelSchema = z.object({
   rating: z.number(),
   ratingSource: z.string(),
   reviewsCount: z.number(),
-  headlines: z.array(
-    z.object({ title: z.string(), source: z.string(), link: z.string(), date: z.string() }),
-  ),
+  headlines: z
+    .array(
+      z.object({ title: z.string().max(200), source: z.string().max(60), link: z.string().max(500), date: z.string().max(60) }),
+    )
+    .max(5),
 });
 export type EmployerIntel = z.infer<typeof EmployerIntelSchema>;
 

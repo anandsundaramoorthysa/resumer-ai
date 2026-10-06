@@ -10,12 +10,12 @@ export function ResumeArtifact() {
         aria-hidden="true"
         className="sheet relative rotate-[0.4deg] overflow-hidden p-5 font-display sm:p-7"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
             <p className="text-xl font-semibold tracking-tight sm:text-2xl">Priya Raman</p>
             <p className="text-sm text-muted">Backend engineer · Chennai</p>
           </div>
-          <span className="stamp mt-1 text-success">
+          <span className="stamp mt-1 shrink-0 text-success">
             <span className="text-xs">VERIFIED</span>
             <span className="text-lg leading-tight">8.7</span>
           </span>
