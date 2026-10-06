@@ -19,7 +19,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
 
   const [user] = userId
     ? await db.select().from(users).where(eq(users.id, userId)).limit(1)
-    : await db.select().from(users).limit(1);
+    : await db.select().from(users).orderBy(asc(users.createdAt)).limit(1);
   if (!user) return Response.json({ error: 'No user in the database.' }, { status: 400 });
 
   const profile = await loadProfileForUser(user.id);

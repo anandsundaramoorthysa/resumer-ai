@@ -82,7 +82,7 @@ export interface SerpDeps {
   now: () => number;
   /** account.json timeout. */
   timeoutMs: number;
-  /** Per-search timeout by engine. No automatic retry: a retry is a second credit. */
+  /** Per-search timeout by engine (live: a fresh google_jobs search can take 15s+ and is billed even if we hang up; keep under the 45s lease / 60s route limit).  No automatic retry: a retry is a second credit. */
   searchTimeoutMs: (engine: string) => number;
 }
 
@@ -92,7 +92,7 @@ const defaults = (): SerpDeps => ({
   env: () => process.env,
   now: () => Date.now(),
   timeoutMs: 6_000,
-  searchTimeoutMs: (engine) => (engine === 'google_news' ? 10_000 : 15_000),
+  searchTimeoutMs: (engine) => (engine === 'google_news' ? 10_000 : engine === 'google_jobs' ? 40_000 : 15_000),
 });
 
 const mg = globalThis as unknown as {

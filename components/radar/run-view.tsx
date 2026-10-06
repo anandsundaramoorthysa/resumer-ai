@@ -96,7 +96,7 @@ export function RunView({
       {!run ? (
         <section className="sheet max-w-xl p-5" aria-labelledby="start-h">
           <p className="eyebrow">Start</p>
-          <h2 id="start-h" className="mt-1 font-display text-2xl">
+          <h2 id="start-h" tabIndex={-1} className="mt-1 font-display text-2xl outline-none">
             Search from your profile
           </h2>
           <p className="mt-1 text-sm text-muted">
@@ -116,16 +116,35 @@ export function RunView({
       ) : (
         <div className="grid gap-8 lg:grid-cols-[19rem_minmax(0,1fr)]">
           <aside aria-label="Run progress">
-            <h2 className="eyebrow mb-4">Run · {run.mode === 'replay' ? 'sample data' : 'live'}</h2>
+            <h2 id="run-h" tabIndex={-1} className="eyebrow mb-4 outline-none">
+              Run · {run.mode === 'replay' ? 'sample data' : 'live'}
+            </h2>
             <Timeline run={run} />
             <div className="mt-5 flex flex-wrap gap-3">
               {active && (
-                <button type="button" className="btn" disabled={r.busy} onClick={r.cancel}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={r.busy}
+                  onClick={() => {
+                    // The Stop button unmounts: keep keyboard focus inside the run panel.
+                    document.getElementById('run-h')?.focus();
+                    void r.cancel();
+                  }}
+                >
                   Stop
                 </button>
               )}
               {(failed || run.status === 'done') && (
-                <button type="button" className="btn btn-primary" onClick={r.restart}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    r.restart();
+                    // The start panel renders on the next frame; move focus to it.
+                    requestAnimationFrame(() => document.getElementById('start-h')?.focus());
+                  }}
+                >
                   {failed ? 'Restart' : 'New search'}
                 </button>
               )}

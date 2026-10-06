@@ -23,7 +23,7 @@ suite('normalizeJobs', () => {
     assert.equal(z.postedAt, '3 days ago');
     assert.equal(z.applyLinks.length, 2);
     assert.equal(z.key, postingKey('Full Stack Developer', 'Sample Systems Pvt Ltd'));
-    assert.deepEqual(z.salaryLpa, { min: 12, max: 18, source: 'regex' });
+    assert.deepEqual(z.salaryLpa, { min: 12, max: 18, source: 'serp' }); // from extensions[] "12–18 LPA"
   });
   test('tolerates missing detected_extensions and job_highlights', () => {
     const swiggy = jobs.find((j) => j.company === 'Demo Foods')!;
@@ -39,6 +39,26 @@ suite('normalizeJobs', () => {
   test('garbage input yields nothing', () => {
     assert.deepEqual(normalizeJobs(null), []);
     assert.deepEqual(normalizeJobs({ jobs_results: [{ company_name: 'x' }, 5] }), []);
+  });
+});
+
+suite('live payload shape (extensions[] instead of detected_extensions)', () => {
+  const live = {
+    jobs_results: [
+      { title: 'Role A', company_name: 'Co A', location: 'Chennai', via: 'via LinkedIn', description: 'Build things.', job_id: 'x', apply_options: [], extensions: ['12 hours ago', '₹75K–₹85K a month', 'Full–time'] },
+      { title: 'Role B', company_name: 'Co B', description: 'Build more.', extensions: ['8 hours ago', 'Contractor'] },
+    ],
+  };
+  const [a, b] = normalizeJobs(live);
+  test('postedAt, scheduleType and salary come from extensions[]', () => {
+    assert.equal(a.postedAt, '12 hours ago');
+    assert.equal(a.scheduleType, 'Full–time');
+    assert.equal(a.salaryLpa.source, 'serp');
+    assert.equal(a.salaryLpa.min, 9);
+    assert.equal(a.salaryLpa.max, 10.2);
+    assert.equal(b.postedAt, '8 hours ago');
+    assert.equal(b.scheduleType, 'Contractor');
+    assert.equal(b.salaryLpa.source, 'none');
   });
 });
 

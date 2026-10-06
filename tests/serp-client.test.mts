@@ -201,6 +201,31 @@ await suiteAsync('companyIntel and helpers', async () => {
     assert.equal(r.data.headlines.length, 3);
   });
 
+  await testAsync('live news never sends `so` (SerpApi 400s q+so); documented ratings[] parse', async () => {
+    const s = setup({ SERPAPI_API_KEY: KEY }, (u) => {
+      const a = accountOk(u);
+      if (a) return a;
+      if (u.searchParams.get('engine') === 'google_news') {
+        return u.searchParams.has('so')
+          ? ok({ error: '`q` and `so` parameters can\'t be used together.' }, 400)
+          : ok({ news_results: [{ title: 'Acme raises funds', link: 'https://example.com/a', source: { name: 'Example' }, date: '1 day ago' }] });
+      }
+      return ok({ ratings: [{ company_name: 'Acme', link: 'https://example.com/r', source: 'Indeed', rating: 3.9, reviews: 1200 }] });
+    });
+    const r = await companyIntel('Acme', 'jobid-b64', 'u1');
+    assert.ok(r.ok);
+    assert.equal(r.data.headlines.length, 1);
+    assert.equal(r.data.rating, 3.9);
+    assert.equal(r.data.ratingSource, 'Indeed');
+    assert.ok(s.searches().every((u) => !u.searchParams.has('so')));
+  });
+
+  await testAsync('google_jobs timeout leaves room for slow live searches (was 15s: billed then dropped)', async () => {
+    resetSerpDeps();
+    const { deps } = await import('@/lib/serp/budget');
+    assert.ok(deps.searchTimeoutMs('google_jobs') >= 30_000 && deps.searchTimeoutMs('google_jobs') < 45_000);
+  });
+
   await testAsync('cache keys ignore api_key and param order', async () => {
     assert.equal(cacheKey('e', { a: '1', b: '2', api_key: 'x' }), cacheKey('e', { b: '2', a: '1' }));
     assert.notEqual(cacheKey('e', { a: '1' }), cacheKey('f', { a: '1' }));

@@ -77,7 +77,7 @@ export function ResultRow({
           </Chip>
         )}
         {news && sample && (
-          <span aria-disabled="true" className={`${linkChip} no-underline opacity-70`}>
+          <span className={`${linkChip} border-dashed text-muted no-underline`}>
             <span className="truncate">Sample news: {news.title}</span>
           </span>
         )}
@@ -89,7 +89,7 @@ export function ResultRow({
         )}
         {posting.applyLinks.slice(0, 3).map((l) =>
           sample ? (
-            <span key={l.link} aria-disabled="true" className={`${linkChip} no-underline opacity-70`}>
+            <span key={l.link} className={`${linkChip} border-dashed text-muted no-underline`}>
               Sample posting · {l.title.replace(/^Apply (on|at|via)\s+/i, '')}
             </span>
           ) : (
@@ -105,6 +105,10 @@ export function ResultRow({
         {canSelect && signInToTailor && (
           <Link href="/sign-in" className="btn btn-primary">
             Sign in to tailor with your own profile
+            <span className="sr-only">
+              {' '}
+              for {posting.title} at {posting.company}
+            </span>
           </Link>
         )}
         {canSelect && !signInToTailor && (
@@ -118,9 +122,7 @@ export function ResultRow({
         )}
         {chosen && !canSelect && <Chip>Selected</Chip>}
         {apply && sample && (
-          <span aria-disabled="true" className="btn opacity-60">
-            Sample posting
-          </span>
+          <span className="btn border-dashed text-muted">Sample posting</span>
         )}
         {apply && !sample && (
           <a href={apply.link} target="_blank" rel="noopener noreferrer" className="btn">

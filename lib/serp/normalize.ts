@@ -28,6 +28,22 @@ export function postingKey(title: string, company: string): string {
   return createHash('sha1').update(`${title.toLowerCase()}|${company.toLowerCase()}`).digest('hex');
 }
 
+/**
+ * Live google_jobs (checked 2026-10-06) no longer returns detected_extensions: the same facts come
+ * as an extensions string array ("2 days ago", "Full–time", "₹75K–₹85K a month"). Prefer the
+ * structured object when present, else classify the strings.
+ */
+function extFacts(j: Obj): { posted_at: string; schedule_type: string; salary: string } {
+  const d = obj(j.detected_extensions);
+  const xs = arr(j.extensions).map(str);
+  const pick = (re: RegExp) => xs.find((x) => re.test(x)) ?? '';
+  return {
+    posted_at: str(d.posted_at) || pick(/\bago\b|^today$|^yesterday$|just posted/i),
+    schedule_type: str(d.schedule_type) || pick(/^(?:full|part)[-–—−\s]?time$|^contract(?:or)?$|^intern(?:ship)?$|^temporary$/i),
+    salary: str(d.salary) || pick(/[₹$€£]|\blpa\b|\b(?:a|per)\s+(?:month|year|hour)\b/i),
+  };
+}
+
 export function normalizeJobs(json: unknown, fromQuery = 0): Posting[] {
   const out: Posting[] = [];
   for (const raw of arr(obj(json).jobs_results)) {
@@ -35,7 +51,7 @@ export function normalizeJobs(json: unknown, fromQuery = 0): Posting[] {
     const title = cap(j.title, 200);
     const company = cap(j.company_name, 120);
     if (!title) continue;
-    const ext = obj(j.detected_extensions);
+    const ext = extFacts(j);
     const description = str(j.description);
     const parsed = PostingSchema.safeParse({
       key: postingKey(title, company),
@@ -48,9 +64,9 @@ export function normalizeJobs(json: unknown, fromQuery = 0): Posting[] {
         .map((o) => ({ title: cap(obj(o).title, 120), link: httpUrl(obj(o).link) }))
         .filter((o) => o.link)
         .slice(0, 6),
-      postedAt: str(ext.posted_at),
-      scheduleType: str(ext.schedule_type),
-      salaryLpa: parseSalaryLpa(description, str(ext.salary) || undefined),
+      postedAt: ext.posted_at,
+      scheduleType: ext.schedule_type,
+      salaryLpa: parseSalaryLpa(description, ext.salary || undefined),
       highlights: arr(j.job_highlights).flatMap((h) => arr(obj(h).items).map((x) => cap(x, 300)).filter(Boolean)).slice(0, 12),
       serpJobId: str(j.job_id),
       fromQuery,

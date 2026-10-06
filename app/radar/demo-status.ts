@@ -63,17 +63,27 @@ const LOG: [string, RadarEvent['level'], string, string?][] = [
   ['done', 'info', 'Done'],
 ];
 
-export function demoStatus(phase: string, intelOn: boolean, base: number, edited?: { q: string; why: string }[]): RadarStatus {
+export function demoStatus(phase: string, intelOn: boolean, edited?: { q: string; why: string }[]): RadarStatus {
   const i = Math.max(0, STAGES.indexOf(phase));
+  // Newest event is stamped "now" so the live elapsed counter starts at 0s for the current step
+  // (and does not include time spent waiting at a gate).
+  const base = Date.now() - i * STEP_MS;
+  const nQ = (edited ?? QUERIES).length;
   const events: RadarEvent[] = LOG.slice(0, i + 1)
     .filter(([p]) => intelOn || !p.startsWith('intel'))
-    .map(([p, level, message, source], n) => ({ at: new Date(base + n * STEP_MS).toISOString(), level, phase: p, message, ...(source ? { source } : {}) }));
+    .map(([p, level, message, source], n) => ({
+      at: new Date(base + n * STEP_MS).toISOString(),
+      level,
+      phase: p,
+      message: p === 'search' ? `Found 5 postings across ${nQ} search${nQ === 1 ? '' : 'es'}` : message,
+      ...(source ? { source } : {}),
+    }));
   const gate = phase === 'awaiting-queries' ? 'queries' : phase === 'select' ? 'select' : '';
   const steps = intelOn ? 6 : 5;
   return {
     runId: 'demo', mode: 'replay', error: '', phase, step: intelOn || i < 5 ? i : i - 1, totalSteps: steps,
     status: gate ? 'awaiting' : phase === 'done' ? 'done' : 'running',
-    gate, message: LOG[i][2], events, creditsUsed: i >= 3 ? (intelOn && i >= 5 ? 3 : 2) : 0,
+    gate, message: events[events.length - 1]?.message ?? LOG[i][2], events, creditsUsed: i >= 3 ? (intelOn && i >= 5 ? 3 : 2) : 0,
     state: {
       intelOn, gate, plan: i >= 0 ? { queries: QUERIES, location: 'India', seniority: 'entry', rationale: 'Sample plan' } : null,
       queries: i >= 1 ? edited ?? QUERIES : [],
@@ -84,25 +94,22 @@ export function demoStatus(phase: string, intelOn: boolean, base: number, edited
   };
 }
 
-export const demoStart = (intel: boolean) => demoStatus('plan', intel, Date.now());
+export const demoStart = (intel: boolean) => demoStatus('plan', intel);
 
 /** One advance step; `queries` carried from the approval so edits survive. */
 export function demoAdvance(run: RadarStatus): RadarStatus {
   let next = STAGES[Math.min(STAGES.indexOf(run.phase) + 1, STAGES.length - 1)];
   if (next === 'intel' && !run.state.intelOn) next = 'select';
-  const base = run.events.length ? Date.parse(run.events[0].at) : Date.now();
-  return demoStatus(next, run.state.intelOn, base, run.state.queries);
+  return demoStatus(next, run.state.intelOn, run.state.queries);
 }
 
 export function demoApprove(run: RadarStatus, queries: { q: string; why: string }[]): RadarStatus {
-  const base = Date.parse(run.events[0]?.at ?? '') || Date.now();
-  return demoStatus('search', run.state.intelOn, base, queries);
+  return demoStatus('search', run.state.intelOn, queries);
 }
 
 export function demoSelect(run: RadarStatus, key: string): RadarStatus & { jobText: string } {
   const p = POSTINGS.find((x) => x.key === key) ?? POSTINGS[0];
-  const base = Date.parse(run.events[0]?.at ?? '') || Date.now();
-  const done = demoStatus('done', run.state.intelOn, base, run.state.queries);
+  const done = demoStatus('done', run.state.intelOn, run.state.queries);
   done.state.selectedKey = p.key;
   return { ...done, jobText: `${p.title} at ${p.company}\n${p.location}\nSample posting (demo). Requires ${p.highlights.join(', ')}.` };
 }

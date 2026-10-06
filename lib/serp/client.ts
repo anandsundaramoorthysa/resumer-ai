@@ -24,7 +24,7 @@ type Engine = keyof typeof TTL;
 
 const RESTRICTOR: Record<Engine, string> = {
   google_jobs:
-    'jobs_results[].{job_id,title,company_name,location,via,description,detected_extensions,job_highlights,apply_options},serpapi_pagination,search_metadata,error',
+    'jobs_results[].{job_id,title,company_name,location,via,description,detected_extensions,job_highlights,extensions,apply_options},serpapi_pagination,search_metadata,error',
   google_news: 'news_results[].{title,link,source,date},search_metadata,error',
   google_jobs_listing: '',
 };
@@ -146,7 +146,7 @@ export async function companyNews(
   userId: string,
 ): Promise<SerpResult<EmployerIntel['headlines']>> {
   void userId;
-  const r = await call('google_news', { q: company, so: '1', gl: 'in', hl: 'en' }, false);
+  const r = await call('google_news', { q: company, gl: 'in', hl: 'en' }, false);
   return r.ok ? done(r, parseNews(r.json)) : r;
 }
 
@@ -160,7 +160,9 @@ export async function companyIntel(
     serpJobId
       ? // SerpApi docs: q "defines the job_id string which can be obtained from Google Jobs API"
         // (the page's example is a base64 JSON blob, which is what google_jobs returns as job_id).
-        // UNVERIFIED live: smoke test. A failure here is non-fatal: ratings just degrade to none.
+        // VERIFIED live (2026-10-06): the job_id from google_jobs is accepted as q; a listing with no ratings
+        // answers 'hasn't returned any results' (an empty ok, 0 credits). Documented response field: ratings[].
+        // A failure here is non-fatal: ratings just degrade to none.
         call('google_jobs_listing', { q: serpJobId, gl: 'in', hl: 'en', google_domain: 'google.co.in' }, false)
       : Promise.resolve<Fail>({ ok: false, reason: 'failed', message: 'No job id to look ratings up with.' }),
     companyNews(company, userId),
