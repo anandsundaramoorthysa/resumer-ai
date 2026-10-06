@@ -198,7 +198,7 @@ await suiteAsync('companyIntel and helpers', async () => {
     const r = await companyIntel('Sample Systems', 'job123', 'u1');
     assert.ok(r.ok && r.mode === 'replay');
     assert.equal(r.data.rating, 4.2);
-    assert.equal(r.data.headlines.length, 3);
+    assert.equal(r.data.headlines.length, 2);
   });
 
   await testAsync('live news never sends `so` (SerpApi 400s q+so); documented ratings[] parse', async () => {
@@ -218,6 +218,26 @@ await suiteAsync('companyIntel and helpers', async () => {
     assert.equal(r.data.rating, 3.9);
     assert.equal(r.data.ratingSource, 'Indeed');
     assert.ok(s.searches().every((u) => !u.searchParams.has('so')));
+  });
+
+  await testAsync('empty listing falls back to a Google review-site rating; news query is quoted', async () => {
+    const s = setup({ SERPAPI_API_KEY: KEY }, (u) => {
+      const a = accountOk(u);
+      if (a) return a;
+      const e = u.searchParams.get('engine');
+      if (e === 'google_jobs_listing') return ok({ search_information: { jobs_listing_state: 'Fully empty' }, error: "Google hasn't returned any results for this query." }, 200);
+      if (e === 'google') {
+        return ok({ organic_results: [{ source: 'glassdoor.co.in', title: 'Acme Reviews - Glassdoor', link: 'https://www.glassdoor.co.in/x', rich_snippet: { top: { detected_extensions: { rating: 3.6, reviews: 3961 } } } }] });
+      }
+      return ok({ news_results: [{ title: 'Acme expands', link: 'https://example.com/a', source: 'Ex', date: 'd' }, { title: 'Unrelated', link: 'https://example.com/b', source: 'Ex', date: 'd' }] });
+    });
+    const r = await companyIntel('Acme', 'jid', 'u1');
+    assert.ok(r.ok);
+    assert.equal(r.data.rating, 3.6);
+    assert.equal(r.data.ratingSource, 'Glassdoor (via Google)');
+    assert.equal(r.data.headlines.length, 1);
+    assert.equal(r.credits, 2);
+    assert.ok(s.searches().some((u) => u.searchParams.get('q') === '"Acme" company India'));
   });
 
   await testAsync('google_jobs timeout leaves room for slow live searches (was 15s: billed then dropped)', async () => {

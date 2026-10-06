@@ -1,3 +1,4 @@
+import { ThemeCorner } from '@/components/theme-corner';
 import Link from 'next/link';
 import { Logo } from '@/components/logo';
 import { ForgotPasswordForm } from './forgot-form';
@@ -6,7 +7,8 @@ export const metadata = { title: 'Reset your password' };
 
 export default function ForgotPasswordPage() {
   return (
-    <main id="main" tabIndex={-1} className="grid min-h-screen min-h-dvh place-items-center px-5 py-10">
+    <main id="main" tabIndex={-1} className="grid min-h-screen min-h-dvh place-items-center px-5 pb-10 pt-16">
+      <ThemeCorner />
       <div className="w-full max-w-md sheet p-6 text-center sm:p-8">
         <Logo size={40} showWordmark={false} className="mb-5" />
         <h1 className="font-display text-2xl">Reset your password</h1>

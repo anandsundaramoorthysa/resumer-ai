@@ -10,6 +10,7 @@
 import * as Sentry from '@sentry/nextjs';
 import Link from 'next/link';
 import { useEffect } from 'react';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 export default function PageError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
@@ -17,6 +18,10 @@ export default function PageError({ error, reset }: { error: Error & { digest?: 
   }, [error]);
 
   return (
+    <>
+    <div className="absolute right-3 top-3 z-40">
+      <ThemeToggle inline />
+    </div>
     <main id="main" tabIndex={-1} className="mx-auto max-w-lg px-5 py-24">
       <p className="eyebrow">§ Error</p>
       <h1 className="mt-2 font-display text-3xl tracking-tight">This page hit a problem</h1>
@@ -32,5 +37,6 @@ export default function PageError({ error, reset }: { error: Error & { digest?: 
         </Link>
       </div>
     </main>
+    </>
   );
 }

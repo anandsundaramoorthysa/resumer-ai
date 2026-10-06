@@ -38,6 +38,7 @@ import { Logo } from '@/components/logo';
 import { MobileNav } from '@/components/mobile-nav';
 import { NAV_LINKS } from '@/components/nav-links';
 import { isSidebarCollapsed, SIDEBAR_COOKIE } from '@/components/sidebar-state';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { isThemeChoice, THEME_COOKIE, type ThemeChoice } from '@/components/theme-state';
 
 /**
@@ -115,6 +116,8 @@ export async function AppHeader({
   const name = userName ?? session?.user?.name ?? null;
 
   if (!signedIn) {
+    const themeValue = (await cookies()).get(THEME_COOKIE)?.value;
+    const signedOutTheme: ThemeChoice = isThemeChoice(themeValue) ? themeValue : 'system';
     return (
       <header className="relative border-b border-line bg-paper">
         <div className={`${container} flex h-14 items-center justify-between gap-3`}>
@@ -125,12 +128,12 @@ export async function AppHeader({
           >
             <Logo size={28} />
           </Link>
-          <Link
-            href="/sign-in"
-            className="btn"
-          >
-            Sign in
-          </Link>
+          <div className="flex items-center gap-2">
+            <ThemeToggle inline choice={signedOutTheme} />
+            <Link href="/sign-in" className="btn">
+              Sign in
+            </Link>
+          </div>
         </div>
       </header>
     );

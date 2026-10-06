@@ -20,10 +20,15 @@
  * The colours themselves are in app/globals.css; this only decides which set applies.
  */
 
-import { useState } from 'react';
-import { THEME_COOKIE, type ThemeChoice } from './theme-state';
+import { useEffect, useState } from 'react';
+import {
+  nextTheme,
+  THEME_COOKIE,
+  THEME_ORDER as ORDER,
+  themeFromAttribute,
+  type ThemeChoice,
+} from './theme-state';
 
-const ORDER: ThemeChoice[] = ['system', 'light', 'dark'];
 const LABELS: Record<ThemeChoice, string> = {
   system: 'Match my device',
   light: 'Light',
@@ -41,28 +46,42 @@ export function ThemeToggle({
   choice: initial,
   /** Icon-only, for the collapsed sidebar: one button that cycles the three. */
   compact = false,
+  /** One 44px icon button for page headers and corners; cycles like `compact`. */
+  inline = false,
   className = '',
 }: {
-  choice: ThemeChoice;
+  /** Omit where the server cannot read the cookie (global-error): read from <html> after mount. */
+  choice?: ThemeChoice;
   compact?: boolean;
+  inline?: boolean;
   className?: string;
 }) {
-  const [choice, setChoice] = useState<ThemeChoice>(initial);
+  const [choice, setChoice] = useState<ThemeChoice>(initial ?? 'system');
+
+  // The pre-paint script has already set data-theme; adopt it so the icon matches.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading <html> is only possible after mount
+    if (initial === undefined) setChoice(themeFromAttribute(document.documentElement.getAttribute('data-theme')));
+  }, [initial]);
 
   const set = (next: ThemeChoice) => {
     setChoice(next);
     apply(next);
   };
 
-  if (compact) {
-    const next = ORDER[(ORDER.indexOf(choice) + 1) % ORDER.length];
+  if (compact || inline) {
+    const next = nextTheme(choice);
     return (
       <button
         type="button"
         onClick={() => set(next)}
         aria-label={`Theme: ${LABELS[choice]}. Switch to ${LABELS[next]}`}
         title={`Theme: ${LABELS[choice]}`}
-        className={`flex min-h-11 w-full items-center justify-center text-muted transition-colors hover:bg-surface hover:text-ink ${className}`}
+        className={
+          inline
+            ? `inline-flex min-h-11 min-w-11 items-center justify-center border border-rule text-muted transition-colors hover:text-ink ${className}`
+            : `flex min-h-11 w-full items-center justify-center text-muted transition-colors hover:bg-surface hover:text-ink ${className}`
+        }
       >
         <ThemeIcon choice={choice} />
       </button>

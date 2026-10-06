@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 import { assert, suite, test } from './harness.mjs';
-import { dedupePostings, normalizeJobs, parseListing, parseNews, postingKey } from '@/lib/serp/normalize';
+import { dedupePostings, normalizeJobs, parseGoogleRating, parseListing, parseNews, postingKey } from '@/lib/serp/normalize';
 import { PostingSchema } from '@/lib/serp/types';
 
 const fx = (n: string) => JSON.parse(readFileSync(`fixtures/serpapi/${n}.json`, 'utf8'));
@@ -150,5 +150,36 @@ suite('untrusted input', () => {
     assert.ok(p.highlights.every((h) => h.length === 300));
     const news = parseNews({ news_results: Array.from({ length: 9 }, (_, i) => ({ title: 't', link: `https://e.com/${i}` })) }, 99);
     assert.equal(news.length, 5);
+  });
+});
+
+suite('parseGoogleRating / parseNews relevance (live shapes, 2026-10-06)', () => {
+  // scrubbed fragment of a real engine=google "Walmart Global Tech India reviews" response
+  const g = {
+    organic_results: [
+      { source: 'LinkedIn', title: 'Walmart Global Tech India', link: 'https://in.linkedin.com/x' },
+      { source: 'AmbitionBox', title: 'Walmart Reviews by 3300+ Employees', link: 'https://www.ambitionbox.com/x', rich_snippet: { top: { detected_extensions: { rating: 3.5, reviews: 3384 } } } },
+      { source: 'glassdoor.co.in', title: 'Walmart Global Tech Reviews - Glassdoor', link: 'https://www.glassdoor.co.in/x', rich_snippet: { top: { detected_extensions: { rating: 3.6, reviews: 3961 } } } },
+    ],
+  };
+  test('prefers Glassdoor, labels the source as via Google', () => {
+    const r = parseGoogleRating(g, 'Walmart Global Tech India');
+    assert.deepEqual(r, { rating: 3.6, ratingSource: 'Glassdoor (via Google)', reviewsCount: 3961 });
+  });
+  test('no rating when the title does not name the company, or nothing parses', () => {
+    assert.equal(parseGoogleRating(g, 'Zoho').rating, 0);
+    assert.equal(parseGoogleRating({}, 'Zoho').rating, 0);
+    assert.equal(parseGoogleRating(null, 'Zoho').ratingSource, '');
+  });
+  test('headlines not mentioning the company are dropped', () => {
+    const n = { news_results: [
+      { title: 'Acme Robotics raises funds', link: 'https://e.com/1', source: 'X', date: 'd' },
+      { title: 'Quick quest for open source', link: 'https://e.com/2', source: 'X', date: 'd' },
+    ] };
+    assert.deepEqual(parseNews(n, 3, 'Acme Robotics Pvt Ltd').map((h) => h.link), ['https://e.com/1']);
+    assert.equal(parseNews(n).length, 2);
+  });
+  test('google_jobs_listing "Fully empty" answer is rating 0', () => {
+    assert.equal(parseListing({ search_information: { jobs_listing_state: 'Fully empty' }, error: "Google hasn't returned any results" }, 'Acme').rating, 0);
   });
 });

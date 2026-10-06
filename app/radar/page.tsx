@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { profileRecords } from '@/lib/db/schema';
 import { AppHeader } from '@/components/app-header';
 import { Logo } from '@/components/logo';
+import { ThemeCorner } from '@/components/theme-corner';
 import { RunView } from '@/components/radar/run-view';
 import { canShowPublicDemo } from './demo-gate';
 
@@ -34,9 +35,12 @@ export default async function RadarPage({ searchParams }: { searchParams: Promis
             <Link href="/" className="inline-flex min-h-11 items-center" aria-label="Resumer AI">
               <Logo size={28} />
             </Link>
-            <Link href="/sign-in" className="btn">
-              Sign in
-            </Link>
+            <div className="flex items-center gap-2">
+              <ThemeCorner inline />
+              <Link href="/sign-in" className="btn">
+                Sign in
+              </Link>
+            </div>
           </div>
         </header>
       ) : (

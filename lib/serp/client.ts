@@ -9,7 +9,7 @@
 
 import { budgetBlocked, cacheKey, deps, noteAttempt, scrub } from './budget';
 import { loadFixture, recordFixture } from './fixtures';
-import { dedupePostings, normalizeJobs, parseListing, parseNews } from './normalize';
+import { dedupePostings, normalizeJobs, parseGoogleRating, parseListing, parseNews } from './normalize';
 import type { EmployerIntel, Posting, SerpResult } from './types';
 
 export { creditStatus, scrub } from './budget';
@@ -18,14 +18,15 @@ export { parseSalaryLpa } from './salary';
 
 const ENDPOINT = 'https://serpapi.com/search.json';
 const HOUR = 3_600_000;
-const TTL = { google_jobs: HOUR, google_news: 24 * HOUR, google_jobs_listing: 24 * HOUR } as const;
+const TTL = { google_jobs: HOUR, google_news: 24 * HOUR, google_jobs_listing: 24 * HOUR, google: 24 * HOUR } as const;
 const EMPTY_TTL = 10 * 60_000;
 type Engine = keyof typeof TTL;
 
 const RESTRICTOR: Record<Engine, string> = {
   google_jobs:
     'jobs_results[].{job_id,title,company_name,location,via,description,detected_extensions,job_highlights,extensions,apply_options},serpapi_pagination,search_metadata,error',
-  google_news: 'news_results[].{title,link,source,date},search_metadata,error',
+  google_news: 'news_results[].{title,link,source,date,snippet},search_metadata,error',
+  google: 'organic_results[].{title,link,source,displayed_link,rich_snippet},search_metadata,error',
   google_jobs_listing: '',
 };
 
@@ -146,8 +147,15 @@ export async function companyNews(
   userId: string,
 ): Promise<SerpResult<EmployerIntel['headlines']>> {
   void userId;
-  const r = await call('google_news', { q: company, gl: 'in', hl: 'en' }, false);
-  return r.ok ? done(r, parseNews(r.json)) : r;
+  // Exact phrase + disambiguator: a bare common-phrase name ("Quest", "Open Systems") matches unrelated news.
+  const r = await call('google_news', { q: `"${company}" company India`, gl: 'in', hl: 'en' }, false);
+  return r.ok ? done(r, parseNews(r.json, 3, company)) : r;
+}
+
+/** Ratings via plain Google search of review sites (rich snippets). Optional: any failure is just "no rating". */
+async function googleRating(company: string): Promise<SerpResult<ReturnType<typeof parseGoogleRating>>> {
+  const r = await call('google', { q: `${company} reviews`, gl: 'in', hl: 'en', google_domain: 'google.co.in' }, false);
+  return r.ok ? done(r, parseGoogleRating(r.json, company)) : r;
 }
 
 /** Ratings (google_jobs_listing) + headlines (google_news). A missing half degrades, it does not fail. */
@@ -167,14 +175,22 @@ export async function companyIntel(
       : Promise.resolve<Fail>({ ok: false, reason: 'failed', message: 'No job id to look ratings up with.' }),
     companyNews(company, userId),
   ]);
-  if (!listing.ok && !news.ok) return news;
-  const base = listing.ok ? parseListing(listing.json, company) : parseListing({}, company);
-  const parts = [listing, news].filter((p) => p.ok);
+  let base = listing.ok ? parseListing(listing.json, company) : parseListing({}, company);
+  // google_jobs_listing answers "Fully empty" for most postings (live 2026-10-06, big employers too):
+  // fall back to review-site rich snippets in a normal Google search. Never in replay, never invented.
+  const live = listing.ok ? listing.mode === 'live' : news.ok && news.mode === 'live';
+  let g: SerpResult<ReturnType<typeof parseGoogleRating>> | null = null;
+  if (!base.rating && live) {
+    g = await googleRating(company);
+    if (g.ok) base = { ...base, ...g.data };
+  }
+  if (!listing.ok && !news.ok && !g?.ok) return news;
+  const parts = [listing, news, g].filter((p) => p?.ok) as Extract<SerpResult<unknown>, { ok: true }>[];
   return {
     ok: true,
     data: { ...base, headlines: news.ok ? news.data : [] },
-    cached: parts.every((p) => p.ok && p.cached),
-    mode: parts.some((p) => p.ok && p.mode === 'replay') ? 'replay' : 'live',
-    credits: parts.reduce((n, p) => n + (p.ok ? p.credits : 0), 0),
+    cached: parts.every((p) => p.cached),
+    mode: parts.some((p) => p.mode === 'replay') ? 'replay' : 'live',
+    credits: parts.reduce((n, p) => n + p.credits, 0),
   };
 }

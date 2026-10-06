@@ -16,3 +16,18 @@ export const THEME_COOKIE = 'theme';
 export function isThemeChoice(value: string | undefined): value is ThemeChoice {
   return value === 'light' || value === 'dark' || value === 'system';
 }
+
+export const THEME_ORDER: ThemeChoice[] = ['system', 'light', 'dark'];
+
+/** What one press of a cycling button switches to: system, then light, then dark, then round. */
+export function nextTheme(choice: ThemeChoice): ThemeChoice {
+  return THEME_ORDER[(THEME_ORDER.indexOf(choice) + 1) % THEME_ORDER.length];
+}
+
+/**
+ * The choice implied by <html data-theme>, which the pre-paint script sets. For client-only
+ * boundaries that cannot read the cookie on the server. No attribute means `system`.
+ */
+export function themeFromAttribute(attr: string | null | undefined): ThemeChoice {
+  return attr === 'light' || attr === 'dark' ? attr : 'system';
+}

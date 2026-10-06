@@ -72,7 +72,7 @@ If the recording uses replay data, say so on screen.
 ## Pre-submission checklist
 
 - [ ] Repo is public and the default branch has the final code.
-- [ ] A LICENSE file is added (none exists yet; the owner decides).
+- [x] LICENSE added: PolyForm Noncommercial 1.0.0 with a paid commercial option (see LICENSE and COMMERCIAL-LICENSE.md). The hackathon rules say an open-source license is encouraged but not required.
 - [ ] Secrets scan passes on the working tree and history (for example `gitleaks detect`); `.env` is not committed.
 - [ ] Fixtures recorded with `SERP_MODE=record` contain no personal data.
 - [ ] README quickstart works from a fresh clone with only `.env.example` copied.

@@ -666,10 +666,10 @@ async function runStep(run: Run, d: RadarDeps): Promise<Work> {
     let intel = s.intel;
     const jobs: RunState['intelTargets'] = [];
     for (const t of s.intelTargets) {
-      if (!creditsAllowed(creditsUsed, 2)) {
+      if (!creditsAllowed(creditsUsed, 3)) {
         events.push(ev('warn', `Skipped ${t.company}: this run's credit limit was reached`, 'serpapi:google_jobs_listing'));
       } else {
-        creditsUsed += 2;
+        creditsUsed += 3;
         jobs.push(t);
       }
     }
@@ -689,7 +689,7 @@ async function runStep(run: Run, d: RadarDeps): Promise<Work> {
         mode = 'replay';
         events.push(ev('warn', 'Credits low, showing sample data', 'serpapi'));
       }
-      events.push(ev('info', `${t.company}: ${r.data.headlines.length} headlines`, 'serpapi:google_news'));
+      events.push(ev('info', `${t.company}: ${r.data.rating ? `${r.data.rating} on ${r.data.ratingSource}, ` : 'no rating, '}${r.data.headlines.length} headlines`, 'serpapi:google_news'));
     });
     return {
       status: 'awaiting',

@@ -1,5 +1,8 @@
 # Resumer AI
 
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue?style=flat-square)](LICENSE)
+[![Commercial license available](https://img.shields.io/badge/commercial-license%20available-success?style=flat-square)](COMMERCIAL-LICENSE.md)
+
 One profile, every role. Resumer AI keeps a single professional profile in sync with your
 portfolio, tailors an ATS-safe resume to any job posting, and scores and revises that
 resume until it clears a quality bar — before you ever see it.
@@ -146,7 +149,16 @@ More: [`docs/hackathon/SUBMISSION.md`](./docs/hackathon/SUBMISSION.md) ·
 
 ### License
 
-License: to be added by the owner before the repo is made public.
+Resumer AI uses a **dual license**:
+
+- **Noncommercial use is free** under the [PolyForm Noncommercial License 1.0.0](LICENSE) —
+  use, modify, and share it for personal, research, educational, charitable, or government
+  purposes at no cost.
+- **Commercial use requires a paid commercial license.** See
+  [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md) or contact the author.
+
+> Because it restricts commercial use, Resumer AI is **source-available**, not OSI-approved
+> "open source." See the [LICENSE](LICENSE) file for the full terms.
 
 ---
 

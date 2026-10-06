@@ -1,10 +1,13 @@
 import Link from 'next/link';
+import { ThemeCorner } from '@/components/theme-corner';
 
 export const metadata = { title: 'Not found' };
 
 /** In the app's own look, rather than Next's default page — a link to a deleted resume lands here. */
 export default function NotFound() {
   return (
+    <>
+    <ThemeCorner />
     <main id="main" tabIndex={-1} className="mx-auto max-w-lg px-5 py-24">
       <p className="eyebrow">§ 404</p>
       <h1 className="mt-2 font-display text-3xl tracking-tight">Nothing here</h1>
@@ -15,5 +18,6 @@ export default function NotFound() {
         Go to the dashboard
       </Link>
     </main>
+    </>
   );
 }

@@ -116,9 +116,44 @@ export function parseListing(json: unknown, company: string): EmployerIntel {
   };
 }
 
-export function parseNews(json: unknown, limit = 3): EmployerIntel['headlines'] {
+const LEGAL = /\b(?:pvt|private|ltd|limited|inc|llc|llp|corp|corporation|india|global|technologies|technology|tech|services|solutions|software|systems)\b\.?/gi;
+/** Distinctive part of a company name ("Walmart Global Tech India" -> "walmart"); falls back to the whole name. */
+const coreName = (company: string): string =>
+  company.replace(LEGAL, ' ').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim().toLowerCase() ||
+  company.trim().toLowerCase();
+
+const REVIEW_SITES: [RegExp, string][] = [
+  [/glassdoor/i, 'Glassdoor'],
+  [/ambitionbox/i, 'AmbitionBox'],
+  [/indeed/i, 'Indeed'],
+  [/naukri/i, 'Naukri'],
+];
+
+/**
+ * Fallback rating from a plain engine=google "<company> reviews" search (VERIFIED live 2026-10-06):
+ * review sites come back as organic_results[] with rich_snippet.top.detected_extensions {rating, reviews}.
+ * Only a result from a known review site whose title names the company counts. Rating 0 otherwise.
+ */
+export function parseGoogleRating(json: unknown, company: string): Pick<EmployerIntel, 'rating' | 'ratingSource' | 'reviewsCount'> {
+  const core = coreName(company);
+  for (const [re, label] of REVIEW_SITES) {
+    for (const raw of arr(obj(json).organic_results)) {
+      const r = obj(raw);
+      if (!re.test(`${str(r.source)} ${str(r.displayed_link)} ${str(r.link)}`)) continue;
+      if (!core || !str(r.title).toLowerCase().includes(core)) continue;
+      const d = obj(obj(obj(r.rich_snippet).top).detected_extensions);
+      const rating = Number(d.rating);
+      if (rating > 0 && rating <= 5) return { rating, ratingSource: `${label} (via Google)`, reviewsCount: count(d.reviews) };
+    }
+  }
+  return { rating: 0, ratingSource: '', reviewsCount: 0 };
+}
+
+export function parseNews(json: unknown, limit = 3, company = ''): EmployerIntel['headlines'] {
+  const core = company ? coreName(company) : '';
   return arr(obj(json).news_results)
     .map(obj)
+    .filter((n) => !core || `${str(n.title)} ${str(n.snippet)}`.toLowerCase().includes(core))
     .map((n) => {
       const s = n.source;
       return {
