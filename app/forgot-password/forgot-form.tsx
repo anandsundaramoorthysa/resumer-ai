@@ -25,20 +25,20 @@ export function ForgotPasswordForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           autoComplete="email"
-          className="mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-brand"
+          className="field mt-1"
         />
       </label>
 
       <button
         type="submit"
         disabled={pending || email.trim().length < 4}
-        className="mt-4 min-h-11 w-full rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+        className="mt-4 btn btn-primary w-full"
       >
         {pending ? 'Sending…' : 'Send the link'}
       </button>
 
       {result ? (
-        <p className={`mt-3 text-sm ${result.ok ? 'text-success' : 'text-danger'}`} role="status">
+        <p className={`mt-3 text-sm ${result.ok ? 'text-success' : 'text-danger'}`} role={result.ok ? 'status' : 'alert'}>
           {result.message}
         </p>
       ) : null}

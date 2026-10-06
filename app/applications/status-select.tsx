@@ -18,7 +18,7 @@ const TONE: Record<ApplicationStatus, string> = {
   // whose difference matters most the one pair you could not tell apart.
   draft: 'border-muted text-muted',
   applied: 'border-brand text-brand-dark',
-  interview: 'border-gold text-gold',
+  interview: 'border-blue text-blue',
   rejected: 'border-danger text-danger',
   offer: 'border-success text-success',
 };
@@ -49,7 +49,7 @@ export function StatusSelect({
           setApplicationStatus(id, e.target.value as ApplicationStatus),
         )
       }
-      className={`min-h-11 rounded-full border bg-surface px-2.5 py-1 text-xs font-semibold outline-none disabled:opacity-50 ${TONE[status]}`}
+      className={`min-h-11 field !w-auto border-2 px-2.5 py-1 text-xs font-semibold disabled:opacity-50 ${TONE[status]}`}
       aria-label={`Status for ${label}`}
     >
       {OPTIONS.map((o) => (

@@ -23,24 +23,26 @@ export default async function ApprovalsPage() {
   return (
     <div className="min-h-screen min-h-dvh">
       <AppHeader width="6xl" />
-      <main className="mx-auto max-w-4xl px-5 py-8">
-        <h1 className="font-display text-3xl">New accounts</h1>
-        <p className="mt-1 max-w-prose text-sm text-muted">
+      <main id="main" tabIndex={-1} className="mx-auto max-w-4xl px-5 py-8 outline-none">
+        <p className="eyebrow">§ Admin</p>
+        <h1 className="mt-1 font-display text-4xl tracking-tight">New accounts</h1>
+        <p className="mt-2 max-w-prose text-sm text-muted">
           Someone who signs up can sign in and see a waiting page, and nothing else, until you
           decide. Approved accounts get the normal limit of 400 AI calls a day; denied ones stay
           locked out and can delete themselves. Either way they are told by email.
         </p>
 
-        <section className="mt-7" aria-labelledby="pending-heading">
-          <h2 id="pending-heading" className="font-display text-xl">
+        <section className="mt-8 border-t border-line pt-4" aria-labelledby="pending-heading">
+          <p className="eyebrow">§ 01</p>
+          <h2 id="pending-heading" className="mt-1 font-display text-xl">
             Waiting ({pending.length})
           </h2>
           {pending.length === 0 ? (
             <p className="mt-3 text-sm text-muted">Nobody is waiting.</p>
           ) : (
-            <ul className="mt-3 space-y-3">
+            <ul className="mt-3 border-t border-line">
               {pending.map((a) => (
-                <li key={a.id} className="rounded-xl border border-line bg-surface p-4">
+                <li key={a.id} className="border-b border-line py-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-semibold [overflow-wrap:anywhere]">{a.email ?? '(no email)'}</p>
@@ -58,11 +60,12 @@ export default async function ApprovalsPage() {
         </section>
 
         {decided.length > 0 ? (
-          <section className="mt-10" aria-labelledby="decided-heading">
-            <h2 id="decided-heading" className="font-display text-xl">Recently decided</h2>
-            <ul className="mt-3 divide-y divide-line rounded-xl border border-line bg-surface">
+          <section className="mt-10 border-t border-line pt-4" aria-labelledby="decided-heading">
+            <p className="eyebrow">§ 02</p>
+            <h2 id="decided-heading" className="mt-1 font-display text-xl">Recently decided</h2>
+            <ul className="mt-3 divide-y divide-line border-y border-line">
               {decided.map((a) => (
-                <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
                   <span className="[overflow-wrap:anywhere]">{a.email}</span>
                   <span className="flex items-center gap-3">
                     <span className={a.approval === 'approved' ? 'text-success' : 'text-danger'}>

@@ -61,22 +61,17 @@ export function ThemeToggle({
         type="button"
         onClick={() => set(next)}
         aria-label={`Theme: ${LABELS[choice]}. Switch to ${LABELS[next]}`}
-        className={`group relative flex min-h-11 w-full items-center justify-center rounded-lg text-muted transition-colors hover:bg-paper hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand ${className}`}
+        title={`Theme: ${LABELS[choice]}`}
+        className={`flex min-h-11 w-full items-center justify-center text-muted transition-colors hover:bg-surface hover:text-ink ${className}`}
       >
         <ThemeIcon choice={choice} />
-        <span
-          aria-hidden="true"
-          className="pointer-events-none fixed left-[4.75rem] z-50 hidden whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-xs font-medium text-ink shadow-md group-hover:block group-focus-visible:block"
-        >
-          Theme: {LABELS[choice]}
-        </span>
       </button>
     );
   }
 
   return (
     <div className={className}>
-      <p className="px-1 pb-1 text-[0.7rem] font-medium uppercase tracking-wide text-muted">Theme</p>
+      <p className="px-1 pb-1 font-mono text-xs uppercase tracking-wider text-muted">Theme</p>
       {/* A group of three pressed-states rather than a radio group: these take effect on
           click with nothing to submit, which is a button's job, not a form control's. */}
       <div role="group" aria-label="Theme" className="flex gap-1">
@@ -88,10 +83,10 @@ export function ThemeToggle({
               type="button"
               onClick={() => set(option)}
               aria-pressed={active}
-              className={`flex min-h-11 flex-1 items-center justify-center rounded-lg border text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand ${
+              className={`flex min-h-11 flex-1 items-center justify-center border text-xs font-semibold transition-colors ${
                 active
-                  ? 'border-brand bg-brand-tint text-brand-dark'
-                  : 'border-line text-muted hover:bg-paper hover:text-ink'
+                  ? 'border-ink bg-surface text-ink'
+                  : 'border-rule text-muted hover:bg-surface hover:text-ink'
               }`}
             >
               <ThemeIcon choice={option} />

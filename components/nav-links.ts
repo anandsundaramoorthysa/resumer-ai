@@ -20,6 +20,7 @@ export interface NavLink {
  */
 export const NAV_LINKS: NavLink[] = [
   { href: '/', label: 'Dashboard' },
+  { href: '/radar', label: 'Job Radar' },
   { href: '/profile', label: 'Profile' },
   { href: '/import', label: 'Import' },
   { href: '/settings/portfolio', label: 'Portfolio' },

@@ -676,3 +676,5 @@ export const dismissedRecords = pgTable(
     index('dismissed_record_identity_idx').on(t.userId, t.identityKey),
   ],
 );
+
+export * from './schema-radar';

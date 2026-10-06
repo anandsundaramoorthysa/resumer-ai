@@ -33,7 +33,7 @@ export function ApplicationFieldsForm({ values }: { values: ApplicationFieldValu
 
   return (
     <form action={action} className="mt-6 space-y-5">
-      <fieldset className="rounded-xl border border-line bg-surface p-5">
+      <fieldset className="border-t border-line pt-4">
         <legend className="px-1.5 font-display text-lg">Right to work</legend>
 
         {/*
@@ -79,7 +79,7 @@ export function ApplicationFieldsForm({ values }: { values: ApplicationFieldValu
         </div>
       </fieldset>
 
-      <fieldset className="rounded-xl border border-line bg-surface p-5">
+      <fieldset className="border-t border-line pt-4">
         <legend className="px-1.5 font-display text-lg">Offer details</legend>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -94,7 +94,7 @@ export function ApplicationFieldsForm({ values }: { values: ApplicationFieldValu
               type="text"
               defaultValue={values.salaryExpectation ?? ''}
               placeholder="e.g. 18–24 LPA, or $120k–$140k"
-              className="min-h-11 w-full rounded-lg border border-muted bg-paper px-3 py-2.5 text-sm outline-none focus:border-brand"
+              className="field"
             />
           </Field>
 
@@ -105,13 +105,13 @@ export function ApplicationFieldsForm({ values }: { values: ApplicationFieldValu
               type="text"
               defaultValue={values.noticePeriod ?? ''}
               placeholder="e.g. 30 days, or immediately"
-              className="min-h-11 w-full rounded-lg border border-muted bg-paper px-3 py-2.5 text-sm outline-none focus:border-brand"
+              className="field"
             />
           </Field>
         </div>
       </fieldset>
 
-      <fieldset className="rounded-xl border border-line bg-surface p-5">
+      <fieldset className="border-t border-line pt-4">
         <legend className="px-1.5 font-display text-lg">
           Voluntary self-identification
         </legend>
@@ -139,7 +139,7 @@ export function ApplicationFieldsForm({ values }: { values: ApplicationFieldValu
       {state ? (
         <p
           role="status"
-          className={`rounded-lg px-3.5 py-2.5 text-sm ${
+          className={`px-3.5 py-2.5 text-sm ${
             state.ok ? 'bg-success-tint text-success' : 'bg-danger-tint text-danger'
           }`}
         >
@@ -147,7 +147,7 @@ export function ApplicationFieldsForm({ values }: { values: ApplicationFieldValu
         </p>
       ) : null}
       {cleared ? (
-        <p role="status" className="rounded-lg bg-success-tint px-3.5 py-2.5 text-sm text-success">
+        <p role="status" className="bg-success-tint px-3.5 py-2.5 text-sm text-success">
           {cleared.message}
         </p>
       ) : null}
@@ -156,7 +156,7 @@ export function ApplicationFieldsForm({ values }: { values: ApplicationFieldValu
         <button
           type="submit"
           disabled={saving}
-          className="min-h-11 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+          className="btn btn-primary text-sm"
         >
           {saving ? 'Saving…' : 'Save answers'}
         </button>
@@ -170,7 +170,7 @@ export function ApplicationFieldsForm({ values }: { values: ApplicationFieldValu
              was styled identically to a Cancel link until hovered — and on touch there is
              no hover, so the only warning never appeared. This matches the delete button
              in app/profile/record-editor.tsx. */
-          className="ml-auto min-h-11 rounded-lg px-4 py-2.5 text-sm font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+          className="ml-auto min-h-11 px-4 py-2.5 text-sm font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
         >
           {clearing ? 'Clearing…' : 'Clear everything'}
         </button>
@@ -230,7 +230,7 @@ function Select({
       id={id}
       name={name}
       defaultValue={defaultValue}
-      className="min-h-11 w-full rounded-lg border border-muted bg-paper px-3 py-2.5 text-sm outline-none focus:border-brand"
+      className="field"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>

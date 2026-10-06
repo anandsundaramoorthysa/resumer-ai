@@ -1,8 +1,29 @@
 import type { Metadata, Viewport } from 'next';
+import { Fraunces, Instrument_Sans, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
 import { getSiteUrl } from '@/lib/site-url';
 
 const SITE_URL = getSiteUrl();
+
+const fraunces = Fraunces({
+  subsets: ['latin'],
+  axes: ['opsz', 'SOFT'],
+  style: ['normal', 'italic'],
+  display: 'swap',
+  variable: '--font-fraunces',
+});
+const instrument = Instrument_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+  variable: '--font-instrument',
+});
+const plexMono = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  display: 'swap',
+  variable: '--font-plex-mono',
+});
 
 /**
  * SEO — a real metadata surface, not just a <title>.
@@ -52,8 +73,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F5F6F8' },
-    { media: '(prefers-color-scheme: dark)', color: '#14161C' },
+    { media: '(prefers-color-scheme: light)', color: '#F3EDE0' },
+    { media: '(prefers-color-scheme: dark)', color: '#17150F' },
   ],
   width: 'device-width',
   initialScale: 1,
@@ -85,7 +106,7 @@ const structuredData = {
  * effect would paint the system theme first and flip after hydration. Nothing else writes
  * this attribute, so React never has to agree with it.
  */
-const APPLY_THEME = `(function(){try{var m=document.cookie.match(/(?:^|; )theme=(light|dark)/);if(m)document.documentElement.setAttribute('data-theme',m[1])}catch(e){}})()`;
+const APPLY_THEME = `(function(){try{var m=document.cookie.match(/(?:^|; )theme=(light|dark)/);if(m){document.documentElement.setAttribute('data-theme',m[1]);[].forEach.call(document.querySelectorAll('meta[name="theme-color"]'),function(e){e.setAttribute('content',m[1]==='dark'?'#17150F':'#F3EDE0');e.removeAttribute('media')})}}catch(e){}})()`;
 
 const STRIP_HOST_INJECTIONS = `(function(){var h=document.head;if(!h)return;[].slice.call(h.childNodes).forEach(function(n){if((n.nodeType===3&&!n.textContent.trim())||(n.nodeType===8&&/Netlify/.test(n.textContent))||(n.nodeType===1&&n.matches('meta[name="hosting-provider"],meta[name="netlify-deploy"],script[src^="/.netlify/scripts/"]')))h.removeChild(n)})})()`;
 
@@ -93,7 +114,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${fraunces.variable} ${instrument.variable} ${plexMono.variable}`}>
       <head>
         {/*
           Netlify's edge writes a comment, two <meta> tags and a HUD script into every
@@ -104,29 +125,18 @@ export default function RootLayout({
         */}
         <script dangerouslySetInnerHTML={{ __html: APPLY_THEME }} />
         <script dangerouslySetInnerHTML={{ __html: STRIP_HOST_INJECTIONS }} />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/*
-          The rule warns that a font linked from a page loads for that page only. This is
-          the App Router root layout, which IS the document head for every page — the
-          pages/_document.js it asks for does not exist in this project and cannot.
-        */}
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Spline+Sans+Mono:wght@400;500;600&display=swap"
-          rel="stylesheet"
-        />
-        <link
-          rel="stylesheet"
-          href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap"
-        />
         <script
           type="application/ld+json"
           // Structured data is static and author-controlled.
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
         />
       </head>
-      <body className="min-h-screen min-h-dvh bg-paper text-ink antialiased">{children}</body>
+      <body className="min-h-screen min-h-dvh bg-paper text-ink antialiased">
+        <a href="#main" className="skip-link">
+          Skip to main content
+        </a>
+        {children}
+      </body>
     </html>
   );
 }

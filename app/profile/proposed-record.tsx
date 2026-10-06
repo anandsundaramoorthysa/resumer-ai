@@ -26,11 +26,11 @@ import {
 } from './actions';
 
 const ROW =
-  'flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3.5 py-2.5';
+  'flex flex-wrap items-center justify-between gap-3 border border-line bg-surface px-3.5 py-2.5';
 const APPROVE =
-  'min-h-11 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold hover:bg-paper disabled:opacity-50';
+  'btn text-xs';
 const REJECT =
-  'min-h-11 rounded-lg px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50';
+  'min-h-11 px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50';
 
 /**
  * One proposed item.
@@ -89,7 +89,7 @@ export function ProposedBulkControls({ count }: { count: number }) {
         type="button"
         disabled={pending}
         onClick={() => startTransition(() => approveAllSynced())}
-        className="min-h-11 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+        className="btn btn-primary text-sm"
       >
         Approve all {count}
       </button>
@@ -105,7 +105,7 @@ export function ProposedBulkControls({ count }: { count: number }) {
           setConfirming(false);
           startTransition(() => rejectAllSynced());
         }}
-        className="min-h-11 rounded-lg border border-line px-4 py-2 text-sm font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+        className="min-h-11 border border-line px-4 py-2 text-sm font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
       >
         {confirming ? `Yes — reject all ${count}` : 'Reject all'}
       </button>

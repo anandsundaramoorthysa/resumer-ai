@@ -115,7 +115,7 @@ export function RecordEditor({
           {records.map((r) => (
             <span
               key={r.id}
-              className="inline-flex items-center gap-1.5 rounded-full bg-brand-tint py-1 pl-2.5 pr-1 text-xs font-medium text-brand-dark"
+              className="inline-flex items-center gap-1.5 bg-brand-tint py-1 pl-2.5 pr-1 text-xs font-medium text-brand-dark"
               title={`Source: ${sourceLabel(r.source)}`}
             >
               {describeRecord(form.type, r.data)}
@@ -129,7 +129,7 @@ export function RecordEditor({
                 aria-label={`Edit ${describeRecord(form.type, r.data)}`}
                 /* 24x24 is WCAG 2.2 AA's floor (2.5.8). At px-1 this was 20x16, which is
                    not reliably hittable with a thumb. Sized without inflating the chip. */
-                className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-full hover:bg-surface"
+                className="inline-flex min-h-6 min-w-6 items-center justify-center hover:bg-surface"
               >
                 &#9998;
               </button>
@@ -159,11 +159,11 @@ export function RecordEditor({
                    their width first, leaving the text an 83px column that ran to twenty
                    lines at 320px — nothing overflowed or clipped, it just became an
                    unreadable ribbon. */
-                className="flex flex-col items-start gap-2 rounded-lg border border-line px-3.5 py-2.5 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-3"
+                className="flex flex-col items-start gap-2 border border-line px-3.5 py-2.5 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-3"
               >
                 <span className="min-w-0">
                   {describeRecord(form.type, r.data)}
-                  <span className="ml-2 font-mono text-[11px] text-muted">
+                  <span className="ml-2 font-mono text-xs text-muted">
                     {sourceLabel(r.source)}
                   </span>
                 </span>
@@ -177,7 +177,7 @@ export function RecordEditor({
                     }}
                     /* px-3 rather than px-2.5: at 2.5 the box measured 43px, one pixel
                        under the 44px touch target this codebase holds itself to. */
-                    className="min-h-11 rounded-lg px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
+                    className="min-h-11 px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
                   >
                     Edit
                   </button>
@@ -229,7 +229,7 @@ export function RecordEditor({
             setAdding(true);
             setEditing(null);
           }}
-          className="mt-3 min-h-11 rounded-lg border border-line px-3.5 text-sm font-semibold hover:bg-paper"
+          className="btn mt-3 text-sm"
         >
           + Add {articleFor(form.singular)} {form.singular}
         </button>
@@ -304,7 +304,7 @@ function RecordFields({
   };
 
   return (
-    <div className="rounded-lg border border-brand-tint bg-paper p-3.5">
+    <div className="border border-brand-tint bg-paper p-3.5">
       {form.fields.map((field) => (
         <Field
           key={field.name}
@@ -323,14 +323,14 @@ function RecordFields({
           type="button"
           onClick={submit}
           disabled={pending || missing.length > 0}
-          className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+          className="btn btn-primary text-sm"
         >
           {pending ? (stage === 'checking' ? 'Checking…' : 'Saving…') : recordId || check ? 'Save' : 'Add'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="min-h-11 rounded-lg px-4 text-sm font-semibold text-muted hover:text-ink"
+          className="min-h-11 px-4 text-sm font-semibold text-muted hover:text-ink"
         >
           Cancel
         </button>
@@ -353,7 +353,7 @@ function Field({
   onChange: (v: string) => void;
 }) {
   const shared =
-    'mt-1 w-full rounded-lg border border-muted bg-surface px-3 py-2 text-sm outline-none focus:border-brand';
+    'field mt-1';
 
   return (
     <label className="mt-2.5 block first:mt-0">
@@ -417,7 +417,7 @@ function DeleteButton({ id, onDone }: { id: string; onDone: (r: Result) => void 
       type="button"
       disabled={pending}
       onClick={() => startTransition(async () => onDone(await deleteProfileRecord(id)))}
-      className="min-h-11 rounded-lg px-2.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+      className="min-h-11 px-2.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
     >
       Remove
     </button>

@@ -50,7 +50,7 @@ export function SetupChecklist({
     <div className="mx-auto max-w-2xl">
       <div className="mb-8 text-center">
         <Logo size={44} showWordmark={false} className="mb-4" />
-        <h1 className="font-display text-3xl">Almost ready</h1>
+        <h1 className="font-display text-3xl tracking-tight">Almost ready</h1>
         <p className="mt-2 text-sm text-muted">
           Add the missing values to <code className="font-mono">.env</code> and reload.
           Nothing else is needed to start drafting.
@@ -61,11 +61,11 @@ export function SetupChecklist({
         {items.map((item) => (
           <li
             key={item.title}
-            className="rounded-xl border border-line bg-surface p-4"
+            className="border-t border-line pt-4"
           >
             <div className="flex items-start gap-3">
               <span
-                className={`mt-0.5 grid h-6 w-6 flex-none place-items-center rounded-full text-xs font-semibold ${
+                className={`mt-0.5 grid h-6 w-6 flex-none place-items-center text-xs font-semibold ${
                   item.done
                     ? 'bg-success-tint text-success'
                     : 'bg-warning-tint text-warning'

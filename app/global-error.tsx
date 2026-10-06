@@ -18,14 +18,17 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
   return (
     <html lang="en">
       <body className="min-h-screen bg-paper text-ink antialiased">
-        <main className="mx-auto max-w-lg px-4 py-24">
-          <h1 className="text-2xl font-semibold">Something went wrong</h1>
-          <p className="mt-3">This page hit an error. It has been reported. Try again, or go back to the home page.</p>
-          <div className="mt-6 flex gap-3">
-            <button type="button" onClick={reset} className="rounded border px-4 py-2">
+        <main id="main" tabIndex={-1} className="mx-auto max-w-lg px-5 py-24">
+          <p className="eyebrow">§ Error</p>
+          <h1 className="mt-2 font-display text-3xl tracking-tight">Something went wrong</h1>
+          <p className="mt-3 text-sm text-muted" role="alert">
+            This page hit an error. It has been reported. Try again, or go back to the home page.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button type="button" onClick={reset} className="btn btn-primary">
               Try again
             </button>
-            <Link href="/" className="rounded border px-4 py-2">
+            <Link href="/" className="btn">
               Home
             </Link>
           </div>

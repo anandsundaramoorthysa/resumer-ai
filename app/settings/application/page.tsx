@@ -32,8 +32,9 @@ export default async function ApplicationFieldsPage() {
     <div className="min-h-screen min-h-dvh">
       <AppHeader current="/settings/application" width="6xl" />
 
-      <main className="mx-auto max-w-6xl px-5 py-8">
-        <h1 className="font-display text-3xl">Application answers</h1>
+      <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
+        <p className="eyebrow">§ Settings</p>
+        <h1 className="mt-1 font-display text-4xl tracking-tight">Application answers</h1>
         <p className="mt-2 max-w-prose text-sm text-muted">
           The questions every application portal asks that have nothing to do with your
           resume — work authorization, sponsorship, salary, notice, and the voluntary
@@ -59,8 +60,8 @@ export default async function ApplicationFieldsPage() {
               Phase 10. Saying so plainly is the point: a settings screen that looks like it
               does something and doesn't is worse than one that admits it.
             */}
-            <div className="rounded-xl border border-gold bg-gold-tint/40 p-4">
-              <h2 className="text-sm font-semibold text-gold">Nothing reads these yet</h2>
+            <div className="border-l-4 border-blue bg-surface p-4">
+              <h2 className="text-sm font-semibold">Nothing reads these yet</h2>
               <p className="mt-1 text-sm text-muted">
                 No resume, cover letter or export uses any of it, and it is never sent to an AI
                 provider — unlike the rest of your profile, which is; see{' '}
@@ -99,9 +100,10 @@ export default async function ApplicationFieldsPage() {
             */}
           <section
             id="where-your-data-goes"
-            className="scroll-mt-20 rounded-xl border border-line bg-surface p-5"
+            className="border-t border-line pt-4 scroll-mt-20"
           >
-            <h2 className="font-display text-lg">Where your data goes</h2>
+            <p className="eyebrow">§ Disclosure</p>
+            <h2 className="mt-1 font-display text-lg">Where your data goes</h2>
 
             {providers.length === 0 ? (
               <p className="mt-3 text-sm text-muted">

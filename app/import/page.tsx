@@ -12,8 +12,9 @@ export default async function ImportPage() {
     <div className="min-h-screen min-h-dvh">
       <AppHeader current="/import" width="6xl" />
 
-      <main className="mx-auto max-w-6xl px-5 py-8">
-        <h1 className="font-display text-3xl">Import an existing resume</h1>
+      <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
+        <p className="eyebrow">§ Import</p>
+        <h1 className="mt-1 font-display text-4xl tracking-tight">Import an existing resume</h1>
         {/* The shell around this page is now 1152px, and this sentence is 250 characters
             of it. Without the cap it sets as a single 180-character line, which is about
             two and a half times a comfortable measure and is read by skipping. The cards

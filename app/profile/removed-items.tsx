@@ -44,13 +44,13 @@ export function RemovedItems({ items }: { items: RemovedItem[] }) {
     startTransition(async () => setNote(await action()));
 
   return (
-    <section className="rounded-xl border border-line bg-surface p-5">
+    <section className="border-t border-line pt-4">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls="removed-list"
-        className="flex min-h-11 w-full items-baseline justify-between gap-3 rounded-lg text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
+        className="flex min-h-11 w-full items-baseline justify-between gap-3 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
       >
         <span>
           <span className="font-display text-lg">Removed</span>
@@ -75,7 +75,7 @@ export function RemovedItems({ items }: { items: RemovedItem[] }) {
           {note ? (
             <p
               role="status"
-              className={`mt-3 rounded-lg px-3 py-2 text-sm ${
+              className={`mt-3 px-3 py-2 text-sm ${
                 note.ok ? 'bg-success-tint text-ink' : 'bg-danger-tint text-ink'
               }`}
             >
@@ -98,7 +98,7 @@ export function RemovedItems({ items }: { items: RemovedItem[] }) {
                     type="button"
                     disabled={pending}
                     onClick={() => run(() => bringBack(item.id))}
-                    className="inline-flex min-h-11 items-center rounded-lg border border-line px-3 text-sm font-semibold hover:bg-paper disabled:opacity-60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
+                    className="btn inline-flex text-sm"
                   >
                     Bring it back
                   </button>
@@ -106,7 +106,7 @@ export function RemovedItems({ items }: { items: RemovedItem[] }) {
                     type="button"
                     disabled={pending}
                     onClick={() => run(() => allowAgain(item.id))}
-                    className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-muted hover:bg-paper hover:text-ink disabled:opacity-60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
+                    className="inline-flex min-h-11 items-center px-3 text-sm font-medium text-muted hover:bg-paper hover:text-ink disabled:opacity-60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
                   >
                     Allow it again
                   </button>

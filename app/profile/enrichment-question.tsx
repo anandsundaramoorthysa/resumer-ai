@@ -35,7 +35,7 @@ export interface QuestionView {
 }
 
 const INPUT =
-  'mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-brand';
+  'field mt-1';
 
 export function EnrichmentQuestion({ question }: { question: QuestionView }) {
   const [scale, setScale] = useState('');
@@ -61,7 +61,7 @@ export function EnrichmentQuestion({ question }: { question: QuestionView }) {
   };
 
   return (
-    <li className="rounded-lg border border-line bg-surface p-3.5">
+    <li className="border border-line bg-surface p-3.5">
       <p className="text-sm">
         {question.kind === 'skill' ? (
           <>
@@ -147,7 +147,7 @@ export function EnrichmentQuestion({ question }: { question: QuestionView }) {
           type="button"
           onClick={save}
           disabled={!filled || pending}
-          className="min-h-11 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+          className="btn btn-primary text-sm"
         >
           {pending ? 'Saving…' : 'Add to my profile'}
         </button>
@@ -163,7 +163,7 @@ export function EnrichmentQuestion({ question }: { question: QuestionView }) {
           disabled={pending}
           title="This question will not be asked again."
           onClick={() => startTransition(() => skipQuestion(question.id))}
-          className="min-h-11 rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:text-ink disabled:opacity-50"
+          className="min-h-11 px-3 py-2 text-sm font-semibold text-muted hover:text-ink disabled:opacity-50"
         >
           {question.kind === 'skill' ? "I haven't used it" : "Don't ask me this again"}
         </button>

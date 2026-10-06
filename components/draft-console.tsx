@@ -19,7 +19,19 @@
  * user is never left watching a spinner with no idea whether the role was ever a fit.
  */
 
-import { useCallback, useRef, useState } from 'react';
+/*
+ * Job Radar handoff. Radar writes these two sessionStorage keys, then navigates to the
+ * page that renders this console; on mount the console reads and clears them:
+ *
+ *   radar:jobText   the job description text to pre-fill (skips scraping a URL)
+ *   radar:jobLabel  short human label, e.g. "Platform Engineer at Acme", shown in a banner
+ *
+ * The same values can also be passed as the initialJobText / initialJobLabel props.
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { KeywordHighlight } from '@/components/keyword-highlight';
+import { ScoreStamp } from '@/components/score-stamp';
 import {
   JOB_FILE_ACCEPT,
   MAX_JOB_FILE_BYTES,
@@ -129,8 +141,27 @@ async function readEvents(
   return ended;
 }
 
-export function DraftConsole() {
-  const [jobInput, setJobInput] = useState('');
+const RADAR_TEXT_KEY = 'radar:jobText';
+const RADAR_LABEL_KEY = 'radar:jobLabel';
+
+function formatElapsed(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+export function DraftConsole({
+  initialJobText,
+  initialJobLabel,
+}: {
+  initialJobText?: string;
+  initialJobLabel?: string;
+} = {}) {
+  const [jobInput, setJobInput] = useState(initialJobText ?? '');
+  const [radarLabel, setRadarLabel] = useState<string | null>(
+    initialJobText ? (initialJobLabel ?? 'selected job') : null,
+  );
+  const [elapsed, setElapsed] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [events, setEvents] = useState<PipelineEvent[]>([]);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -144,8 +175,35 @@ export function DraftConsole() {
   const abortRef = useRef<AbortController | null>(null);
   const tokenRef = useRef<string | null>(null);
   const stopRef = useRef(false);
+  const startedAtRef = useRef(0);
 
   const busy = phase === 'assessing' || phase === 'drafting' || phase === 'improving';
+
+  // Radar handoff (see top of file). Read once, then clear so a refresh starts clean.
+  useEffect(() => {
+    try {
+      const text = sessionStorage.getItem(RADAR_TEXT_KEY);
+      const label = sessionStorage.getItem(RADAR_LABEL_KEY);
+      sessionStorage.removeItem(RADAR_TEXT_KEY);
+      sessionStorage.removeItem(RADAR_LABEL_KEY);
+      if (text) {
+        // Reading sessionStorage must wait for mount (SSR has none), hence setState here.
+        /* eslint-disable react-hooks/set-state-in-effect */
+        setJobInput(text);
+        setRadarLabel(label || 'selected job');
+        /* eslint-enable react-hooks/set-state-in-effect */
+      }
+    } catch {
+      // Storage can be blocked; the console then simply starts empty.
+    }
+  }, []);
+
+  // Elapsed timer for the progress line; real clock, restarts per run.
+  useEffect(() => {
+    if (!busy) return;
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [busy]);
 
   /**
    * Type and size are checked here purely so the answer is instant; the server checks
@@ -305,8 +363,11 @@ export function DraftConsole() {
     setDeclined(false);
     setResult(null);
     setPasses([]);
+    setAmendResult(null);
     stopRef.current = false;
     tokenRef.current = null;
+    startedAtRef.current = Date.now();
+    setElapsed(0);
     setPhase('assessing');
 
     // Multipart only when there is a file to carry. Without one the request is plain
@@ -407,7 +468,11 @@ export function DraftConsole() {
         if (payload.fit && payload.token) {
           tokenRef.current = payload.token;
           setFit(payload.fit);
-          if (payload.fit.decision === 'proceed') await draft(payload.token);
+          if (payload.fit.decision === 'proceed') {
+            startedAtRef.current = Date.now();
+            setElapsed(0);
+            await draft(payload.token);
+          }
         }
       } catch (err) {
         if ((err as Error).name !== 'AbortError') setError((err as Error).message);
@@ -419,8 +484,21 @@ export function DraftConsole() {
   );
 
   const draftAnyway = useCallback(() => {
-    if (tokenRef.current) void draft(tokenRef.current);
+    if (!tokenRef.current) return;
+    startedAtRef.current = Date.now();
+    setElapsed(0);
+    void draft(tokenRef.current);
   }, [draft]);
+
+  /**
+   * Retry keeps the input exactly as it was. If the fit check already succeeded, only the
+   * draft is re-run from the same sealed token; otherwise the whole run restarts.
+   */
+  const retry = useCallback(() => {
+    setError(null);
+    if (tokenRef.current && fit) draftAnyway();
+    else void start();
+  }, [draftAnyway, fit, start]);
 
   const decline = useCallback(() => {
     setDeclined(true);
@@ -444,6 +522,21 @@ export function DraftConsole() {
     (s) => latestByStage.has(s) || (s === 'score' && scoreRows.length > 0),
   );
 
+  // Shown the moment the button is pressed, before the server has said anything.
+  const totalSteps = STAGE_ORDER.length;
+  const currentStep = Math.min(Math.max(startedStages.length, 1), totalSteps);
+  const currentStage = startedStages[startedStages.length - 1];
+  const stepText =
+    phase === 'improving'
+      ? 'Improving the draft'
+      : currentStage
+        ? STAGE_LABELS[currentStage]
+        : phase === 'drafting'
+          ? 'Starting the draft'
+          : 'Starting the fit check';
+  const showProgress = busy || startedStages.length > 0;
+  const failed = !!error && !busy && !result && !declined;
+
   const buttonLabel =
     phase === 'assessing'
       ? 'Checking fit…'
@@ -455,13 +548,33 @@ export function DraftConsole() {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-line bg-surface p-5">
+      <div className="sheet p-4 sm:p-5">
         <h2 className="font-display text-xl">Start a new resume</h2>
         <p className="mt-1 text-sm text-muted">
           Paste a job link, a full description, or a LinkedIn post — or attach the job
           description as a PDF or DOCX. Either one on its own is enough, and you can do
           both. We check how well your profile fits the role first, and tell you why.
         </p>
+
+        {radarLabel && (
+          <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border border-line bg-paper px-3 py-2 text-sm">
+            <span>
+              Job from Radar: <span className="font-semibold">{radarLabel}</span>
+            </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setRadarLabel(null);
+                setJobInput('');
+                document.getElementById('jobInput')?.focus();
+              }}
+              className="min-h-6 font-semibold underline disabled:opacity-50"
+            >
+              change
+            </button>
+          </p>
+        )}
 
         <label htmlFor="jobInput" className="sr-only">
           Job posting link or description
@@ -473,10 +586,10 @@ export function DraftConsole() {
           placeholder="Paste a job URL, description, or LinkedIn post here…"
           rows={5}
           disabled={busy}
-          className="mt-4 w-full resize-y rounded-xl border border-muted bg-paper px-3.5 py-3 text-sm outline-none placeholder:text-muted focus:border-brand disabled:opacity-60"
+          className="field mt-4 resize-y disabled:opacity-60"
         />
 
-        <div className="mt-3 rounded-xl border border-dashed border-line p-3">
+        <div className="mt-3 border border-dashed border-line p-3">
           {file ? (
             <div className="flex flex-wrap items-center gap-3">
               <span className="min-w-0 break-all font-mono text-xs text-ink">
@@ -487,7 +600,7 @@ export function DraftConsole() {
                 type="button"
                 onClick={() => setFile(null)}
                 disabled={busy}
-                className="ml-auto min-h-11 rounded-lg border border-line px-3 py-2 text-xs font-semibold hover:bg-paper disabled:opacity-50"
+                className="btn ml-auto"
               >
                 Remove file
               </button>
@@ -496,10 +609,7 @@ export function DraftConsole() {
             <div className="flex flex-wrap items-center gap-3">
               {/* The input is hidden from sight but not from the keyboard: the label is
                   the 44px target, and focus lands on it through the association. */}
-              <label
-                htmlFor="jobFile"
-                className="inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-brand"
-              >
+              <label htmlFor="jobFile" className="btn focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue">
                 Attach a PDF or DOCX
                 <input
                   id="jobFile"
@@ -524,13 +634,8 @@ export function DraftConsole() {
 
         {/* Anything raised before the first stage appears belongs beside the controls
             that caused it; once stages are on screen the failure is shown against them. */}
-        {error && events.length === 0 && (
-          <p
-            role="alert"
-            className="mt-3 rounded-lg bg-danger-tint px-3 py-2.5 text-sm text-danger"
-          >
-            {error}
-          </p>
+        {error && !showProgress && (
+          <ErrorBox message={error} onRetry={failed ? retry : undefined} />
         )}
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -540,7 +645,7 @@ export function DraftConsole() {
             third-party AI company, and until now nothing on the way to it said so or
             named one.
           */}
-          <span className="text-xs text-muted">
+          <span className="max-w-prose text-xs text-muted">
             Your portfolio is re-checked for changes before drafting. This sends your
             profile and the job description to a third-party AI provider —{' '}
             <a
@@ -555,18 +660,42 @@ export function DraftConsole() {
             type="button"
             onClick={start}
             disabled={busy || (!file && jobInput.trim().length < 3)}
-            className="min-h-11 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand transition-colors hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn btn-primary"
           >
+            {busy && <Spinner />}
             {buttonLabel}
           </button>
         </div>
       </div>
 
-      {startedStages.length > 0 && (
-        <div className="rounded-2xl border border-line bg-surface p-5">
-          <h3 className="font-mono text-xs font-semibold uppercase tracking-wider text-muted">
-            Live progress
-          </h3>
+      {showProgress && (
+        <div className="sheet p-4 sm:p-5">
+          <h3 className="eyebrow">Live progress</h3>
+
+          {/* Plain text, not a live region: a ticking clock would be read out every second.
+              The stage list below is the polite announcement. */}
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+            {busy && <Spinner />}
+            <span className="font-semibold tabular-nums">
+              Step {currentStep} of {totalSteps} · {formatElapsed(elapsed)}
+            </span>
+            <span className="text-muted">{stepText}{busy ? '…' : ''}</span>
+          </div>
+          <div
+            className="progress mt-2"
+            role="progressbar"
+            aria-label="Draft progress"
+            aria-valuemin={0}
+            aria-valuemax={totalSteps}
+            aria-valuenow={busy ? currentStep - 1 : startedStages.length}
+            aria-valuetext={`Step ${currentStep} of ${totalSteps}`}
+          >
+            <span
+              style={{
+                width: `${(((busy ? currentStep - 1 : startedStages.length) / totalSteps) * 100).toFixed(0)}%`,
+              }}
+            />
+          </div>
 
           {/* REQ-8.1 is a live view, and "live" has to mean live for a screen reader
               too — polite so each stage is announced without interrupting. */}
@@ -612,11 +741,7 @@ export function DraftConsole() {
             })}
           </ol>
 
-          {error && events.length > 0 && (
-            <p role="alert" className="mt-4 rounded-lg bg-danger-tint px-3 py-2.5 text-sm text-danger">
-              {error}
-            </p>
-          )}
+          {error && <ErrorBox message={error} onRetry={failed ? retry : undefined} />}
         </div>
       )}
 
@@ -647,12 +772,35 @@ const STATUS_WORDS: Record<'running' | 'done' | 'error', string> = {
   error: 'failed',
 };
 
+/** Spinner that stands still for people who asked for reduced motion. */
+function Spinner() {
+  return (
+    <span
+      aria-hidden
+      className="inline-block h-4 w-4 flex-none animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
+    />
+  );
+}
+
+function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div role="alert" className="mt-3 flex flex-wrap items-center gap-3 bg-danger-tint px-3 py-2.5 text-sm text-danger">
+      <span className="min-w-0 flex-1">{message}</span>
+      {onRetry && (
+        <button type="button" onClick={onRetry} className="btn border-danger bg-surface text-danger">
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * The mark is decorative: the same status is spelled out in the sr-only text beside the
  * stage name, so nothing here is carried by shape or colour alone (WCAG 1.4.1).
  */
 function StatusDot({ status }: { status: 'running' | 'done' | 'error' }) {
-  const base = 'mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full text-[11px]';
+  const base = 'mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full text-xs';
   if (status === 'done')
     return <span aria-hidden className={`${base} bg-success-tint text-success`}>✓</span>;
   if (status === 'error')
@@ -717,27 +865,61 @@ function FitCard({
     : fit.verdict === 'partial'
       ? 'bg-warning-tint text-warning'
       : 'bg-danger-tint text-danger';
+  const held = fit.skills.held.map((s) => s.keyword);
 
   return (
-    <section aria-labelledby="fit-heading" className="rounded-2xl border border-line bg-surface p-5">
+    <section aria-labelledby="fit-heading" className="sheet p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-xs uppercase tracking-wider text-muted">
-            Role fit · assessed as {fit.persona}
-          </p>
+          <p className="eyebrow">Role fit · assessed as {fit.persona}</p>
           <h3 id="fit-heading" className="mt-1 font-display text-xl">
             {fit.headline}
           </h3>
         </div>
-        <span className={`rounded-full px-3 py-1 font-mono text-xs font-semibold tabular ${badge}`}>
+        <span className={`px-3 py-1 font-mono text-xs font-semibold tabular ${badge}`}>
           {VERDICT_LABEL[fit.verdict]} · {fit.score}/100
         </span>
       </div>
 
-      <p className="mt-3 text-sm">{fit.summary}</p>
+      {/* The decision comes first: it is the one thing on this card that needs an answer. */}
+      {autoProceeded && (
+        <p className="mt-4 bg-success-tint px-3 py-2.5 text-sm text-success">
+          That’s a workable fit, so drafting started straight away.
+        </p>
+      )}
+
+      {deciding && (
+        <div className="mt-4 border border-rule p-4">
+          <p className="text-sm font-semibold">
+            This looks like a stretch for your profile as it stands. Draft it anyway?
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            The draft only uses what your profile says — nothing is invented to close the
+            gap — so expect a lower score. You can also add what’s missing below first.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button type="button" onClick={onYes} className="btn btn-primary">
+              Yes, draft it
+            </button>
+            <button type="button" onClick={onNo} className="btn">
+              No, stop here
+            </button>
+          </div>
+        </div>
+      )}
+
+      {declined && (
+        <p className="mt-4 bg-paper px-3 py-2.5 text-sm text-muted">
+          No resume was drafted, and nothing about this check was saved.
+        </p>
+      )}
+
+      <p className="mt-4 text-sm">
+        <KeywordHighlight text={fit.summary} matched={held} missing={fit.skills.missing} />
+      </p>
 
       {fit.knockouts.length > 0 && (
-        <div className="mt-4 rounded-lg bg-danger-tint px-3 py-2.5 text-sm text-danger">
+        <div className="mt-4 bg-danger-tint px-3 py-2.5 text-sm text-danger">
           <p className="font-semibold">Eligibility rules your profile does not meet</p>
           <ul className="mt-1 list-disc space-y-1 pl-5">
             {fit.knockouts.map((k, i) => (
@@ -760,9 +942,9 @@ function FitCard({
                 <li
                   key={s.keyword}
                   title={s.evidence ? `Shown by: ${s.evidence}` : undefined}
-                  className="rounded-md bg-success-tint px-2 py-0.5 text-xs text-success"
+                  className="text-sm"
                 >
-                  {s.keyword}
+                  <KeywordHighlight text={s.keyword} matched={[s.keyword]} />
                 </li>
               ))}
               {fit.skills.held.length === 0 && <li className="text-xs text-muted">None</li>}
@@ -775,10 +957,10 @@ function FitCard({
             <p className="text-xs font-semibold text-muted">
               Asked for, not named in your profile ({fit.skills.missing.length})
             </p>
-            <ul className="mt-1.5 flex flex-wrap gap-1.5">
+            <ul className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5">
               {fit.skills.missing.map((s) => (
-                <li key={s} className="rounded-md bg-danger-tint px-2 py-0.5 text-xs text-danger">
-                  {s}
+                <li key={s} className="text-sm">
+                  <KeywordHighlight text={s} matched={[]} missing={[s]} />
                 </li>
               ))}
               {fit.skills.missing.length === 0 && <li className="text-xs text-muted">None</li>}
@@ -799,13 +981,13 @@ function FitCard({
                 <li key={i} className="flex items-start gap-2.5 text-sm">
                   <span
                     aria-hidden
-                    className={`mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full text-[11px] ${m.tone}`}
+                    className={`mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full text-xs ${m.tone}`}
                   >
                     {m.mark}
                   </span>
                   <div className="min-w-0">
                     <p>
-                      <span className="font-mono text-[11px] uppercase text-muted">
+                      <span className="font-mono text-xs uppercase text-muted">
                         {AREA_LABEL[f.area]}
                       </span>{' '}
                       {f.requirement}
@@ -843,12 +1025,6 @@ function FitCard({
         </p>
       )}
 
-      {autoProceeded && (
-        <p className="mt-4 rounded-lg bg-success-tint px-3 py-2.5 text-sm text-success">
-          That’s a workable fit, so drafting started straight away.
-        </p>
-      )}
-
       {/*
         The list above is what the profile does not SAY. For a real person a good part of
         it is not a gap at all — they have done the thing and never wrote it down, and
@@ -863,40 +1039,6 @@ function FitCard({
           result={amendResult}
           onSubmit={onAmend}
         />
-      )}
-
-      {deciding && (
-        <div className="mt-4 rounded-xl border border-line p-4">
-          <p className="text-sm font-semibold">
-            Your profile doesn’t currently match this role. Draft the resume anyway?
-          </p>
-          <p className="mt-1 text-xs text-muted">
-            It will only use what is in your profile — nothing above will be invented to
-            close the gap — so expect a lower score.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={onYes}
-              className="min-h-11 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
-            >
-              Yes, draft it
-            </button>
-            <button
-              type="button"
-              onClick={onNo}
-              className="min-h-11 rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper"
-            >
-              No, stop here
-            </button>
-          </div>
-        </div>
-      )}
-
-      {declined && (
-        <p className="mt-4 rounded-lg bg-paper px-3 py-2.5 text-sm text-muted">
-          No resume was drafted, and nothing about this check was saved.
-        </p>
       )}
     </section>
   );
@@ -928,12 +1070,12 @@ function AmendBox({
   const example = missing[0] ?? 'SEO';
 
   return (
-    <div className="mt-4 rounded-xl border border-line p-4">
-      <p className="text-sm font-semibold">Do you actually have any of these?</p>
+    <div className="mt-4 border border-line p-4">
+      <p className="text-sm font-semibold">Is something here missing only because your profile never said it?</p>
       <p className="mt-1 text-xs text-muted">
-        If something above is missing only because your profile never mentioned it, say so
-        here and it will be saved to your profile — then this role is judged again. Only
-        what you write is saved; nothing is filled in for you.
+        If you have done any of the underlined items, tell us in your own words and it
+        will be saved to your profile — then this role is checked again. Only what you
+        write is saved; nothing is filled in for you.
       </p>
 
       <label htmlFor="amend" className="sr-only">
@@ -946,7 +1088,7 @@ function AmendBox({
         rows={3}
         disabled={pending}
         placeholder={`e.g. I've done ${example} on all my own products and for ferventers.com — mostly technical audits.`}
-        className="mt-3 w-full resize-y rounded-xl border border-muted bg-paper px-3.5 py-3 text-sm outline-none placeholder:text-muted focus:border-brand disabled:opacity-60"
+        className="field mt-3 resize-y disabled:opacity-60"
       />
 
       <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -957,7 +1099,7 @@ function AmendBox({
             setText('');
           }}
           disabled={pending || text.trim().length < MIN_AMEND_CHARS}
-          className="min-h-11 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn btn-primary"
         >
           {pending ? 'Saving and re-checking…' : 'Save and check again'}
         </button>
@@ -969,13 +1111,13 @@ function AmendBox({
       {result && (
         <div className="mt-3 space-y-2 text-sm" aria-live="polite">
           {result.added && (
-            <p className="rounded-lg bg-success-tint px-3 py-2 text-success">{result.added}</p>
+            <p className="bg-success-tint px-3 py-2 text-success">{result.added}</p>
           )}
           {result.message && !result.added && (
-            <p className="rounded-lg bg-paper px-3 py-2 text-muted">{result.message}</p>
+            <p className="bg-paper px-3 py-2 text-muted">{result.message}</p>
           )}
           {result.dropped.length > 0 && (
-            <div className="rounded-lg bg-warning-tint px-3 py-2 text-warning">
+            <div className="bg-warning-tint px-3 py-2 text-warning">
               <p className="font-semibold">Not saved, because your note didn’t say it:</p>
               <ul className="mt-1 list-disc pl-5">
                 {result.dropped.map((d, i) => (
@@ -985,7 +1127,7 @@ function AmendBox({
             </div>
           )}
           {result.unplaced.length > 0 && (
-            <div className="rounded-lg bg-paper px-3 py-2 text-muted">
+            <div className="bg-paper px-3 py-2 text-muted">
               <p className="font-semibold">Couldn’t place this part of what you wrote:</p>
               <ul className="mt-1 list-disc pl-5">
                 {result.unplaced.map((u, i) => (
@@ -1017,43 +1159,42 @@ function ResultCard({
   const passed = s.passed;
 
   return (
-    <div className="rounded-2xl border border-line bg-surface p-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
+    <div className="sheet p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-display text-xl">
           {passed ? 'Ready to send' : improving ? 'Improving…' : 'Best version produced'}
         </h3>
-        <span
-          className={`font-mono text-2xl font-semibold tabular ${
-            passed ? 'text-success' : 'text-warning'
-          }`}
-        >
-          {s.overall.toFixed(1)}
-          <span className="text-sm text-muted"> / 10</span>
-        </span>
+        <ScoreStamp score={s.overall} passed={passed} />
       </div>
 
       <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Metric
-          label="Keyword gate"
-          value={`${Math.round(s.keywordCoveragePct * 100)}%`}
+          label="Job keywords covered"
+          hint="Gate: the job’s must-have terms appear in your resume."
+          value={s.keywordCoveragePct}
+          note={s.keywordGatePassed ? 'gate passed' : 'gate not passed'}
           tone={s.keywordGatePassed ? 'good' : 'bad'}
         />
-        <Metric label="Formatting" value={pct(s.formattingScore)} />
-        <Metric label="Evidence" value={pct(s.evidenceScore)} />
-        <Metric label="Skills" value={pct(s.skillsCompletenessScore)} />
+        <Metric label="Layout" hint="Clean, ATS-readable structure." value={s.formattingScore} />
+        <Metric
+          label="Results shown"
+          hint="Bullets that state an outcome or a figure."
+          value={s.evidenceScore}
+        />
+        <Metric
+          label="Skills listed"
+          hint="How completely your skills section is filled in."
+          value={s.skillsCompletenessScore}
+        />
       </dl>
 
       {improving && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-brand-tint px-3 py-2.5 text-sm text-brand-dark">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 bg-brand-tint px-3 py-2.5 text-sm text-brand-dark">
           <span>
             Improving automatically, one short pass at a time. Each pass starts from the
             best version so far, so stopping never loses anything.
           </span>
-          <button
-            type="button"
-            onClick={onStop}
-            className="min-h-11 rounded-lg border border-line bg-surface px-3 py-2 text-xs font-semibold text-ink hover:bg-paper"
-          >
+          <button type="button" onClick={onStop} className="btn bg-surface">
             Stop improving
           </button>
         </div>
@@ -1071,7 +1212,7 @@ function ResultCard({
       )}
 
       {!passed && !improving && s.haltExplanation && (
-        <p className="mt-4 rounded-lg bg-warning-tint px-3 py-2.5 text-sm text-warning">
+        <p className="mt-4 bg-warning-tint px-3 py-2.5 text-sm text-warning">
           {s.haltExplanation}
         </p>
       )}
@@ -1080,8 +1221,8 @@ function ResultCard({
           and figures only the user knows. The questions that ask for them already exist
           on the profile page, and nothing here pointed to them. */}
       {!passed && !improving && s.evidenceScore < 0.5 && (
-        <p className="mt-3 rounded-lg bg-paper px-3 py-2.5 text-sm">
-          Most bullets don’t state a result or a figure, which holds Evidence down. The{' '}
+        <p className="mt-3 bg-paper px-3 py-2.5 text-sm">
+          Most bullets don’t state a result or a figure, which holds “Results shown” down. The{' '}
           <a href="/profile" className="font-semibold underline">
             questions on your profile
           </a>{' '}
@@ -1090,7 +1231,7 @@ function ResultCard({
       )}
 
       {result.selfTest.issues.length > 0 && (
-        <div className="mt-4 rounded-lg bg-danger-tint px-3 py-2.5 text-sm text-danger">
+        <div className="mt-4 bg-danger-tint px-3 py-2.5 text-sm text-danger">
           <p className="font-semibold">Render check found problems:</p>
           <ul className="mt-1 list-disc pl-5">
             {result.selfTest.issues.map((i) => (
@@ -1103,22 +1244,13 @@ function ResultCard({
       <div className="mt-5 flex flex-wrap gap-3">
         {/* Review leads, deliberately. Downloading straight from the generator asks you
             to trust it sight-unseen on something this consequential. */}
-        <a
-          href={`/resume/${result.snapshotId}`}
-          className="inline-flex min-h-11 items-center rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
-        >
+        <a href={`/resume/${result.snapshotId}`} className="btn btn-primary">
           Review &amp; edit →
         </a>
-        <a
-          href={`/api/export/${result.snapshotId}?format=pdf`}
-          className="inline-flex min-h-11 items-center rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper"
-        >
+        <a href={`/api/export/${result.snapshotId}?format=pdf`} className="btn">
           Download PDF
         </a>
-        <a
-          href={`/api/export/${result.snapshotId}?format=docx`}
-          className="inline-flex min-h-11 items-center rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper"
-        >
+        <a href={`/api/export/${result.snapshotId}?format=docx`} className="btn">
           Download DOCX
         </a>
       </div>
@@ -1129,27 +1261,40 @@ function ResultCard({
 
 function Metric({
   label,
+  hint,
   value,
+  note,
   tone,
 }: {
   label: string;
-  value: string;
+  hint: string;
+  /** 0..1 */
+  value: number;
+  note?: string;
   tone?: 'good' | 'bad';
 }) {
+  const pct = Math.round(value * 100);
   return (
-    <div className="rounded-lg border border-line px-3 py-2">
+    <div className="border border-line px-3 py-2">
       <dt className="text-xs text-muted">{label}</dt>
       <dd
         className={`font-mono text-base font-semibold tabular ${
           tone === 'bad' ? 'text-danger' : tone === 'good' ? 'text-success' : ''
         }`}
       >
-        {value}
+        {pct}%{note && <span className="ml-2 text-xs font-normal">{note}</span>}
+        <div
+          className="progress mt-1"
+          role="progressbar"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+        >
+          <span style={{ width: `${pct}%` }} />
+        </div>
       </dd>
+      <dd className="mt-1 text-xs text-muted">{hint}</dd>
     </div>
   );
-}
-
-function pct(n: number): string {
-  return `${Math.round(n * 100)}%`;
 }

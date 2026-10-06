@@ -22,7 +22,7 @@ export interface EditableJob {
 }
 
 const inputClass =
-  'mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-brand';
+  'field mt-1';
 
 export function JobHeader({ job, others, bulletCount }: { job: EditableJob; others: EditableJob[]; bulletCount: number }) {
   const [mode, setMode] = useState<'view' | 'edit' | 'remove'>('view');
@@ -56,14 +56,14 @@ export function JobHeader({ job, others, bulletCount }: { job: EditableJob; othe
           <button
             type="button"
             onClick={() => setMode('edit')}
-            className="min-h-11 rounded-lg px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
+            className="min-h-11 px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
           >
             Edit job
           </button>
           <button
             type="button"
             onClick={() => setMode(mode === 'remove' ? 'view' : 'remove')}
-            className="min-h-11 rounded-lg px-2.5 text-xs font-semibold text-danger hover:bg-danger-tint"
+            className="min-h-11 px-2.5 text-xs font-semibold text-danger hover:bg-danger-tint"
           >
             Remove job
           </button>
@@ -98,7 +98,7 @@ export function AddJob() {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="min-h-11 rounded-lg border border-line px-3.5 text-sm font-semibold hover:bg-paper"
+          className="btn text-sm"
         >
           + Add a job
         </button>
@@ -139,7 +139,7 @@ function JobForm({ job, onDone, onCancel }: { job?: EditableJob; onDone: (r: Res
   };
 
   return (
-    <form onSubmit={submit} className="rounded-lg border border-brand-tint bg-paper p-3.5">
+    <form onSubmit={submit} className="border border-brand-tint bg-paper p-3.5">
       <div className="grid gap-x-3 sm:grid-cols-2">
         <label className="block">
           <span className="text-xs font-medium text-muted">Job title</span>
@@ -190,11 +190,11 @@ function JobForm({ job, onDone, onCancel }: { job?: EditableJob; onDone: (r: Res
         <button
           type="submit"
           disabled={pending}
-          className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+          className="btn btn-primary text-sm"
         >
           {pending ? 'Saving…' : job ? 'Save job' : 'Add job'}
         </button>
-        <button type="button" onClick={onCancel} className="min-h-11 rounded-lg px-4 text-sm font-semibold text-muted hover:text-ink">
+        <button type="button" onClick={onCancel} className="min-h-11 px-4 text-sm font-semibold text-muted hover:text-ink">
           Cancel
         </button>
       </div>
@@ -223,7 +223,7 @@ function RemoveJob({
     );
 
   return (
-    <div className="mt-2 rounded-lg border border-danger bg-danger-tint/40 p-3.5 text-sm">
+    <div className="mt-2 border border-danger bg-danger-tint/40 p-3.5 text-sm">
       <p>
         Remove <strong>{job.title}</strong> at {job.company}
         {bulletCount > 0 ? ` and decide what happens to its ${bulletCount} accomplishment${bulletCount === 1 ? '' : 's'}` : ''}?
@@ -246,11 +246,11 @@ function RemoveJob({
           type="button"
           onClick={confirm}
           disabled={pending}
-          className="min-h-11 rounded-lg border border-danger bg-surface px-4 text-sm font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+          className="btn text-sm !border-danger !text-danger"
         >
           {pending ? 'Removing…' : 'Remove job'}
         </button>
-        <button type="button" onClick={onCancel} className="min-h-11 rounded-lg px-4 text-sm font-semibold text-muted hover:text-ink">
+        <button type="button" onClick={onCancel} className="min-h-11 px-4 text-sm font-semibold text-muted hover:text-ink">
           Keep it
         </button>
       </div>

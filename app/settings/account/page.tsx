@@ -25,8 +25,9 @@ export default async function AccountPage() {
     <div className="min-h-screen min-h-dvh">
       <AppHeader current="/settings/account" width="6xl" />
 
-      <main className="mx-auto max-w-3xl px-5 py-8">
-        <h1 className="font-display text-3xl">Your account</h1>
+      <main id="main" tabIndex={-1} className="mx-auto max-w-3xl px-5 py-8 outline-none">
+        <p className="eyebrow">§ Settings</p>
+        <h1 className="mt-1 font-display text-4xl tracking-tight">Your account</h1>
         <p className="mt-2 max-w-prose text-sm text-muted">
           Signed in as <span className="font-mono">{user?.email}</span>. Your profile, resumes and
           answers belong to you: take a copy whenever you like, and close the account when you are
@@ -34,22 +35,24 @@ export default async function AccountPage() {
         </p>
 
         {(await isOwnerSession(session)) ? (
-          <section className="mt-7 rounded-xl border border-brand bg-brand-tint/40 p-5">
-            <h2 className="font-display text-lg">New accounts</h2>
+          <section className="mt-8 border-t border-line pt-4">
+            <p className="eyebrow">§ 01 Owner</p>
+            <h2 className="mt-1 font-display text-lg">New accounts</h2>
             <p className="mt-1.5 max-w-prose text-sm text-muted">
               You are the site owner. Everyone who signs up waits for you to approve or deny them.
             </p>
             <Link
               href="/admin/approvals"
-              className="mt-3 inline-flex min-h-11 items-center rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+              className="btn btn-primary mt-3 inline-flex text-sm"
             >
               Review new accounts
             </Link>
           </section>
         ) : null}
 
-        <section className="mt-7 rounded-xl border border-line bg-surface p-5">
-          <h2 className="font-display text-lg">Download your data</h2>
+        <section className="mt-8 border-t border-line pt-4">
+          <p className="eyebrow">§ 02 Data</p>
+          <h2 className="mt-1 font-display text-lg">Download your data</h2>
           <p className="mt-1.5 max-w-prose text-sm text-muted">
             One JSON file with your contact details, every profile fact, your jobs, every resume
             this app generated, your applications, your saved application answers and the record of
@@ -57,7 +60,7 @@ export default async function AccountPage() {
           </p>
           <a
             href="/api/account/export"
-            className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-line px-4 text-sm font-semibold hover:bg-paper"
+            className="btn mt-3 inline-flex text-sm"
           >
             Download JSON
           </a>

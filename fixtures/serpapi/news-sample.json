@@ -1,0 +1,49 @@
+{
+  "search_metadata": {
+    "status": "Success"
+  },
+  "search_parameters": {
+    "engine": "google_news",
+    "q": "Zoho",
+    "so": "1",
+    "gl": "in"
+  },
+  "news_results": [
+    {
+      "position": 1,
+      "title": "Zoho opens a new campus to hire 1,000 engineers",
+      "link": "https://example.com/news/zoho-campus",
+      "source": {
+        "name": "The Hindu BusinessLine"
+      },
+      "date": "10/02/2026, 08:00 AM, +0000 UTC"
+    },
+    {
+      "position": 2,
+      "title": "Zoho launches new AI features across its suite",
+      "link": "https://example.com/news/zoho-ai",
+      "source": {
+        "name": "Economic Times"
+      },
+      "date": "09/28/2026, 05:30 AM, +0000 UTC"
+    },
+    {
+      "position": 3,
+      "title": "Why Chennai remains a hub for product companies",
+      "link": "https://example.com/news/chennai-product",
+      "source": {
+        "name": "Moneycontrol"
+      },
+      "date": "09/20/2026, 11:10 AM, +0000 UTC"
+    },
+    {
+      "position": 4,
+      "title": "A fourth story that the top-3 limit should cut",
+      "link": "https://example.com/news/extra",
+      "source": {
+        "name": "Mint"
+      },
+      "date": "09/10/2026, 11:10 AM, +0000 UTC"
+    }
+  ]
+}

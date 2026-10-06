@@ -99,7 +99,7 @@ export function PasswordInput({ visible, onVisibleChange, className = '', id, ..
           aria-pressed={shown}
           aria-controls={inputId}
           title={shown ? 'Hide password' : 'Show password'}
-          className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg text-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+          className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue"
         >
           {shown ? <EyeOff /> : <Eye />}
         </button>

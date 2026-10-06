@@ -51,7 +51,7 @@ export async function AppInstallPanel({
    * different heights. The grid that owns both columns owns the space above them.
    */
   return (
-    <section className="rounded-xl border border-line bg-surface p-5">
+    <section className="border-t border-line pt-4">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="font-display text-lg">Repository access</h2>
         {installations.length > 0 ? (
@@ -64,7 +64,7 @@ export async function AppInstallPanel({
 
       {notice ? (
         <p
-          className={`mt-3 rounded-lg px-3 py-2 text-sm ${
+          className={`mt-3 px-3 py-2 text-sm ${
             notice.kind === 'installed'
               ? 'bg-success-tint text-success'
               : 'bg-danger-tint text-danger'
@@ -94,10 +94,10 @@ export async function AppInstallPanel({
         <>
           <ul className="mt-3 space-y-2">
             {reposByInstallation.map(({ installation, repos }) => (
-              <li key={installation.id} className="rounded-lg border border-line px-3.5 py-2.5">
+              <li key={installation.id} className="border border-line px-3.5 py-2.5">
                 <p className="text-sm font-semibold">
                   {installation.accountLogin}
-                  <span className="ml-2 font-mono text-[11px] font-normal text-muted">
+                  <span className="ml-2 font-mono text-xs font-normal text-muted">
                     {installation.targetType.toLowerCase()}
                   </span>
                 </p>
@@ -113,7 +113,7 @@ export async function AppInstallPanel({
           </ul>
 
           {currentRepo && !covered ? (
-            <p className="mt-3 rounded-lg bg-warning-tint/50 px-3 py-2 text-sm text-warning">
+            <p className="mt-3 bg-warning-tint/50 px-3 py-2 text-sm text-warning">
               The app is installed, but <span className="font-mono">{currentRepo}</span> is
               not one of the repositories it can read. Use the link below to add it —
               otherwise sync falls back to the older, broader access.
@@ -133,7 +133,7 @@ export async function AppInstallPanel({
       {url ? (
         <a
           href={url}
-          className="mt-4 inline-flex min-h-11 items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+          className="btn btn-primary mt-4 inline-flex text-sm"
         >
           {installations.length === 0 ? 'Install on GitHub' : 'Change which repositories'}
         </a>

@@ -1,0 +1,109 @@
+/**
+ * Canned Job Radar run for /radar?demo=1. Pure and client-side: no network, no DB, no key.
+ * The status is derived from `phase` alone (stateless), so the run-view hook can treat it
+ * like the real API. Everything here is SAMPLE DATA and says so (mode: 'replay').
+ */
+
+import type { RadarStatus, RadarEvent } from '@/lib/radar/events';
+import type { Posting, RankedPosting, EmployerIntel, MarketSignal } from '@/lib/serp/types';
+
+const STAGES = ['plan', 'awaiting-queries', 'search:q0', 'search:q1', 'rank', 'intel:0', 'market', 'select', 'done'];
+const STEP_MS = 1500;
+
+const QUERIES = [
+  { q: 'junior full stack developer react node', why: 'Your strongest, most provable stack' },
+  { q: 'software engineer typescript postgres bengaluru', why: 'Same skills, nearer your location' },
+];
+
+const mk = (key: string, title: string, company: string, location: string, via: string, lo: number, hi: number, src: 'serp' | 'regex' | 'none', hl: string[]): Posting => ({
+  key, title, company, location, via, description: '', postedAt: '3 days ago', scheduleType: 'Full-time',
+  salaryLpa: { min: lo, max: hi, source: src }, highlights: hl, serpJobId: key, fromQuery: 0,
+  applyLinks: [{ title: `Apply on ${via}`, link: `https://example.com/${key}` }],
+});
+
+const POSTINGS: Posting[] = [
+  mk('d1', 'Full Stack Engineer', 'Lumen Labs', 'Bengaluru, Karnataka', 'LinkedIn', 8, 12, 'regex', ['React', 'Node.js', 'PostgreSQL']),
+  mk('d2', 'Software Engineer, Platform', 'Northwind Systems', 'Remote, India', 'Naukri', 10, 14, 'serp', ['TypeScript', 'Docker']),
+  mk('d3', 'Frontend Developer', 'Paperkite', 'Chennai, Tamil Nadu', 'Indeed', 6, 9, 'regex', ['React', 'CSS']),
+  mk('d4', 'Backend Engineer (Python)', 'Orchard Pay', 'Hyderabad, Telangana', 'Glassdoor', 0, 0, 'none', ['Python', 'AWS']),
+];
+
+const RANKED: RankedPosting[] = [
+  { key: 'd1', score: 86, coveragePct: 82, matched: ['React', 'Node.js', 'PostgreSQL', 'TypeScript'], missing: ['Kubernetes'], reason: 'Four of five core skills are on your resume.' },
+  { key: 'd2', score: 74, coveragePct: 68, matched: ['TypeScript', 'Docker'], missing: ['Terraform', 'AWS'], reason: 'Strong on language, thin on infrastructure.' },
+  { key: 'd3', score: 61, coveragePct: 55, matched: ['React', 'CSS'], missing: ['Next.js', 'Jest'], reason: 'Frontend-only; fewer of your backend proofs apply.' },
+  { key: 'd4', score: 38, coveragePct: 30, matched: ['AWS'], missing: ['Python', 'Django', 'Redis'], reason: 'Different primary language.' },
+];
+
+const INTEL: EmployerIntel[] = [
+  { company: 'Lumen Labs', rating: 4.2, ratingSource: 'Glassdoor', reviewsCount: 312, headlines: [{ title: 'Lumen Labs raises Series A to expand engineering', source: 'Sample Times', link: 'https://example.com/news', date: '2 weeks ago' }] },
+];
+
+const MARKET: MarketSignal = {
+  sampleSize: 4,
+  salaryLpa: { p25: 7.5, median: 10, p75: 12.5, n: 3 },
+  topSkills: [
+    { skill: 'React', pct: 75, held: true },
+    { skill: 'TypeScript', pct: 50, held: true },
+    { skill: 'Docker', pct: 50, held: true },
+    { skill: 'AWS', pct: 50, held: false },
+    { skill: 'Kubernetes', pct: 25, held: false },
+  ],
+  gapSkills: ['AWS', 'Kubernetes', 'Terraform'],
+};
+
+const LOG: [string, RadarEvent['level'], string, string?][] = [
+  ['plan', 'info', 'Planned 2 searches from your profile', 'groq'],
+  ['awaiting-queries', 'info', 'Waiting for you to approve the searches'],
+  ['search:q0', 'info', 'Found 3 postings for "junior full stack developer…"', 'serpapi:google_jobs'],
+  ['search:q1', 'info', 'Found 2 postings for "software engineer typescript…"', 'serpapi:google_jobs'],
+  ['rank', 'info', 'Ranked 4 postings against your resume', 'local'],
+  ['intel:0', 'info', 'Looked up Lumen Labs', 'serpapi:google_maps'],
+  ['market', 'info', 'Summarised pay and skills across 4 postings', 'local'],
+  ['select', 'info', 'Pick the posting to tailor your resume for'],
+  ['done', 'info', 'Done'],
+];
+
+export function demoStatus(phase: string, intelOn: boolean, base: number, edited?: { q: string; why: string }[]): RadarStatus {
+  const i = Math.max(0, STAGES.indexOf(phase));
+  const events: RadarEvent[] = LOG.slice(0, i + 1)
+    .filter(([p]) => intelOn || !p.startsWith('intel'))
+    .map(([p, level, message, source], n) => ({ at: new Date(base + n * STEP_MS).toISOString(), level, phase: p, message, ...(source ? { source } : {}) }));
+  const gate = phase === 'awaiting-queries' ? 'queries' : phase === 'select' ? 'select' : '';
+  return {
+    runId: 'demo', mode: 'replay', error: '', phase, step: i, totalSteps: STAGES.length - 1,
+    status: gate ? 'awaiting' : phase === 'done' ? 'done' : 'running',
+    gate, message: LOG[i][2], events, creditsUsed: i >= 3 ? (intelOn && i >= 5 ? 3 : 2) : 0,
+    state: {
+      intelOn, gate, plan: i >= 0 ? { queries: QUERIES, location: 'India', seniority: 'entry', rationale: 'Sample plan' } : null,
+      queries: i >= 1 ? edited ?? QUERIES : [],
+      postings: i >= 3 ? POSTINGS : [], okQueries: Math.min(2, Math.max(0, i - 1)),
+      ranked: i >= 4 ? RANKED : [], intelTargets: [], intel: i >= 5 && intelOn ? INTEL : [],
+      market: i >= 6 ? MARKET : null, selectedKey: '',
+    },
+  };
+}
+
+export const demoStart = (intel: boolean) => demoStatus('plan', intel, Date.now());
+
+/** One advance step; `queries` carried from the approval so edits survive. */
+export function demoAdvance(run: RadarStatus): RadarStatus {
+  const next = STAGES[Math.min(STAGES.indexOf(run.phase) + 1, STAGES.length - 1)];
+  const base = run.events.length ? Date.parse(run.events[0].at) : Date.now();
+  return demoStatus(next, run.state.intelOn, base, run.state.queries);
+}
+
+export function demoApprove(run: RadarStatus, queries: { q: string; why: string }[]): RadarStatus {
+  const base = Date.parse(run.events[0]?.at ?? '') || Date.now();
+  return demoStatus('search:q0', run.state.intelOn, base, queries);
+}
+
+export function demoSelect(run: RadarStatus, key: string): RadarStatus & { jobText: string } {
+  const p = POSTINGS.find((x) => x.key === key) ?? POSTINGS[0];
+  const base = Date.parse(run.events[0]?.at ?? '') || Date.now();
+  const done = demoStatus('done', run.state.intelOn, base, run.state.queries);
+  done.state.selectedKey = p.key;
+  return { ...done, jobText: `${p.title} at ${p.company}\n${p.location}\nSample posting (demo). Requires ${p.highlights.join(', ')}.` };
+}
+
+export const DEMO_STEP_MS = STEP_MS;

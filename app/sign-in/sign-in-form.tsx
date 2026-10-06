@@ -56,7 +56,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
 
   return (
     <div className="mt-6 text-left">
-      <div className="flex rounded-lg border border-line p-1" role="tablist">
+      <div className="flex border border-rule p-1" role="tablist">
         {(['sign-in', 'sign-up'] as const).map((m) => (
           <button
             key={m}
@@ -69,7 +69,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
             }}
             /* text-xs until `sm`: at 320px the tab box is 102px and "Create account"
                needs 104, so the label touched both rounded edges. */
-            className={`min-h-11 flex-1 rounded-md px-1 text-xs font-semibold sm:text-sm ${
+            className={`min-h-11 flex-1 px-1 text-xs font-semibold sm:text-sm ${
               mode === m ? 'bg-brand text-on-brand' : 'text-muted hover:text-ink'
             }`}
           >
@@ -143,7 +143,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
         <button
           type="submit"
           disabled={!canSubmit}
-          className="mt-4 min-h-11 w-full rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+          className="mt-4 btn btn-primary w-full"
         >
           {pending
             ? 'Working…'
@@ -156,7 +156,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
       {result ? (
         <p
           className={`mt-3 text-sm ${result.ok ? 'text-success' : 'text-danger'}`}
-          role="status"
+          role={result.ok ? 'status' : 'alert'}
         >
           {result.message}
           {result.problems?.length ? (
@@ -189,7 +189,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
 }
 
 const INPUT =
-  'mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-brand';
+  'field mt-1';
 
 function Labelled({ label, children }: { label: string; children: React.ReactNode }) {
   return (

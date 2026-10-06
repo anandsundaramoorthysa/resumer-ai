@@ -15,9 +15,9 @@ export function FlaggedRecord({
   const [pending, startTransition] = useTransition();
 
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3.5 py-2.5">
+    <li className="flex flex-wrap items-center justify-between gap-3 border border-line bg-surface px-3.5 py-2.5">
       <span className="min-w-0 text-sm">
-        <span className="font-mono text-[11px] text-muted">{type}</span>
+        <span className="font-mono text-xs text-muted">{type}</span>
         <br />
         {text}
       </span>
@@ -26,7 +26,7 @@ export function FlaggedRecord({
           type="button"
           disabled={pending}
           onClick={() => startTransition(() => keepRecord(id))}
-          className="min-h-11 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold hover:bg-paper disabled:opacity-50"
+          className="btn text-xs"
         >
           Keep
         </button>
@@ -34,7 +34,7 @@ export function FlaggedRecord({
           type="button"
           disabled={pending}
           onClick={() => startTransition(() => removeRecord(id))}
-          className="min-h-11 rounded-lg px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+          className="min-h-11 px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
         >
           Remove
         </button>

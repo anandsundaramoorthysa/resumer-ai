@@ -1,0 +1,130 @@
+{
+  "search_metadata": {
+    "status": "Success",
+    "google_domain": "google.co.in"
+  },
+  "search_parameters": {
+    "engine": "google_jobs",
+    "q": "machine learning engineer Hyderabad",
+    "gl": "in",
+    "hl": "en",
+    "google_domain": "google.co.in"
+  },
+  "jobs_results": [
+    {
+      "title": "Machine Learning Engineer",
+      "company_name": "Microsoft India",
+      "location": "Hyderabad, Telangana",
+      "via": "via Microsoft Careers",
+      "share_link": "https://www.google.com/search?q=sample-1",
+      "extensions": [
+        "2 days ago",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "2 days ago",
+        "schedule_type": "Full-time"
+      },
+      "description": "Train and deploy ranking models with Python, PyTorch and MLflow on Azure. 3+ years of experience. Strong grasp of statistics, feature engineering and model monitoring. Experience with Docker and Kubernetes preferred.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "3+ years in ML engineering",
+            "PyTorch, Python, Azure"
+          ]
+        },
+        {
+          "title": "Responsibilities",
+          "items": [
+            "Deploy and monitor models in production"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "Apply on Microsoft Careers",
+          "link": "https://careers.microsoft.com/jobs/ml-engineer-hyd"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=2515"
+    },
+    {
+      "title": "ML Engineer",
+      "company_name": "Darwinbox",
+      "location": "Hyderabad, Telangana",
+      "via": "via Naukri",
+      "share_link": "https://www.google.com/search?q=sample-2",
+      "extensions": [
+        "6 days ago",
+        "25–40 LPA",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "6 days ago",
+        "schedule_type": "Full-time",
+        "salary": "25–40 LPA"
+      },
+      "description": "Build NLP features for HR analytics using Python, Transformers and SQL. Skills: NLP, PyTorch, FastAPI, AWS.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "NLP and PyTorch",
+            "FastAPI services"
+          ]
+        },
+        {
+          "title": "Responsibilities",
+          "items": [
+            "Ship NLP features"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "Apply on Naukri",
+          "link": "https://www.naukri.com/job-listings-ml-engineer-darwinbox-3"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=119"
+    },
+    {
+      "title": "Associate Data Scientist",
+      "company_name": "Amazon Development Centre",
+      "location": "Hyderabad, Telangana",
+      "via": "via Amazon Jobs",
+      "share_link": "https://www.google.com/search?q=sample-3",
+      "extensions": [
+        "1 week ago",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "1 week ago",
+        "schedule_type": "Full-time"
+      },
+      "description": "Support forecasting models using Python, SQL and scikit-learn. 0-2 years. Salary ₹1,00,000 - ₹1,40,000 per month.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "Python, SQL, scikit-learn"
+          ]
+        },
+        {
+          "title": "Responsibilities",
+          "items": [
+            "Build forecasts"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "Apply on Amazon Jobs",
+          "link": "https://www.amazon.jobs/en/jobs/associate-data-scientist-hyd"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=2425"
+    }
+  ]
+}

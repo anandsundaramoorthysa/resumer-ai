@@ -1,52 +1,47 @@
 @import 'tailwindcss';
 
 /**
- * Tidewater v2 — the palette from PLAN.md §9, with every text color verified against
- * WCAG AA (4.5:1) by calculation rather than assumed (NFR-4). The gold and warning shades
- * are deliberately darker than they "look right" at a glance: the brighter versions
- * measured 3.24:1 and 3.34:1 on white, which fails for normal text. `--color-gold-bright`
- * exists for large/decorative use only and must never carry small standalone text.
- *
- * The status colors are checked against their OWN tint, not only against white. A badge
- * is where they are actually used, and that is the tighter pair: at the previous values
- * gold/gold-tint measured 4.20:1, warning/warning-tint 4.26:1 and danger/danger-tint
- * 4.42:1 — all readable-looking, all failing. Each was darkened by a few percent until
- * its badge cleared 4.5:1; nothing else about the palette moved.
- *
- * `--color-on-brand` exists because white is not a safe foreground in both themes. On the
- * light brand it measures 4.95:1, but on the dark theme's lighter brand it collapses to
- * 2.93:1 — so every primary button in dark mode was failing. The token flips to near-black
- * there (6.37:1 on brand, 9.71:1 on brand-dark) instead.
- *
- * `--color-line` is 1.25:1 and stays that way: it draws card edges and dividers, which are
- * decorative under WCAG 1.4.11. Form controls need a 3:1 boundary and use `border-muted`
- * (6.13:1 light, 6.42:1 dark) rather than this.
+ * "Ink on paper, red-pen edit" tokens (docs/hackathon/UI-PLAN.md section 1). Contrast ratios
+ * were computed: ink/paper 14.9, muted/paper 6.1, brand/paper 5.2, blue/paper 9.8,
+ * rule/paper 4.1. Brand and blue carry text only on paper/surface, never on tints.
+ * `--color-line` is decorative hairlines only; controls use `--color-rule` (>=3:1).
+ * `--color-hl` is a BACKGROUND behind ink text, never a text color.
  */
 @theme {
-  --color-paper: #f5f6f8;
-  --color-surface: #ffffff;
-  --color-ink: #14161c;
-  --color-muted: #5b6270;
-  --color-line: #e4e6eb;
+  --color-paper: #f3ede0;
+  --color-surface: #fbf8f1;
+  --color-ink: #1b1a17;
+  --color-muted: #5e574a;
+  --color-line: #d9d0bd;
+  --color-rule: #7a7262;
 
-  --color-brand: #0e7c86;
-  --color-brand-dark: #0a5f67;
-  --color-brand-tint: #e4f1f1;
+  --color-brand: #b8301a;
+  --color-brand-dark: #8f2412;
+  --color-brand-tint: #f2ddd2;
   --color-on-brand: #ffffff;
 
-  --color-gold: #8f641c;
-  --color-gold-tint: #f6eedd;
+  --color-blue: #1f3a5f;
+  --color-hl: #f2d95c;
+  /* gold is a legacy alias of blue; stop using it in new code. */
+  --color-gold: var(--color-blue);
+  --color-gold-tint: #e6e9ee;
 
-  --color-success: #197a42;
-  --color-success-tint: #e5f4eb;
-  --color-warning: #a15b11;
-  --color-warning-tint: #fbeedd;
-  --color-danger: #c23c3c;
-  --color-danger-tint: #fbeaea;
+  --color-success: #1e6b39;
+  --color-success-tint: #dde9d6;
+  --color-warning: #85500a;
+  --color-warning-tint: #f3e2c0;
+  --color-danger: #a3281a;
+  --color-danger-tint: #f4dad0;
 
-  --font-display: 'Instrument Serif', Georgia, serif;
-  --font-sans: 'General Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: 'Spline Sans Mono', ui-monospace, 'Courier New', monospace;
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, 'Courier New', monospace;
+
+  --radius-sm: 2px;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 150ms;
+  --dur-base: 250ms;
+  --dur-sweep: 400ms;
 }
 
 /**
@@ -72,51 +67,55 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
-    --color-paper: #14161c;
-    --color-surface: #1b1e26;
-    --color-ink: #eaebef;
-    --color-muted: #9ba1ac;
-    --color-line: #2b2f3a;
+    --color-paper: #17150f;
+    --color-surface: #201d16;
+    --color-ink: #efe8d8;
+    --color-muted: #a89f8c;
+    --color-line: #3a352a;
+    --color-rule: #8a8171;
 
-    --color-brand: #2ba6af;
-    --color-brand-dark: #6fc9d0;
-    --color-brand-tint: #17313f;
-    --color-on-brand: #0c1416;
+    --color-brand: #ff6a4d;
+    --color-brand-dark: #ff8a6e;
+    --color-brand-tint: #3a1f17;
+    --color-on-brand: #17150f;
 
-    --color-gold: #d8ae5e;
-    --color-gold-tint: #33291a;
+    --color-blue: #9db8e3;
+    --color-hl: #5a4a12;
+    --color-gold-tint: #232a36;
 
-    --color-success: #4fbe81;
-    --color-success-tint: #16301f;
-    --color-warning: #e0994a;
+    --color-success: #7cc48f;
+    --color-success-tint: #1e2a1c;
+    --color-warning: #e5a24a;
     --color-warning-tint: #33260f;
-    --color-danger: #e58080;
-    --color-danger-tint: #331a1a;
+    --color-danger: #ff8a75;
+    --color-danger-tint: #3a1d16;
   }
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-    --color-paper: #14161c;
-    --color-surface: #1b1e26;
-    --color-ink: #eaebef;
-    --color-muted: #9ba1ac;
-    --color-line: #2b2f3a;
+    --color-paper: #17150f;
+    --color-surface: #201d16;
+    --color-ink: #efe8d8;
+    --color-muted: #a89f8c;
+    --color-line: #3a352a;
+    --color-rule: #8a8171;
 
-    --color-brand: #2ba6af;
-    --color-brand-dark: #6fc9d0;
-    --color-brand-tint: #17313f;
-    --color-on-brand: #0c1416;
+    --color-brand: #ff6a4d;
+    --color-brand-dark: #ff8a6e;
+    --color-brand-tint: #3a1f17;
+    --color-on-brand: #17150f;
 
-    --color-gold: #d8ae5e;
-    --color-gold-tint: #33291a;
+    --color-blue: #9db8e3;
+    --color-hl: #5a4a12;
+    --color-gold-tint: #232a36;
 
-    --color-success: #4fbe81;
-    --color-success-tint: #16301f;
-    --color-warning: #e0994a;
+    --color-success: #7cc48f;
+    --color-success-tint: #1e2a1c;
+    --color-warning: #e5a24a;
     --color-warning-tint: #33260f;
-    --color-danger: #e58080;
-    --color-danger-tint: #331a1a;
+    --color-danger: #ff8a75;
+    --color-danger-tint: #3a1d16;
 }
 
 :root[data-theme='light'] {
@@ -125,10 +124,12 @@
 
 html {
   font-family: var(--font-sans);
+  scroll-padding-top: 4rem;
 }
 
 body {
   font-family: var(--font-sans);
+  font-size: 1rem;
   line-height: 1.5;
 }
 
@@ -144,20 +145,200 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Focus visibility — keyboard users get an unmistakable ring (NFR-4). */
+/* Focus visibility: one ring everywhere, blue so it never competes with vermilion. */
 :focus-visible {
-  outline: 2px solid var(--color-brand);
+  outline: 2px solid var(--color-blue);
   outline-offset: 2px;
-  border-radius: 4px;
+}
+
+/* ---- Shared classes (Package A) ---- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: 0;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-weight: 600;
+  transform: translateY(-120%);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* A sheet of resume paper: flat, hairline edge, no radius. */
+.sheet {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+  box-shadow: 0 1px 0 var(--color-line), 6px 8px 0 -2px color-mix(in srgb, var(--color-ink) 8%, transparent);
+  border-radius: 0;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 1.25rem;
+  border: 1px solid var(--color-rule);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.btn:hover:not(:disabled) {
+  background: var(--color-brand-tint);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  color: var(--color-on-brand);
+  box-shadow: 2px 2px 0 var(--color-ink);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-brand-dark);
+}
+.btn-primary:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--color-ink);
+}
+
+.field {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+.field::placeholder {
+  color: var(--color-muted);
+}
+
+/* Highlighter sweep: background only, text stays ink. Use on <mark class="hl">. */
+.hl {
+  color: var(--color-ink);
+  background: linear-gradient(var(--color-hl), var(--color-hl)) no-repeat 0 85% / 100% 70%;
+  padding: 0 0.15em;
+  transition: background-size var(--dur-sweep) var(--ease-out);
+}
+@starting-style {
+  .hl {
+    background-size: 0% 70%;
+  }
+}
+
+/* Rotated rubber-stamp box; pair text with the label, never colour alone. */
+.stamp {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border: 3px double currentColor;
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  transform: rotate(-6deg);
+}
+
+.ledger {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.ledger th {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: left;
+  color: var(--color-muted);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-ink);
+}
+.ledger td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+}
+
+/* Progress bar: use <div class="progress" role="progressbar"><span style="width:..%"/></div> */
+.progress {
+  height: 0.5rem;
+  background: var(--color-line);
+  border-radius: 0;
+  overflow: hidden;
+}
+.progress > * {
+  display: block;
+  height: 100%;
+  background: var(--color-brand);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+/* One staggered load per page: add .rise to children, set --i inline (40ms steps). */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.rise {
+  animation: rise var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 40ms);
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+  .hl {
+    background-size: 100% 70% !important;
   }
 }
 

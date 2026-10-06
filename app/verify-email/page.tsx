@@ -25,8 +25,8 @@ export default async function VerifyEmailPage({
     : { ok: false, message: 'That link is missing its token. Open it from the email directly.' };
 
   return (
-    <main className="grid min-h-screen min-h-dvh place-items-center px-5 py-10">
-      <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-8 text-center">
+    <main id="main" tabIndex={-1} className="grid min-h-screen min-h-dvh place-items-center px-5 py-10">
+      <div className="w-full max-w-md sheet p-6 text-center sm:p-8">
         <Logo size={40} showWordmark={false} className="mb-5" />
         <h1 className="font-display text-2xl">
           {result.ok ? 'Email confirmed' : 'That link did not work'}
@@ -35,7 +35,7 @@ export default async function VerifyEmailPage({
 
         <Link
           href="/sign-in"
-          className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+          className="mt-6 btn btn-primary w-full"
         >
           {result.ok ? 'Sign in' : 'Back to sign in'}
         </Link>

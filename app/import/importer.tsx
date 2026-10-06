@@ -12,7 +12,7 @@
  * and the profile it would land in is what every generated bullet is checked against.
  */
 
-import { useMemo, useState, useTransition } from 'react';
+import { useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { commitImportAction, reviewImportAction, type ImportActionResult } from './actions';
@@ -110,8 +110,28 @@ export function Importer() {
   const [checking, setChecking] = useState(false);
   const [source, setSource] = useState<ImportSource>('resume');
   const [saving, startSaving] = useTransition();
+  /**
+   * What has been read so far, kept across failures. A dropped connection or a spent
+   * allowance used to send the user back to the start with every parsed section thrown
+   * away; now the sections that did come back stay here and only the rest are retried.
+   */
+  const chunksRef = useRef<string[]>([]);
+  const partialsRef = useRef<Map<number, unknown>>(new Map());
+  const truncatedRef = useRef(false);
+  /** Work was kept after a failure and can be continued from the first screen. */
+  const [resumable, setResumable] = useState(false);
+  const [kept, setKept] = useState({ read: 0, total: 0 });
+  /** Sections that are still unread after a run; each can be retried from the review. */
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  /** Which review sections are expanded. Everything else is collapsed. */
+  const [opened, setOpened] = useState<Set<string>>(new Set());
 
   const begin = (file: File, from: ImportSource) => {
+    setResumable(false);
+    setUnreadCount(0);
+    chunksRef.current = [];
+    partialsRef.current = new Map();
     setError(null);
     setNotice(null);
     setResult(null);
@@ -178,72 +198,127 @@ export function Importer() {
         return;
       }
 
-      const chunks: string[] = upload.chunks ?? [];
-      setProgress({ done: 0, total: chunks.length });
+      chunksRef.current = upload.chunks ?? [];
+      partialsRef.current = new Map();
+      truncatedRef.current = Boolean(upload.truncated);
+      await readAndAssemble(false);
+    } catch {
+      fail('The import stopped. Check your connection and try again.', false);
+    }
+  };
 
-      const partials: unknown[] = [];
-      let unread = 0;
+  /**
+   * A failure keeps whatever was already read. From the first screens it returns to
+   * "choose" with a way to continue; from the review it only shows the message, so the
+   * list on screen is never lost.
+   */
+  const fail = (message: string, inReview: boolean) => {
+    setError(message);
+    if (inReview) return;
+    setKept({ read: partialsRef.current.size, total: chunksRef.current.length });
+    setResumable(chunksRef.current.length > 0);
+    setPhase('choose');
+  };
 
-      for (let i = 0; i < chunks.length; i++) {
-        const res = await fetch('/api/import/parse', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chunk: chunks[i] }),
-        }).catch(() => null);
-        const json = res ? await readJson(res) : null;
-        if (res?.status === 401 || res?.status === 429) {
-          // Signed out, or today's AI allowance is spent: every later chunk would fail too.
-          setError(json?.error ?? 'The extraction stopped partway through.');
-          setPhase('choose');
-          return;
-        }
-        // Anything else — a dropped connection, a host error page — costs this chunk only.
-        // It used to parse the error page as JSON and throw away every chunk already read.
-        if (res?.ok && json?.read) partials.push(json.partial);
-        else unread += 1;
-        setProgress({ done: i + 1, total: chunks.length });
-      }
+  /** Reads every section that has no result yet, then builds the review list. */
+  const readAndAssemble = async (inReview: boolean) => {
+    const chunks = chunksRef.current;
+    const partials = partialsRef.current;
+    setError(null);
+    setProgress({ done: partials.size, total: chunks.length });
 
-      const previewRes = await fetch('/api/import/preview', {
+    for (let i = 0; i < chunks.length; i++) {
+      if (partials.has(i)) continue;
+      const res = await fetch('/api/import/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ partials }),
-      });
-      const data = (await readJson(previewRes)) as (Preview & { error?: string }) | null;
-      if (!previewRes.ok || !data) {
-        setError(data?.error ?? 'Could not assemble the results. Try again.');
-        setPhase('choose');
+        body: JSON.stringify({ chunk: chunks[i] }),
+      }).catch(() => null);
+      const json = res ? await readJson(res) : null;
+      if (res?.status === 401 || res?.status === 429) {
+        // Signed out, or today's AI allowance is spent: every later chunk would fail too.
+        fail(json?.error ?? 'The extraction stopped partway through.', inReview);
         return;
       }
+      // Anything else — a dropped connection, a host error page — costs this chunk only.
+      if (res?.ok && json?.read) partials.set(i, json.partial);
+      setProgress({ done: i + 1, total: chunks.length });
+    }
+    const unread = chunks.length - partials.size;
 
-      const allKeys = new Set<string>([
-        ...data.records.map((r) => r.key),
-        ...data.roles.flatMap((r) => r.bullets.map((b) => b.key)),
-      ]);
-      setPreview(data);
-      setSelected(allKeys);
-      setUseContact(Boolean(data.contact));
-      setPhase('review');
-      void check(data);
+    const previewRes = await fetch('/api/import/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ partials: [...partials.entries()].sort((a, b) => a[0] - b[0]).map(([, p]) => p) }),
+    });
+    const data = (await readJson(previewRes)) as (Preview & { error?: string }) | null;
+    if (!previewRes.ok || !data) {
+      fail(data?.error ?? 'Could not assemble the results. Try again.', inReview);
+      return;
+    }
 
-      const notes: string[] = [];
-      if (unread > 0) {
-        notes.push(
-          `${unread} of ${chunks.length} sections could not be read, so anything in them is missing from this list.`,
-        );
-      }
-      if (upload.truncated) {
-        notes.push('The file was longer than the import limit and was read up to the cap.');
-      }
-      if (allKeys.size === 0) {
-        notes.push(
-          'Nothing recognisable as a skill, role, project or qualification came back — the text may not be laid out as a resume.',
-        );
-      }
-      setNotice(notes.length > 0 ? notes.join(' ') : null);
+    const keys = [
+      ...data.records.map((r) => r.key),
+      ...data.roles.flatMap((r) => r.bullets.map((b) => b.key)),
+    ];
+    // Keys are content hashes, so a retry keeps every earlier decision and ticks only
+    // what is new.
+    const known = new Set([
+      ...(preview?.records ?? []).map((r) => r.key),
+      ...(preview?.roles ?? []).flatMap((r) => r.bullets.map((b) => b.key)),
+    ]);
+    setPreview(data);
+    setSelected(
+      new Set(keys.filter((k) => (known.has(k) ? selected.has(k) : true))),
+    );
+    setUseContact(inReview ? useContact : Boolean(data.contact));
+    if (!inReview) {
+      const firstRole = data.roles.find((r) => r.bullets.length > 0);
+      const firstType = TYPE_ORDER.find((t) => data.records.some((r) => r.type === t));
+      setOpened(new Set(firstRole ? ['role:' + firstRole.key] : firstType ? ['type:' + firstType] : []));
+    }
+    setResumable(false);
+    setUnreadCount(unread);
+    setPhase('review');
+    void check(data);
+
+    const notes: string[] = [];
+    if (unread > 0) {
+      notes.push(
+        `${unread} of ${chunks.length} sections could not be read, so anything in them is missing from this list.`,
+      );
+    }
+    if (truncatedRef.current) {
+      notes.push('The file was longer than the import limit and was read up to the cap.');
+    }
+    if (keys.length === 0) {
+      notes.push(
+        'Nothing recognisable as a skill, role, project or qualification came back — the text may not be laid out as a resume.',
+      );
+    }
+    setNotice(notes.length > 0 ? notes.join(' ') : null);
+  };
+
+  /** Continue after a failure on the first screen: only unread sections are requested. */
+  const resume = async () => {
+    setPhase('reading');
+    setResumable(false);
+    try {
+      await readAndAssemble(false);
     } catch {
-      setError('The import stopped. Check your connection and try again.');
-      setPhase('choose');
+      fail('The import stopped. Check your connection and try again.', false);
+    }
+  };
+
+  /** Retry the sections that failed, from the review, without losing the list. */
+  const retryUnread = async () => {
+    setRetrying(true);
+    try {
+      await readAndAssemble(true);
+    } catch {
+      fail('The retry stopped. Check your connection and try again.', true);
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -264,7 +339,7 @@ export function Importer() {
     try {
       // Advice only: a failed request leaves the list as extracted.
       const found = await reviewImportAction(candidates).catch(() => ({}));
-      setNotes(found);
+      setNotes((prev) => ({ ...prev, ...found }));
       const dupes = Object.entries(found).filter(([, n]) => n.duplicateOf).map(([k]) => k);
       if (dupes.length > 0) {
         setSelected((prev) => {
@@ -348,6 +423,30 @@ export function Importer() {
     return (
       <div>
         {error ? <Banner tone="danger">{error}</Banner> : null}
+        {resumable ? (
+          <div className="mb-6 border-l-4 border-brand bg-brand-tint p-4 text-ink">
+            <p className="text-sm font-semibold">
+              Your progress is kept: {kept.read} of {kept.total}{' '}
+              sections of {fileName} were already read.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-3">
+              <button type="button" onClick={() => void resume()} className="btn btn-primary text-sm">
+                Continue where it stopped
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setResumable(false);
+                  chunksRef.current = [];
+                  partialsRef.current = new Map();
+                }}
+                className="btn text-sm"
+              >
+                Discard and start over
+              </button>
+            </div>
+          </div>
+        ) : null}
         {/*
           * Side by side from `lg`, stacked below it.
           *
@@ -360,7 +459,7 @@ export function Importer() {
           * would leave a card that is mostly empty border.
           */}
         <div className="grid items-start gap-5 lg:grid-cols-2">
-          <div className="rounded-2xl border border-dashed border-line bg-surface p-6 sm:p-8">
+          <div className="border-t border-line pt-4">
             <h2 className="font-display text-xl">Upload your existing resume</h2>
             <p className="mt-2 max-w-prose text-sm text-muted">
               PDF or DOCX. It is read in memory and never stored — only the facts you
@@ -370,7 +469,7 @@ export function Importer() {
 
             <label
               htmlFor="resume-file"
-              className="mt-5 inline-flex min-h-11 cursor-pointer items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+              className="btn btn-primary mt-5 inline-flex cursor-pointer text-sm"
             >
               Choose a file
             </label>
@@ -392,7 +491,7 @@ export function Importer() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-dashed border-line bg-surface p-6 sm:p-8">
+          <div className="border-t border-line pt-4">
             <h2 className="font-display text-xl">Or import your LinkedIn profile</h2>
             <p className="mt-2 max-w-prose text-sm text-muted">
               Not by scraping it. LinkedIn will hand you the same data itself, with every
@@ -418,7 +517,7 @@ export function Importer() {
 
             <label
               htmlFor="linkedin-file"
-              className="mt-5 inline-flex min-h-11 cursor-pointer items-center rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
+              className="btn mt-5 inline-flex cursor-pointer text-sm"
             >
               Choose your export
             </label>
@@ -449,7 +548,7 @@ export function Importer() {
   if (phase === 'reading') {
     if (source === 'linkedin') {
       return (
-        <div className="rounded-2xl border border-line bg-surface p-6" role="status" aria-live="polite">
+        <div className="border-t border-line pt-4" role="status" aria-live="polite">
           <h2 className="font-display text-xl">Reading {fileName}</h2>
           <p className="mt-2 text-sm text-muted">
             Unpacking the archive and reading each CSV. No model is involved, so this
@@ -461,7 +560,7 @@ export function Importer() {
 
     const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
     return (
-      <div className="rounded-2xl border border-line bg-surface p-6">
+      <div className="border-t border-line pt-4">
         <h2 className="font-display text-xl">Reading {fileName}</h2>
         <p className="mt-2 text-sm text-muted">
           Each section is read in its own short request — a single long one would be cut
@@ -481,11 +580,18 @@ export function Importer() {
             </span>
             <span className="font-mono tabular">{pct}%</span>
           </div>
-          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line">
-            <div
-              className="h-full rounded-full bg-brand transition-all"
-              style={{ width: `${pct}%` }}
-            />
+          <div
+            className="progress mt-1.5"
+            role="progressbar"
+            aria-label="Import progress"
+            aria-valuemin={0}
+            aria-valuemax={progress.total || 100}
+            aria-valuenow={progress.total ? progress.done : 0}
+            aria-valuetext={
+              progress.total ? `${progress.done} of ${progress.total} sections read` : 'Extracting text'
+            }
+          >
+            <div className="transition-[width]" style={{ width: `${pct}%` }} />
           </div>
         </div>
       </div>
@@ -495,19 +601,19 @@ export function Importer() {
   /* ---------------------------------------------------------------- saved -- */
   if (phase === 'saved') {
     return (
-      <div className="rounded-2xl border border-line bg-surface p-8 text-center">
+      <div className="border-t border-line pt-4 text-center">
         <h2 className="font-display text-2xl">Added to your profile</h2>
         <p className="mx-auto mt-2 max-w-md text-sm text-muted">{result?.message}</p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <Link
             href="/profile"
-            className="inline-flex min-h-11 items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+            className="btn btn-primary inline-flex text-sm"
           >
             View your profile
           </Link>
           <Link
             href="/"
-            className="inline-flex min-h-11 items-center rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
+            className="btn inline-flex text-sm"
           >
             Back to dashboard
           </Link>
@@ -523,8 +629,26 @@ export function Importer() {
     <div>
       {notice ? <Banner tone="warning">{notice}</Banner> : null}
       {result && !result.ok ? <Banner tone="danger">{result.message}</Banner> : null}
+      {error ? <Banner tone="danger">{error}</Banner> : null}
+      {unreadCount > 0 ? (
+        <div className="mb-4">
+          <button
+            type="button"
+            onClick={() => void retryUnread()}
+            disabled={retrying}
+            className="btn text-sm"
+          >
+            {retrying
+              ? `Retrying… ${progress.done} of ${progress.total}`
+              : `Retry ${unreadCount} unread section${unreadCount === 1 ? '' : 's'}`}
+          </button>
+          <span className="sr-only" role="status">
+            {retrying ? 'Retrying unread sections' : ''}
+          </span>
+        </div>
+      ) : null}
 
-      <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+      <div className="border-t border-line pt-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="font-display text-xl">What was found in {fileName}</h2>
@@ -538,18 +662,34 @@ export function Importer() {
               </p>
             ) : null}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setOpened(
+                  opened.size > 0
+                    ? new Set()
+                    : new Set([
+                        ...(preview?.roles ?? []).filter((r) => r.bullets.length > 0).map((r) => 'role:' + r.key),
+                        ...TYPE_ORDER.filter((t) => grouped.has(t)).map((t) => 'type:' + t),
+                      ]),
+                )
+              }
+              className="btn text-xs"
+            >
+              {opened.size > 0 ? 'Collapse all' : 'Expand all'}
+            </button>
             <button
               type="button"
               onClick={() => setMany(allKeys, true)}
-              className="min-h-11 rounded-lg border border-line px-3 py-2 text-xs font-semibold hover:bg-paper"
+              className="btn text-xs"
             >
               Select all
             </button>
             <button
               type="button"
               onClick={() => setMany(allKeys, false)}
-              className="min-h-11 rounded-lg border border-line px-3 py-2 text-xs font-semibold hover:bg-paper"
+              className="btn text-xs"
             >
               Clear all
             </button>
@@ -557,8 +697,8 @@ export function Importer() {
         </div>
 
         {preview?.contact ? (
-          <fieldset className="mt-6 rounded-xl border border-line p-4">
-            <legend className="px-1.5 text-sm font-semibold">Contact details</legend>
+          <fieldset className="mt-6 border-t border-line pt-3">
+            <legend className="pr-3 text-sm font-semibold">Contact details</legend>
             <label className="flex min-h-11 items-start gap-3 py-1">
               <input
                 type="checkbox"
@@ -592,11 +732,14 @@ export function Importer() {
           const keys = role.bullets.map((b) => b.key);
           const on = keys.filter((k) => selected.has(k)).length;
           return (
-            <fieldset key={role.key} className="mt-5 rounded-xl border border-line p-4">
-              <legend className="px-1.5 text-sm font-semibold">
-                {role.title}
-                {role.company ? ` — ${role.company}` : ''}
-              </legend>
+            <ReviewSection
+              key={role.key}
+              id={`role:${role.key}`}
+              opened={opened}
+              setOpened={setOpened}
+              title={`${role.title}${role.company ? ` — ${role.company}` : ''}`}
+              meta={`${on}/${keys.length} ticked`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="font-mono text-xs text-muted">
                   {[role.startDate, role.endDate].filter(Boolean).join(' – ') ||
@@ -605,7 +748,7 @@ export function Importer() {
                 <button
                   type="button"
                   onClick={() => setMany(keys, on !== keys.length)}
-                  className="min-h-11 rounded px-2 py-1 text-xs font-semibold text-brand-dark hover:underline"
+                  className="min-h-11 px-2 py-1 text-xs font-semibold text-brand-dark hover:underline"
                 >
                   {on === keys.length ? 'Untick all' : 'Tick all'} ({on}/{keys.length})
                 </button>
@@ -622,7 +765,7 @@ export function Importer() {
                   />
                 ))}
               </ul>
-            </fieldset>
+            </ReviewSection>
           );
         })}
 
@@ -653,15 +796,19 @@ export function Importer() {
            */
           const tagLike = list.every((c) => !c.detail && c.label.length <= 60);
           return (
-            <fieldset key={type} className="mt-5 rounded-xl border border-line p-4">
-              <legend className="px-1.5 text-sm font-semibold">
-                {TYPE_HEADINGS[type]}
-              </legend>
+            <ReviewSection
+              key={type}
+              id={`type:${type}`}
+              opened={opened}
+              setOpened={setOpened}
+              title={TYPE_HEADINGS[type]}
+              meta={`${on}/${keys.length} ticked`}
+            >
               <div className="flex justify-end">
                 <button
                   type="button"
                   onClick={() => setMany(keys, on !== keys.length)}
-                  className="min-h-11 rounded px-2 py-1 text-xs font-semibold text-brand-dark hover:underline"
+                  className="min-h-11 px-2 py-1 text-xs font-semibold text-brand-dark hover:underline"
                 >
                   {on === keys.length ? 'Untick all' : 'Tick all'} ({on}/{keys.length})
                 </button>
@@ -679,7 +826,7 @@ export function Importer() {
                   />
                 ))}
               </ul>
-            </fieldset>
+            </ReviewSection>
           );
         })}
 
@@ -692,12 +839,12 @@ export function Importer() {
           * of what you had ticked was only ever visible once you got there. It settles
           * into place at the end of the card, so nothing is permanently covered.
           */}
-        <div className="sticky bottom-0 z-10 -mx-5 mt-6 flex flex-wrap items-center gap-3 border-t border-line bg-surface px-5 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6">
+        <div className="sticky bottom-0 z-10 mt-6 flex flex-wrap items-center gap-3 border-t border-line bg-paper pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <button
             type="button"
             onClick={save}
             disabled={saving || selectedCount === 0}
-            className="min-h-11 rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+            className="btn btn-primary text-sm"
           >
             {saving ? (
               'Saving…'
@@ -716,13 +863,57 @@ export function Importer() {
               setPreview(null);
               setPhase('choose');
             }}
-            className="min-h-11 rounded-lg px-4 py-2.5 text-sm font-semibold text-muted hover:text-ink"
+            className="min-h-11 px-4 py-2.5 text-sm font-semibold text-muted hover:text-ink"
           >
             Start over
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+/** One collapsible group in the review list, with its tick count on the summary line. */
+function ReviewSection({
+  id,
+  opened,
+  setOpened,
+  title,
+  meta,
+  children,
+}: {
+  id: string;
+  opened: Set<string>;
+  setOpened: (next: Set<string>) => void;
+  title: string;
+  meta: string;
+  children: React.ReactNode;
+}) {
+  const open = opened.has(id);
+  return (
+    <details
+      open={open}
+      onToggle={(e) => {
+        const now = e.currentTarget.open;
+        if (now === open) return;
+        const next = new Set(opened);
+        if (now) next.add(id);
+        else next.delete(id);
+        setOpened(next);
+      }}
+      className="mt-5 border-t border-line pt-1"
+    >
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+        <span>
+          <span aria-hidden="true" className="mr-2 font-mono text-xs">
+            {open ? '▾' : '▸'}
+          </span>
+          {title}
+        </span>
+        <span className="font-mono text-xs font-normal text-muted tabular">{meta}</span>
+      </summary>
+      {children}
+    </details>
   );
 }
 
@@ -749,7 +940,7 @@ function CandidateRow({
     <li>
       <label
         className={`flex min-h-11 items-start gap-3 py-2 ${
-          divided ? 'border-b border-dashed border-line last:border-b-0' : ''
+          divided ? 'border-b border-line last:border-b-0' : ''
         }`}
       >
         <input
@@ -769,7 +960,7 @@ function CandidateRow({
             </span>
           ) : null}
           {note?.rewrite ? (
-            <span className="mt-1 block rounded bg-brand-tint/40 px-2 py-1.5 text-xs">
+            <span className="mt-1 block bg-brand-tint px-2 py-1.5 text-xs text-ink">
               <span className="block font-semibold">Suggested wording</span>
               <span className="mt-0.5 block">{note.rewrite.to}</span>
               <span className="mt-0.5 block text-muted">{note.rewrite.reason}</span>
@@ -779,7 +970,7 @@ function CandidateRow({
                   e.preventDefault();
                   onUseRewrite?.();
                 }}
-                className="mt-1 min-h-11 rounded-lg border border-brand px-3 text-xs font-semibold text-brand-dark hover:bg-brand-tint"
+                className="mt-1 min-h-11 border border-brand px-3 text-xs font-semibold text-brand-dark hover:bg-brand-tint"
               >
                 Use this wording
               </button>
@@ -803,7 +994,7 @@ function Banner({
       ? 'bg-danger-tint text-danger'
       : 'bg-warning-tint text-warning';
   return (
-    <p role="alert" className={`mb-4 rounded-lg px-3.5 py-2.5 text-sm ${cls}`}>
+    <p role="alert" className={`mb-4 px-3.5 py-2.5 text-sm ${cls}`}>
       {children}
     </p>
   );

@@ -15,10 +15,18 @@ const PATHS: Record<string, React.ReactNode> = {
   // Dashboard — four panes.
   '/': (
     <>
-      <rect x="2.75" y="2.75" width="6" height="6" rx="1.5" />
-      <rect x="11.25" y="2.75" width="6" height="6" rx="1.5" />
-      <rect x="2.75" y="11.25" width="6" height="6" rx="1.5" />
-      <rect x="11.25" y="11.25" width="6" height="6" rx="1.5" />
+      <rect x="2.75" y="2.75" width="6" height="6" rx="0" />
+      <rect x="11.25" y="2.75" width="6" height="6" rx="0" />
+      <rect x="2.75" y="11.25" width="6" height="6" rx="0" />
+      <rect x="11.25" y="11.25" width="6" height="6" rx="0" />
+    </>
+  ),
+  // Job Radar — a radar sweep.
+  '/radar': (
+    <>
+      <circle cx="10" cy="10" r="7.25" />
+      <circle cx="10" cy="10" r="3.5" />
+      <path d="M10 10l5-5" strokeLinecap="round" />
     </>
   ),
   // Profile — a person.

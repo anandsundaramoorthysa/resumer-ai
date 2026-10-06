@@ -96,14 +96,14 @@ export function AccountMenu({
         aria-controls="account-menu-panel"
         aria-label={name ? `Account: ${name}` : 'Account'}
         onClick={() => setOpen((value) => !value)}
-        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full"
       >
         <span
           aria-hidden="true"
           className={`grid h-8 w-8 place-items-center rounded-full border text-xs font-semibold tracking-wide ${
             open
-              ? 'border-brand bg-brand-tint text-brand-dark'
-              : 'border-line bg-brand-tint text-brand-dark hover:border-brand'
+              ? 'border-brand bg-brand-tint text-ink'
+              : 'border-rule bg-brand-tint text-ink hover:border-brand'
           }`}
         >
           {initials ?? (
@@ -124,10 +124,10 @@ export function AccountMenu({
         <div
           ref={panelRef}
           id="account-menu-panel"
-          className="absolute right-0 top-full z-40 mt-2 w-56 rounded-xl border border-line bg-surface p-1 shadow-lg"
+          className="absolute right-0 top-full z-40 mt-2 w-56 border border-rule bg-surface p-1 shadow-lg"
         >
           <div className="px-3 py-2">
-            <p className="text-[0.7rem] font-medium uppercase tracking-wide text-muted">
+            <p className="font-mono text-xs uppercase tracking-wider text-muted">
               Signed in as
             </p>
             <p className="mt-0.5 truncate text-sm font-semibold text-ink">{name ?? 'Your account'}</p>
@@ -137,7 +137,7 @@ export function AccountMenu({
             <button
               ref={firstItemRef}
               type="submit"
-              className="flex min-h-11 w-full items-center rounded-lg px-3 text-sm font-semibold text-danger hover:bg-danger-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
+              className="flex min-h-11 w-full items-center px-3 text-sm font-semibold text-danger hover:bg-danger-tint"
             >
               Sign out
             </button>

@@ -1,0 +1,153 @@
+{
+  "search_metadata": {
+    "status": "Success",
+    "google_domain": "google.co.in"
+  },
+  "search_parameters": {
+    "engine": "google_jobs",
+    "q": "data analyst Chennai",
+    "gl": "in",
+    "hl": "en",
+    "google_domain": "google.co.in"
+  },
+  "jobs_results": [
+    {
+      "title": "Data Analyst",
+      "company_name": "Freshworks",
+      "location": "Chennai, Tamil Nadu",
+      "via": "via Naukri",
+      "share_link": "https://www.google.com/search?q=sample-1",
+      "extensions": [
+        "2 days ago",
+        "₹6–10 LPA",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "2 days ago",
+        "schedule_type": "Full-time",
+        "salary": "₹6–10 LPA"
+      },
+      "description": "Analyse product usage with SQL and Python, build Power BI dashboards and present insights to stakeholders. 1-3 years. Skills: SQL, Python, Power BI, Excel, statistics.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "SQL and Python",
+            "Power BI or Tableau"
+          ]
+        },
+        {
+          "title": "Responsibilities",
+          "items": [
+            "Build weekly dashboards"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "Apply on Naukri",
+          "link": "https://www.naukri.com/job-listings-data-analyst-freshworks-2"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=1210"
+    },
+    {
+      "title": "Business Data Analyst",
+      "company_name": "Zoho Corporation",
+      "location": "Chennai, Tamil Nadu",
+      "via": "via LinkedIn",
+      "share_link": "https://www.google.com/search?q=sample-2",
+      "extensions": [
+        "4 days ago",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "4 days ago",
+        "schedule_type": "Full-time"
+      },
+      "description": "Own reporting for the finance team using SQL, Excel and Tableau. Compensation ₹50,000 - ₹70,000 per month. Strong communication needed.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "SQL, Excel and Tableau"
+          ]
+        },
+        {
+          "title": "Responsibilities",
+          "items": [
+            "Own finance reporting"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "Apply on LinkedIn",
+          "link": "https://www.linkedin.com/jobs/view/2002"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=2116"
+    },
+    {
+      "title": "Junior Data Analyst",
+      "company_name": "Chargebee",
+      "location": "Chennai, Tamil Nadu",
+      "via": "via Chargebee Careers",
+      "share_link": "https://www.google.com/search?q=sample-3",
+      "extensions": [
+        "1 week ago",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "1 week ago",
+        "schedule_type": "Full-time"
+      },
+      "description": "Entry level position for fresh graduates with SQL and Excel. Training provided. No salary details listed.",
+      "job_highlights": [],
+      "apply_options": [
+        {
+          "title": "Apply on Chargebee Careers",
+          "link": "https://www.chargebee.com/careers/junior-data-analyst"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=199"
+    },
+    {
+      "title": "Analytics Intern",
+      "company_name": "Kissflow",
+      "location": "Chennai, Tamil Nadu",
+      "via": "via Internshala",
+      "share_link": "https://www.google.com/search?q=sample-4",
+      "extensions": [
+        "Today",
+        "Internship"
+      ],
+      "detected_extensions": {
+        "posted_at": "Today",
+        "schedule_type": "Internship"
+      },
+      "description": "Three month internship. SQL basics, Python pandas. Stipend: ₹15,000 per month.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "Pandas and SQL basics"
+          ]
+        },
+        {
+          "title": "Responsibilities",
+          "items": [
+            "Assist the analytics team"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "Apply on Internshala",
+          "link": "https://internshala.com/job/detail/analytics-intern-kissflow"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=168"
+    }
+  ]
+}

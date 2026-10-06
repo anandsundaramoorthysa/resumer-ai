@@ -26,7 +26,7 @@ export function DeleteAccount({ hasPassword, email }: { hasPassword: boolean; em
   };
 
   return (
-    <section className="mt-5 rounded-xl border border-danger bg-surface p-5">
+    <section className="border-t border-danger pt-4 mt-5">
       <h2 className="font-display text-lg text-danger">Delete your account</h2>
       <p className="mt-1.5 max-w-prose text-sm text-muted">
         Everything goes: your profile, your jobs, every resume, your applications, your answers and
@@ -44,7 +44,7 @@ export function DeleteAccount({ hasPassword, email }: { hasPassword: boolean; em
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 autoComplete="current-password"
-                className="mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-danger"
+                className="field mt-1"
               />
             ) : (
               <input
@@ -52,7 +52,7 @@ export function DeleteAccount({ hasPassword, email }: { hasPassword: boolean; em
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 autoComplete="off"
-                className="mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-danger"
+                className="field mt-1"
               />
             )}
           </label>
@@ -65,7 +65,7 @@ export function DeleteAccount({ hasPassword, email }: { hasPassword: boolean; em
             <button
               type="submit"
               disabled={pending || value.trim().length === 0}
-              className="min-h-11 rounded-lg border border-danger bg-surface px-4 text-sm font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+              className="btn text-sm !border-danger !text-danger"
             >
               {pending ? 'Deleting…' : 'Delete everything'}
             </button>
@@ -76,7 +76,7 @@ export function DeleteAccount({ hasPassword, email }: { hasPassword: boolean; em
                 setValue('');
                 setError(null);
               }}
-              className="min-h-11 rounded-lg px-4 text-sm font-semibold text-muted hover:text-ink"
+              className="min-h-11 px-4 text-sm font-semibold text-muted hover:text-ink"
             >
               Keep my account
             </button>
@@ -86,7 +86,7 @@ export function DeleteAccount({ hasPassword, email }: { hasPassword: boolean; em
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="mt-3 min-h-11 rounded-lg border border-danger px-4 text-sm font-semibold text-danger hover:bg-danger-tint"
+          className="btn mt-3 text-sm !border-danger !text-danger"
         >
           Delete my account
         </button>

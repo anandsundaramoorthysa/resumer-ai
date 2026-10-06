@@ -65,7 +65,7 @@ export async function PasswordStatusCard() {
   const hasPassword = Boolean(account.passwordHash);
 
   return (
-    <section className="mt-10 rounded-xl border border-line bg-surface p-5">
+    <section className="mt-10 border-t border-line pt-5">
       <h2 className="font-display text-lg">How you sign in</h2>
 
       {hasPassword ? (
@@ -89,7 +89,7 @@ export async function PasswordStatusCard() {
           </p>
           <Link
             href="/set-password"
-            className="mt-4 inline-flex min-h-11 items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+            className="mt-4 btn btn-primary"
           >
             Create a password
           </Link>

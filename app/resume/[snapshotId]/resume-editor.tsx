@@ -6,12 +6,17 @@
  * Two things this exists for. First, you get to fix a sentence before it goes out;
  * downloading straight from the generator asks you to trust it blindly on something
  * high-stakes. Second, every generated line shows the profile record it came from, so
- * the output is auditable rather than a black box — and a line you edit yourself stops
- * claiming that provenance, because it is now your sentence, not a traced-back one.
+ * the output is auditable rather than a black box — and a line whose text you actually
+ * change stops claiming that provenance, because it is now your sentence. Clicking into
+ * a line and leaving it unchanged keeps its trace.
+ *
+ * Edits autosave (debounced) through the existing PATCH endpoint. Exports render from
+ * the saved version, so export links are disabled while anything is unsaved.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { QualityGateResult, ResumeDocument } from '@/lib/types';
+import { ScoreStamp } from '@/components/score-stamp';
 
 interface SourceInfo {
   type: string;
@@ -19,12 +24,45 @@ interface SourceInfo {
   text: string;
 }
 
-type Edit = {
+interface Flat {
   sectionKey: string;
   groupIndex: number | null;
   itemIndex: number;
   text: string;
-};
+  sourceRecordId: string | null;
+}
+
+const AUTOSAVE_MS = 1500;
+const keyOf = (sectionKey: string, groupIndex: number | null, itemIndex: number) =>
+  `${sectionKey}:${groupIndex}:${itemIndex}`;
+
+/** Every editable line of a document, by stable key (lines are never added or removed here). */
+function flatten(doc: ResumeDocument): Map<string, Flat> {
+  const out = new Map<string, Flat>();
+  for (const s of doc.sections) {
+    s.items.forEach((it, i) =>
+      out.set(keyOf(s.key, null, i), {
+        sectionKey: s.key,
+        groupIndex: null,
+        itemIndex: i,
+        text: it.text,
+        sourceRecordId: it.sourceRecordId,
+      }),
+    );
+    (s.groups ?? []).forEach((g, gi) =>
+      g.items.forEach((it, i) =>
+        out.set(keyOf(s.key, gi, i), {
+          sectionKey: s.key,
+          groupIndex: gi,
+          itemIndex: i,
+          text: it.text,
+          sourceRecordId: it.sourceRecordId,
+        }),
+      ),
+    );
+  }
+  return out;
+}
 
 export function ResumeEditor({
   snapshotId,
@@ -40,13 +78,25 @@ export function ResumeEditor({
   /** Its application has left draft: this is what was sent, so it is read-only. */
   sent: boolean;
 }) {
-  const [doc, setDoc] = useState<ResumeDocument>(initialDocument);
+  // The last version the server confirmed. Source trace comes from here, so a line you
+  // have not changed keeps its trace no matter how many others you edit.
+  const [savedDoc, setSavedDoc] = useState<ResumeDocument>(initialDocument);
+  // Text typed into a line, by line key. Only entries that differ from savedDoc count.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sources, setSources] = useState<Record<string, SourceInfo>>({});
-  const [dirty, setDirty] = useState<Map<string, Edit>>(new Map());
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
   const [showTrace, setShowTrace] = useState(true);
+
+  const saved = useMemo(() => flatten(savedDoc), [savedDoc]);
+  const generated = useMemo(() => flatten(initialDocument), [initialDocument]);
+
+  const dirtyKeys = useMemo(
+    () => Object.keys(drafts).filter((k) => saved.has(k) && drafts[k] !== saved.get(k)!.text),
+    [drafts, saved],
+  );
+  const unsaved = dirtyKeys.length > 0 || saving;
 
   useEffect(() => {
     fetch(`/api/resume/${snapshotId}`)
@@ -57,50 +107,48 @@ export function ResumeEditor({
       .catch(() => {});
   }, [snapshotId]);
 
-  const setText = useCallback(
-    (sectionKey: string, groupIndex: number | null, itemIndex: number, text: string) => {
-      setSaved(false);
-      setDoc((prev) => {
-        const next = structuredClone(prev);
-        const section = next.sections.find((s) => s.key === sectionKey);
-        if (!section) return prev;
-        const target =
-          groupIndex === null
-            ? section.items[itemIndex]
-            : section.groups?.[groupIndex]?.items[itemIndex];
-        if (!target) return prev;
-        target.text = text;
-        return next;
-      });
-      setDirty((prev) => {
-        const next = new Map(prev);
-        next.set(`${sectionKey}:${groupIndex}:${itemIndex}`, {
-          sectionKey,
-          groupIndex,
-          itemIndex,
-          text,
-        });
-        return next;
-      });
-    },
-    [],
-  );
+  const setLine = useCallback((key: string, text: string) => {
+    setJustSaved(false);
+    setSaveError(null);
+    setDrafts((prev) => ({ ...prev, [key]: text }));
+  }, []);
 
-  const save = async () => {
-    if (dirty.size === 0) return;
+  const save = useCallback(async () => {
+    const current = drafts;
+    const edits = Object.keys(current)
+      .filter((k) => saved.has(k) && current[k] !== saved.get(k)!.text)
+      .map((k) => {
+        const f = saved.get(k)!;
+        return {
+          sectionKey: f.sectionKey,
+          groupIndex: f.groupIndex,
+          itemIndex: f.itemIndex,
+          text: current[k],
+        };
+      });
+    if (edits.length === 0) return;
+
     setSaving(true);
     setSaveError(null);
     try {
       const res = await fetch(`/api/resume/${snapshotId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ edits: [...dirty.values()] }),
+        body: JSON.stringify({ edits }),
       });
       if (res.ok) {
-        const j = await res.json();
-        setDoc(j.document);
-        setDirty(new Map());
-        setSaved(true);
+        const j = (await res.json()) as { document: ResumeDocument };
+        const next = flatten(j.document);
+        setSavedDoc(j.document);
+        // Keep anything typed while the request was in flight; drop what is now saved.
+        setDrafts((cur) => {
+          const kept: Record<string, string> = {};
+          for (const k of Object.keys(cur)) {
+            if (cur[k] !== next.get(k)?.text) kept[k] = cur[k];
+          }
+          return kept;
+        });
+        setJustSaved(true);
       } else {
         // A refused save used to look exactly like a save that had not been pressed.
         const j = await res.json().catch(() => null);
@@ -111,47 +159,91 @@ export function ResumeEditor({
     } finally {
       setSaving(false);
     }
-  };
+  }, [drafts, saved, snapshotId]);
 
-  const editedCount = useMemo(
-    () =>
-      doc.sections.reduce((n, s) => {
-        const flat = [...s.items, ...(s.groups ?? []).flatMap((g) => g.items)];
-        return n + flat.filter((i) => i.sourceRecordId === null).length;
-      }, 0),
-    [doc],
-  );
+  // Debounced autosave. After a failure it waits for the next edit (or "Try saving
+  // again") instead of hammering a server that just said no.
+  useEffect(() => {
+    if (sent || saving || saveError || dirtyKeys.length === 0) return;
+    const t = setTimeout(() => void save(), AUTOSAVE_MS);
+    return () => clearTimeout(t);
+  }, [drafts, dirtyKeys.length, saving, saveError, sent, save]);
+
+  useEffect(() => {
+    if (!unsaved) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [unsaved]);
+
+  const editedCount = useMemo(() => {
+    let n = 0;
+    for (const [k, f] of saved) {
+      if (f.sourceRecordId === null || dirtyKeys.includes(k)) n++;
+    }
+    return n;
+  }, [saved, dirtyKeys]);
+
+  const status = saveError
+    ? 'Not saved'
+    : saving
+      ? 'Saving…'
+      : dirtyKeys.length > 0
+        ? 'Unsaved changes'
+        : justSaved
+          ? 'Saved'
+          : '';
+
+  const exportLink = (href: string, label: string, primary: boolean) =>
+    unsaved ? (
+      <button type="button" disabled className={`btn ${primary ? 'btn-primary' : ''}`}>
+        {label}
+      </button>
+    ) : (
+      <a href={href} className={`btn ${primary ? 'btn-primary' : ''}`}>
+        {label}
+      </a>
+    );
+
+  const doc = savedDoc;
+  const lineProps = (sectionKey: string, groupIndex: number | null, i: number, ariaLabel: string) => {
+    const key = keyOf(sectionKey, groupIndex, i);
+    const f = saved.get(key)!;
+    const text = drafts[key] ?? f.text;
+    return {
+      ariaLabel,
+      text,
+      sourceId: f.sourceRecordId,
+      changed: text !== f.text,
+      canRevert: text !== (generated.get(key)?.text ?? f.text),
+      sources,
+      showTrace,
+      readOnly: sent,
+      onChange: (t: string) => setLine(key, t),
+      onUndo: () => setLine(key, f.text),
+      onRevert: () => setLine(key, generated.get(key)?.text ?? f.text),
+    };
+  };
 
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
+          <p className="eyebrow">Review</p>
           <h1 className="font-display text-3xl">
             {doc.jobRequirement?.roleTitle ?? 'Baseline resume'}
           </h1>
           <p className="mt-1 text-sm text-muted">
             {doc.jobRequirement?.company ? `${doc.jobRequirement.company} · ` : ''}
-            {sent ? 'Sent with an application, so it is kept exactly as it was sent.' : 'Edit anything before you export.'}
+            {sent
+              ? 'Sent with an application, so it is kept exactly as it was sent.'
+              : 'Edit anything before you export. Changes save automatically.'}
           </p>
         </div>
-        {score ? (
-          <div className="text-right">
-            <div
-              className={`font-mono text-3xl font-semibold tabular ${
-                score.passed ? 'text-success' : 'text-warning'
-              }`}
-            >
-              {score.overall?.toFixed(1)}
-              <span className="text-sm text-muted"> / 10</span>
-            </div>
-            <div className="text-xs text-muted">
-              {score.passed ? 'cleared the bar' : 'best version produced'}
-            </div>
-          </div>
-        ) : null}
+        <ScoreStamp score={score?.overall ?? null} />
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3 border border-line bg-surface px-4 py-3">
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -166,90 +258,74 @@ export function ResumeEditor({
             ? `${editedCount} line${editedCount === 1 ? '' : 's'} written or edited by you`
             : 'every line traces back to your profile'}
         </span>
-        <span className="ml-auto flex items-center gap-2">
-          {dirty.size > 0 ? (
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving}
-              className="min-h-11 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : `Save ${dirty.size} change${dirty.size === 1 ? '' : 's'}`}
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          <span
+            role="status"
+            aria-live="polite"
+            className={`text-xs font-semibold ${
+              status === 'Saved'
+                ? 'text-success'
+                : status === 'Not saved'
+                  ? 'text-danger'
+                  : 'text-warning'
+            }`}
+          >
+            {status}
+          </span>
+          {dirtyKeys.length > 0 && !saving ? (
+            <button type="button" onClick={() => void save()} className="btn btn-primary">
+              {saveError ? 'Try saving again' : 'Save now'}
             </button>
-          ) : saved ? (
-            <span className="text-xs text-success">Saved</span>
           ) : null}
-          {saveError ? (
-            <span role="alert" className="text-xs text-danger">
-              {saveError}
-            </span>
-          ) : null}
-          <a
-            href={`/api/export/${snapshotId}?format=pdf`}
-            className="inline-flex min-h-11 items-center rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-paper"
-          >
-            PDF
-          </a>
-          <a
-            href={`/api/export/${snapshotId}?format=docx`}
-            className="inline-flex min-h-11 items-center rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-paper"
-          >
-            DOCX
-          </a>
         </span>
       </div>
 
-      {/*
-        REQ-6.2. The warning is not a footnote next to the link, it is the frame around
-        it: this file has icons and colour, which is exactly what an ATS strips, ignores
-        or misreads. It exists for a human — an email attachment, a recruiter, a print —
-        and the one place it must never go is the box on a careers page.
-      */}
-      <div className="mb-4 rounded-xl border border-gold bg-gold-tint/40 px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-gold">
-              Presentation copy — do not upload to an application portal
-            </p>
-            <p className="mt-0.5 max-w-prose text-xs text-muted">
-              Same words, with small vector icons beside your contact details and a colour
-              accent. Send it to a person; use the plain PDF or DOCX above for any form
-              that parses your resume.
-            </p>
-          </div>
-          <a
-            href={`/api/export/${snapshotId}?format=pdf&mode=presentation`}
-            className="inline-flex min-h-11 items-center rounded-lg border border-gold px-4 py-2 text-sm font-semibold text-gold hover:bg-gold-tint"
-          >
-            Presentation PDF
-          </a>
-        </div>
-      </div>
-
-      {dirty.size > 0 ? (
-        <p className="mb-4 rounded-lg bg-warning-tint px-3 py-2.5 text-sm text-warning">
-          You have unsaved edits. Exports render from the saved version, so save before
-          downloading.
+      {saveError ? (
+        <p role="alert" className="mb-4 bg-danger-tint px-3 py-2.5 text-sm text-danger">
+          {saveError} Your edits are still on this page.
         </p>
       ) : null}
 
       {/*
-        * The rendered resume, mirroring the ats-strict layout.
-        *
-        * The page shell around it is 1152px and everything above — the score, the toolbar,
-        * the export warning — takes all of it. This does not, and the cap is the point
-        * rather than a leftover: what is drawn here is a page. It is the same words that
-        * come out of the PDF exporter onto US Letter, which is 816px at 96dpi, and the
-        * bullets are written and scored against that measure. Left to fill 1152px they
-        * ran past 160 characters a line — a preview that no longer resembles the thing
-        * being previewed, and one where a bullet that wraps to three lines in the export
-        * looks like a comfortable two here.
-        *
-        * `mx-auto` because the cards above it are full-bleed: pinned left it read as a
-        * layout that had failed to fill, centred it reads as a document under a toolbar,
-        * which is what it is.
+        REQ-6.2. The presentation copy has icons and colour, which an ATS strips or
+        misreads; it is for a person (an email attachment, a print). The standard PDF
+        and DOCX are what go into an application portal.
+      */}
+      <div className="mb-4 border border-line bg-surface px-4 py-3">
+        <p className="eyebrow">Export</p>
+        <div className="mt-2 flex flex-wrap items-start gap-x-6 gap-y-3">
+          <div>
+            {exportLink(`/api/export/${snapshotId}?format=pdf`, 'Download PDF', true)}
+            <p className="mt-1 text-xs text-muted">Plain and ATS-safe. The one to send.</p>
+          </div>
+          <div>
+            {exportLink(`/api/export/${snapshotId}?format=docx`, 'Download DOCX', false)}
+            <p className="mt-1 text-xs text-muted">Editable in Word, for portals that ask for it.</p>
+          </div>
+          <div>
+            {exportLink(
+              `/api/export/${snapshotId}?format=pdf&mode=presentation`,
+              'Presentation PDF',
+              false,
+            )}
+            <p className="mt-1 max-w-xs text-xs text-muted">
+              Has icons and colour. For people, not application forms.
+            </p>
+          </div>
+        </div>
+        {unsaved ? (
+          <p className="mt-3 text-xs text-warning">
+            Exports use the saved version, so downloads unlock once your changes are saved.
+          </p>
+        ) : null}
+      </div>
+
+      {/*
+        * The rendered resume, mirroring the ats-strict layout, capped at a US Letter-ish
+        * measure on purpose: bullets are written and scored against that width, and a
+        * preview stretched to the page shell stops resembling the file it previews.
         */}
-      <article className="mx-auto max-w-4xl rounded-xl border border-line bg-surface p-7">
+      <article className="sheet mx-auto max-w-4xl p-4 sm:p-7">
         <header className="border-b border-line pb-4">
           <h2 className="text-xl font-bold">{doc.contact.fullName}</h2>
           <p className="mt-1 text-sm text-muted">
@@ -270,15 +346,10 @@ export function ResumeEditor({
               {section.heading}
             </h3>
 
-            {section.items.map((item, i) => (
+            {section.items.map((_, i) => (
               <Line
                 key={i}
-                text={item.text}
-                sourceId={item.sourceRecordId}
-                sources={sources}
-                showTrace={showTrace}
-                readOnly={sent}
-                onChange={(t) => setText(section.key, null, i, t)}
+                {...lineProps(section.key, null, i, `${section.heading} bullet ${i + 1}`)}
               />
             ))}
 
@@ -295,16 +366,16 @@ export function ResumeEditor({
                     <span className="font-mono text-xs text-muted">{group.dateRange}</span>
                   ) : null}
                 </div>
-                {group.items.map((item, i) => (
+                {group.items.map((_, i) => (
                   <Line
                     key={i}
-                    text={item.text}
-                    sourceId={item.sourceRecordId}
-                    sources={sources}
-                    showTrace={showTrace}
                     bullet
-                    readOnly={sent}
-                    onChange={(t) => setText(section.key, gi, i, t)}
+                    {...lineProps(
+                      section.key,
+                      gi,
+                      i,
+                      `${section.heading}, ${group.title}, bullet ${i + 1}`,
+                    )}
                   />
                 ))}
               </div>
@@ -313,50 +384,94 @@ export function ResumeEditor({
         ))}
       </article>
 
-      <p className="mt-3 text-center font-mono text-xs text-muted [overflow-wrap:anywhere]">{fileName}</p>
+      <p className="mt-3 text-center font-mono text-xs text-muted [overflow-wrap:anywhere]">
+        {fileName}
+      </p>
     </div>
   );
 }
 
 function Line({
+  ariaLabel,
   text,
   sourceId,
+  changed,
+  canRevert,
   sources,
   showTrace,
   bullet,
   readOnly,
   onChange,
+  onUndo,
+  onRevert,
 }: {
+  ariaLabel: string;
   text: string;
   sourceId: string | null;
+  /** Text differs from the last saved version. */
+  changed: boolean;
+  /** Text differs from what the generator wrote. */
+  canRevert: boolean;
   sources: Record<string, SourceInfo>;
   showTrace: boolean;
   bullet?: boolean;
   readOnly?: boolean;
   onChange: (text: string) => void;
+  onUndo: () => void;
+  onRevert: () => void;
 }) {
   const source = sourceId ? sources[sourceId] : null;
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow: collapse first so the box can also shrink.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
+
+  const showActions = !readOnly && (changed || canRevert);
 
   return (
-    <div className="group mt-2">
+    <div className="mt-2">
       <div className="flex items-start gap-2">
-        {bullet ? <span className="mt-1.5 select-none text-muted">•</span> : null}
-        <div
-          contentEditable={!readOnly}
-          suppressContentEditableWarning
-          onBlur={(e) => onChange(e.currentTarget.textContent ?? '')}
-          className="min-w-0 flex-1 rounded px-1 py-0.5 text-sm outline-none hover:bg-paper focus:bg-paper focus:ring-1 focus:ring-brand"
-        >
-          {text}
-        </div>
+        {bullet ? (
+          <span aria-hidden className="mt-1.5 select-none text-muted">
+            •
+          </span>
+        ) : null}
+        <textarea
+          ref={ref}
+          rows={1}
+          value={text}
+          aria-label={ariaLabel}
+          readOnly={readOnly}
+          onChange={(e) => onChange(e.target.value.replace(/\n/g, ' '))}
+          className="block min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1 py-0.5 text-sm leading-relaxed hover:bg-paper focus:bg-paper"
+        />
       </div>
-      {showTrace ? (
-        <p className="ml-4 mt-0.5 font-mono text-[11px] text-muted">
-          {source
-            ? `↳ ${source.type} · ${source.origin === 'manual' ? 'entered by you' : 'from your portfolio'}`
-            : sourceId === null
-              ? '↳ written or edited by you'
-              : '↳ source record no longer in your profile'}
+      {showTrace || showActions ? (
+        <p className="ml-4 mt-0.5 flex flex-wrap items-center gap-x-3 font-mono text-xs text-muted">
+          {showTrace ? (
+            <span>
+              {changed || sourceId === null
+                ? '↳ written or edited by you'
+                : source
+                  ? `↳ ${source.type} · ${source.origin === 'manual' ? 'entered by you' : 'from your portfolio'}`
+                  : '↳ source record no longer in your profile'}
+            </span>
+          ) : null}
+          {!readOnly && changed ? (
+            <button type="button" onClick={onUndo} className="min-h-6 font-sans font-semibold text-ink underline">
+              Undo<span className="sr-only"> change to {ariaLabel}</span>
+            </button>
+          ) : null}
+          {!readOnly && canRevert ? (
+            <button type="button" onClick={onRevert} className="min-h-6 font-sans font-semibold text-ink underline">
+              Revert to generated<span className="sr-only"> for {ariaLabel}</span>
+            </button>
+          ) : null}
         </p>
       ) : null}
     </div>

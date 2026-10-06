@@ -5,6 +5,7 @@ import { isEncryptionConfigured } from '@/lib/auth/secret-box';
 import { hasAnyProvider, availableProviders } from '@/lib/ai/models';
 import { AppHeader } from '@/components/app-header';
 import { DraftConsole } from '@/components/draft-console';
+import { Landing } from '@/components/landing/landing';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { getDashboardData } from '@/lib/server/dashboard';
 import { approvalFor } from '@/lib/server/approval';
@@ -34,19 +35,7 @@ export default async function HomePage() {
   if (!session?.user?.id) {
     return (
       <Shell>
-        <div className="mx-auto max-w-lg rounded-2xl border border-line bg-surface p-8 text-center">
-          <h1 className="font-display text-3xl">One profile. Every role.</h1>
-          <p className="mt-3 text-sm text-muted">
-            Build one profile — import your resume, connect a GitHub portfolio, or add it
-            by hand — and draft a tailored, ATS-ready resume for any job.
-          </p>
-          <Link
-            href="/sign-in"
-            className="mt-6 inline-flex min-h-11 items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
-          >
-            Sign in or create account
-          </Link>
-        </div>
+        <Landing />
       </Shell>
     );
   }
@@ -61,45 +50,51 @@ export default async function HomePage() {
   if (data.recordCount === 0) {
     return (
       <Shell userName={session.user.name ?? undefined}>
-        <div className="mx-auto max-w-xl rounded-2xl border border-line bg-surface p-8">
-          <h1 className="font-display text-2xl">Let&apos;s get your profile in, {firstName}</h1>
-          <p className="mt-2 text-sm text-muted">
+        <div className="mx-auto max-w-2xl">
+          <p className="eyebrow">§ 1 Get started</p>
+          <h1 className="mt-2 font-display text-3xl tracking-tight">
+            Let&apos;s get your profile in, {firstName}
+          </h1>
+          <p className="mt-3 max-w-prose text-base text-muted">
             Resumer AI builds every resume from facts you actually have, so it needs your
-            profile before it can draft anything. Two ways to fill it in a couple of
-            minutes:
+            profile before it can draft anything.
           </p>
-          <div className="mt-6 space-y-3">
-            <Link
-              href="/settings/portfolio"
-              className="block rounded-xl border border-line p-4 transition-colors hover:border-brand"
-            >
-              <div className="font-semibold">Connect your GitHub portfolio</div>
-              <div className="mt-1 text-sm text-muted">
-                Point it at the repo behind your site. It reads your skills, projects and
-                experience, and re-checks for changes before every draft.
-              </div>
+
+          <section className="sheet mt-8 p-5 sm:p-6" aria-labelledby="next-step">
+            <p className="eyebrow text-brand">Recommended next step</p>
+            <h2 id="next-step" className="mt-1 font-display text-xl">
+              Connect your GitHub portfolio
+            </h2>
+            <p className="mt-2 max-w-prose text-sm text-muted">
+              Point it at the repo behind your site. It reads your skills, projects and
+              experience, and re-checks for changes before every draft.
+            </p>
+            <Link href="/settings/portfolio" className="btn btn-primary mt-4">
+              Connect GitHub portfolio
             </Link>
-            <Link
-              href="/import"
-              className="block rounded-xl border border-line p-4 transition-colors hover:border-brand"
-            >
-              <div className="font-semibold">Upload an existing resume</div>
-              <div className="mt-1 text-sm text-muted">
-                PDF or DOCX. It&apos;s read into the individual facts behind it and shown to
-                you for approval before anything is saved.
-              </div>
-            </Link>
-            <Link
-              href="/profile"
-              className="block rounded-xl border border-line p-4 transition-colors hover:border-brand"
-            >
-              <div className="font-semibold">Add your details by hand</div>
-              <div className="mt-1 text-sm text-muted">
-                Skills, roles and projects. Anything you enter here is yours — the sync
-                never overwrites it.
-              </div>
-            </Link>
-          </div>
+          </section>
+
+          <p className="eyebrow mt-8">Or</p>
+          <ul className="mt-2 divide-y divide-line border-y border-line text-sm">
+            <li className="py-3">
+              <Link href="/import" className="font-semibold underline">
+                Upload an existing resume
+              </Link>
+              <span className="block text-muted">
+                PDF or DOCX, read into individual facts and shown to you for approval first.
+              </span>
+            </li>
+            <li className="py-3">
+              <Link href="/profile" className="font-semibold underline">
+                Add your details by hand
+              </Link>
+              <span className="block text-muted">
+                Anything you enter is yours; the sync never overwrites it.
+              </span>
+            </li>
+          </ul>
+
+          <RadarCard className="mt-8" />
         </div>
       </Shell>
     );
@@ -107,66 +102,41 @@ export default async function HomePage() {
 
   return (
     <Shell userName={session.user.name ?? undefined}>
-      <div className="mb-7 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-3xl">Good to see you, {firstName}</h1>
-          <p className="mt-1 text-sm text-muted">Here&apos;s where things stand.</p>
-        </div>
+      <div className="mb-8">
+        <p className="eyebrow">§ Dashboard</p>
+        <h1 className="mt-2 font-display text-3xl tracking-tight">Good to see you, {firstName}</h1>
       </div>
 
-      <dl className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Resumes drafted" value={String(data.draftCount)} />
-        {/*
-          * "None yet" rather than an em-dash.
-          *
-          * At 24px in a monospace face, accented with the dark theme's LIGHT teal, a bare
-          * "—" rendered as a solid teal bar exactly where a number should be — beside
-          * three tiles showing real values it read as a skeleton loader, not as "no data".
-          * The accent is dropped when there is nothing to accent, matching the
-          * "Profile last synced / Never" tile which already handled this correctly.
-          */}
-        <Stat
-          label="Average ATS score"
-          value={data.averageScore ? data.averageScore.toFixed(1) : 'None yet'}
-          suffix={data.averageScore ? '/ 10' : undefined}
-          accent={data.averageScore ? 'brand' : undefined}
-          small={!data.averageScore}
-          caption={data.averageScore ? (data.averageRole ?? undefined) : undefined}
+      <dl className="mb-8 max-w-xl">
+        <Leader label="Resumes drafted" value={String(data.draftCount)} />
+        <Leader
+          label={data.averageRole ? `Average ATS score · ${data.averageRole}` : 'Average ATS score'}
+          value={data.averageScore ? `${data.averageScore.toFixed(1)} / 10` : 'None yet'}
         />
-        <Stat label="Applications tracked" value={String(data.applicationCount)} />
-        <Stat
-          label="Profile last synced"
-          value={data.lastSyncedLabel}
-          accent="gold"
-          small
-        />
+        <Leader label="Applications tracked" value={String(data.applicationCount)} />
+        <Leader label="Profile last synced" value={data.lastSyncedLabel} />
       </dl>
 
-      <div className="grid gap-5 lg:grid-cols-[1.6fr_1fr]">
+      <div className="grid gap-8 lg:grid-cols-[1.6fr_1fr]">
         {/*
-          * `min-w-0` is load-bearing, not tidiness.
-          *
-          * A grid item's automatic minimum size is min-content, so this column was sized
-          * to the widest thing inside it — the Recent drafts table, 394px. On a 320px
-          * phone that widened the LAYOUT VIEWPORT to 394px: the browser zoomed the whole
-          * dashboard out and scrolled it sideways. The `overflow-x-auto` on the table
-          * cannot prevent it, because the automatic minimum only collapses when the grid
-          * ITEM has non-visible overflow, and that div is two levels down.
-          *
-          * It also hid itself from every previous audit: once the layout viewport widens,
-          * `window.innerWidth` and `scrollWidth` both read 394, so an overflow check
-          * comparing the two sees nothing wrong.
+          * `min-w-0` is load-bearing: a grid item's automatic minimum size is min-content,
+          * so without it the Recent drafts table widens the layout viewport on a 320px
+          * phone and the whole page scrolls sideways (and window.innerWidth/scrollWidth
+          * both read the widened value, hiding it from overflow checks).
           */}
-        <div className="min-w-0 space-y-5">
+        <div className="min-w-0 space-y-8">
           <DraftConsole />
           <RecentDrafts drafts={data.recentDrafts} />
         </div>
-        <PortfolioCard
-          repo={data.portfolioRepo}
-          lastSyncedLabel={data.lastSyncedLabel}
-          recordCount={data.recordCount}
-          flaggedCount={data.flaggedCount}
-        />
+        <div className="min-w-0 space-y-8">
+          <RadarCard />
+          <PortfolioCard
+            repo={data.portfolioRepo}
+            lastSyncedLabel={data.lastSyncedLabel}
+            recordCount={data.recordCount}
+            flaggedCount={data.flaggedCount}
+          />
+        </div>
       </div>
     </Shell>
   );
@@ -182,42 +152,39 @@ function Shell({
   return (
     <div className="min-h-screen min-h-dvh">
       <AppHeader current="/" userName={userName} width="6xl" />
-      <main className="mx-auto max-w-6xl px-5 py-8">{children}</main>
+      <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8">
+        {children}
+      </main>
     </div>
   );
 }
 
-function Stat({
-  label,
-  value,
-  suffix,
-  accent,
-  small,
-  caption,
-}: {
-  label: string;
-  value: string;
-  suffix?: string;
-  accent?: 'brand' | 'gold';
-  small?: boolean;
-  /** What the value is scoped to, when it is not the whole history. */
-  caption?: string;
-}) {
-  const color =
-    accent === 'brand' ? 'text-brand-dark' : accent === 'gold' ? 'text-gold' : '';
+/** Ledger row: label, dotted leader, value. */
+function Leader({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-line bg-surface px-4 py-3.5">
-      <dt className="text-xs font-medium text-muted">{label}</dt>
-      <dd
-        className={`mt-1.5 font-mono font-semibold tabular ${
-          small ? 'text-base' : 'text-2xl'
-        } ${color}`}
-      >
-        {value}
-        {suffix ? <span className="text-sm text-muted"> {suffix}</span> : null}
-      </dd>
-      {caption ? <p className="mt-1 truncate text-xs text-muted" title={caption}>{caption}</p> : null}
+    <div className="flex items-baseline gap-2 py-1.5">
+      <dt className="min-w-0 text-sm text-muted">{label}</dt>
+      <span aria-hidden="true" className="min-w-4 flex-1 border-b border-dotted border-rule" />
+      <dd className="font-mono text-sm font-semibold tabular-nums">{value}</dd>
     </div>
+  );
+}
+
+function RadarCard({ className = '' }: { className?: string }) {
+  return (
+    <section className={`sheet p-5 ${className}`} aria-labelledby="radar-h">
+      <p className="eyebrow">§ Discover</p>
+      <h2 id="radar-h" className="mt-1 font-display text-xl">
+        Job Radar
+      </h2>
+      <p className="mt-2 text-sm text-muted">
+        Live openings from Google Jobs (SerpApi), ranked against your real profile, with
+        sources shown.
+      </p>
+      <Link href="/radar" className="btn mt-4">
+        Open Job Radar
+      </Link>
+    </section>
   );
 }
 
@@ -236,41 +203,34 @@ function RecentDrafts({
   if (drafts.length === 0) return null;
 
   return (
-    <div className="rounded-2xl border border-line bg-surface p-5">
+    <section className="border-t border-line pt-4">
+      <p className="eyebrow">§ Recent</p>
       <h2 className="font-display text-xl">Recent drafts</h2>
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="mt-3 overflow-x-auto">
+        <table className="ledger text-sm">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-muted">
-              {/* A floor on the Role column: the auto layout gave it whatever the other
-                  three did not want, collapsing a long job title to a 95px, six-line
-                  ribbon. The container scrolls instead. */}
-              <th className="min-w-48 pb-2.5 pr-3 font-medium">Role</th>
-              <th className="pb-2.5 pr-3 font-medium">Category</th>
-              <th className="pb-2.5 pr-3 font-medium">Score</th>
-              <th className="pb-2.5 font-medium">Drafted</th>
+            <tr>
+              <th className="min-w-48">Role</th>
+              <th>Category</th>
+              <th>Score</th>
+              <th>Drafted</th>
             </tr>
           </thead>
           <tbody>
             {drafts.map((d) => (
-              <tr key={d.id} className="border-t border-line">
-                <td className="py-3 pr-3">
+              <tr key={d.id}>
+                <td>
                   <div className="font-semibold">{d.roleTitle}</div>
-                  {d.company ? (
-                    <div className="text-xs text-muted">{d.company}</div>
-                  ) : null}
+                  {d.company ? <div className="text-xs text-muted">{d.company}</div> : null}
                 </td>
-                <td className="py-3 pr-3">
-                  <span className="rounded-full bg-brand-tint px-2.5 py-1 text-xs font-semibold text-brand-dark">
+                <td>
+                  <span className="border border-rule px-1.5 py-0.5 text-xs font-semibold">
                     {d.category}
                   </span>
                 </td>
                 <td
-                  /* "Not scored yet" and "scored badly" are different facts. The
-                     em-dash for an unscored draft was rendered in the same amber as a
-                     6.2 — the dashboard's own "None yet" stat tile already makes this
-                     distinction, and the tables did not. */
-                  className={`py-3 pr-3 font-mono font-semibold tabular ${
+                  /* "Not scored yet" and "scored badly" are different facts: unscored is muted. */
+                  className={`font-mono font-semibold tabular-nums ${
                     d.score == null
                       ? 'text-muted'
                       : d.score >= 8.5
@@ -280,13 +240,13 @@ function RecentDrafts({
                 >
                   {d.score?.toFixed(1) ?? '—'}
                 </td>
-                <td className="py-3 text-muted">{d.createdAt}</td>
+                <td className="text-muted">{d.createdAt}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -302,10 +262,10 @@ function PortfolioCard({
   flaggedCount: number;
 }) {
   return (
-    <aside className="rounded-2xl border border-line bg-surface p-5">
+    <aside className="border-t border-line pt-4">
       <span
-        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-          repo ? 'bg-success-tint text-success' : 'bg-warning-tint text-warning'
+        className={`inline-flex items-center gap-1.5 border border-current px-2 py-0.5 text-xs font-semibold ${
+          repo ? 'text-success' : 'text-warning'
         }`}
       >
         {repo ? '✓ Connected' : 'Not connected'}
@@ -316,15 +276,10 @@ function PortfolioCard({
         <Row k="Source" v={repo ?? 'None yet'} />
         <Row k="Last checked" v={lastSyncedLabel} />
         <Row k="Profile facts" v={String(recordCount)} />
-        {flaggedCount > 0 ? (
-          <Row k="Needs review" v={`${flaggedCount} flagged`} warn />
-        ) : null}
+        {flaggedCount > 0 ? <Row k="Needs review" v={`${flaggedCount} flagged`} warn /> : null}
       </dl>
 
-      <Link
-        href="/settings/portfolio"
-        className="mt-4 flex min-h-11 items-center justify-center rounded-lg border border-line py-2.5 text-center text-sm font-semibold hover:bg-paper"
-      >
+      <Link href="/settings/portfolio" className="btn mt-4 w-full">
         {repo ? 'Manage connection' : 'Connect portfolio'}
       </Link>
     </aside>
@@ -333,7 +288,7 @@ function PortfolioCard({
 
 function Row({ k, v, warn }: { k: string; v: string; warn?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-dashed border-line py-2 last:border-b-0">
+    <div className="flex items-center justify-between gap-3 border-b border-dotted border-rule py-2 last:border-b-0">
       <dt className="text-muted">{k}</dt>
       <dd className={`font-semibold ${warn ? 'text-warning' : ''}`}>{v}</dd>
     </div>

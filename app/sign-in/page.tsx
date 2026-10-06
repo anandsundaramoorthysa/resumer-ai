@@ -35,10 +35,14 @@ export default function SignInPage() {
     (isMailConfigured() || process.env.NODE_ENV !== 'production');
 
   return (
-    <main className="grid min-h-screen min-h-dvh place-items-center px-5 py-10">
-      <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-8 text-center">
+    <main id="main" tabIndex={-1} className="grid min-h-screen min-h-dvh place-items-center px-5 py-10">
+      <div className="w-full max-w-md sheet p-6 text-center sm:p-8">
         <Logo size={40} showWordmark={false} className="mb-5" />
         <h1 className="font-display text-2xl">Sign in to Resumer AI</h1>
+        <p className="mt-2 border border-rule px-3 py-2 text-left text-sm">
+          <strong>Access is by owner approval.</strong> New accounts wait until the site owner
+          approves them, because every account uses the same AI services.
+        </p>
 
         {providerAvailability.github ? (
           <>
@@ -54,7 +58,7 @@ export default function SignInPage() {
             >
               <button
                 type="submit"
-                className="mt-5 min-h-11 w-full rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+                className="btn btn-primary mt-5 w-full"
               >
                 Continue with GitHub
               </button>
@@ -71,7 +75,7 @@ export default function SignInPage() {
           >
             <button
               type="submit"
-              className="mt-3 min-h-11 w-full rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
+              className="mt-3 btn w-full"
             >
               Continue with Google
             </button>
@@ -81,9 +85,9 @@ export default function SignInPage() {
         {passwordEnabled &&
         (providerAvailability.github || providerAvailability.google) ? (
           <div className="mt-6 flex items-center gap-3">
-            <span className="h-px flex-1 bg-line" />
+            <span className="h-px flex-1 bg-rule" />
             <span className="text-xs text-muted">or use an email address</span>
-            <span className="h-px flex-1 bg-line" />
+            <span className="h-px flex-1 bg-rule" />
           </div>
         ) : null}
 

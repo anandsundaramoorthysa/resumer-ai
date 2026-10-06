@@ -44,14 +44,15 @@ export default async function ActivityPage() {
     <div className="min-h-screen min-h-dvh">
       <AppHeader current="/activity" width="6xl" />
 
-      <main className="mx-auto max-w-6xl px-5 py-8">
-        <h1 className="font-display text-3xl">Activity</h1>
-        <p className="mt-1 max-w-prose text-sm text-muted">
+      <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
+        <p className="eyebrow">§ Activity</p>
+        <h1 className="mt-1 font-display text-4xl tracking-tight">Activity</h1>
+        <p className="mt-2 max-w-prose text-sm text-muted">
           Every draft attempt — including the ones that failed — what the AI calls cost, and
           what changed in your profile. Nothing here is shared; it is your own record.
         </p>
 
-        <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <dl className="mt-8 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-4">
           <Stat label="Recent draft attempts" value={String(summary.total)} />
           <Stat
             label="Succeeded"
@@ -64,19 +65,20 @@ export default async function ActivityPage() {
           />
         </dl>
 
-        <section className="mt-10" aria-labelledby="runs-heading">
-          <h2 id="runs-heading" className="font-display text-2xl">Draft runs</h2>
+        <section className="mt-10 border-t border-line pt-4" aria-labelledby="runs-heading">
+          <p className="eyebrow">§ 01</p>
+          <h2 id="runs-heading" className="mt-1 font-display text-2xl">Draft runs</h2>
           {runs.length === 0 ? (
             <p className="mt-3 text-sm text-muted">
               No drafts yet. <Link href="/" className="font-semibold underline">Draft a resume</Link>{' '}
               and each attempt is recorded here.
             </p>
           ) : (
-            <ul className="mt-4 space-y-3">
+            <ul className="mt-4 border-t border-line">
               {runs.map((r) => {
                 const status = effectiveRunStatus(r);
                 return (
-                <li key={r.id} className="rounded-xl border border-line bg-surface p-4">
+                <li key={r.id} className="border-b border-line py-4">
                   <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                     <div className="min-w-0">
                       <p className="font-semibold [overflow-wrap:anywhere]">
@@ -96,14 +98,14 @@ export default async function ActivityPage() {
                           {r.score.toFixed(1)}
                         </span>
                       ) : null}
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS[status].tone}`}>
+                      <span className={`px-2.5 py-1 text-xs font-semibold ${STATUS[status].tone}`}>
                         {STATUS[status].label}
                       </span>
                     </div>
                   </div>
 
                   {status === 'failed' || status === 'killed' ? (
-                    <p className="mt-2 rounded-lg bg-danger-tint px-3 py-2 font-mono text-xs text-danger [overflow-wrap:anywhere]">
+                    <p className="mt-2 bg-danger-tint px-3 py-2 text-ink font-mono text-xs text-danger [overflow-wrap:anywhere]">
                       {status === 'killed'
                         ? 'Stopped at the time limit before it could finish.'
                         : `${r.errorKind ?? 'unknown'}${operator && r.errorDetail ? ` — ${r.errorDetail}` : ''}`}
@@ -146,8 +148,9 @@ export default async function ActivityPage() {
         </section>
 
         <div className="mt-10 grid gap-10 lg:grid-cols-2">
-          <section aria-labelledby="usage-heading">
-            <h2 id="usage-heading" className="font-display text-2xl">AI usage</h2>
+          <section className="border-t border-line pt-4" aria-labelledby="usage-heading">
+            <p className="eyebrow">§ 02</p>
+            <h2 id="usage-heading" className="mt-1 font-display text-2xl">AI usage</h2>
             <p className="mt-1 text-sm text-muted">
               Last {usage.length} days (UTC). The daily allowance is {dailyLimit.maxCalls} calls
               and {(dailyLimit.maxTokens / 1_000_000).toFixed(0)}M tokens.
@@ -156,9 +159,17 @@ export default async function ActivityPage() {
               {usage.map((u) => (
                 <li key={u.day} className="grid grid-cols-[2.5rem_1fr_9.5rem] items-center gap-3 text-xs">
                   <span className="font-mono text-muted">{u.day.slice(5)}</span>
-                  <span className="h-2 overflow-hidden rounded-full bg-line" aria-hidden>
+                  <span
+                    className="progress"
+                    role="progressbar"
+                    aria-label={`AI calls on ${u.day}`}
+                    aria-valuemin={0}
+                    aria-valuemax={dailyLimit.maxCalls}
+                    aria-valuenow={Math.min(u.calls, dailyLimit.maxCalls)}
+                    aria-valuetext={`${u.calls} of ${dailyLimit.maxCalls} calls`}
+                  >
                     <span
-                      className="block h-full rounded-full bg-brand"
+                      className="transition-[width]"
                       style={{ width: `${Math.min(100, (u.calls / dailyLimit.maxCalls) * 100)}%` }}
                     />
                   </span>
@@ -170,15 +181,16 @@ export default async function ActivityPage() {
             </ul>
           </section>
 
-          <section aria-labelledby="changes-heading">
-            <h2 id="changes-heading" className="font-display text-2xl">Profile changes</h2>
+          <section className="border-t border-line pt-4" aria-labelledby="changes-heading">
+            <p className="eyebrow">§ 03</p>
+            <h2 id="changes-heading" className="mt-1 font-display text-2xl">Profile changes</h2>
             <p className="mt-1 text-sm text-muted">
               {changes.length ? `The newest ${changes.length} changes to your profile.` : 'No profile changes recorded yet.'}
             </p>
             {changes.length > 0 && (
-            <ul className="mt-4 divide-y divide-line rounded-xl border border-line bg-surface">
+            <ul className="mt-4 divide-y divide-line border-y border-line">
               {changes.map((c) => (
-                <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-x-3 px-4 py-2.5 text-sm">
+                <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-x-3 py-2.5 text-sm">
                   <span>
                     <span className="font-semibold capitalize">{c.action.replace(/-/g, ' ')}</span>{' '}
                     <span className="text-muted">
@@ -207,9 +219,9 @@ const SOURCE_WORDS: Record<string, string> = {
 
 function Stat({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (
-    <div className="rounded-xl border border-line bg-surface px-4 py-3.5">
-      <dt className="text-xs font-medium text-muted">{label}</dt>
-      <dd className={`mt-1.5 font-mono text-2xl font-semibold tabular ${danger ? 'text-danger' : ''}`}>{value}</dd>
+    <div>
+      <dt className="eyebrow">{label}</dt>
+      <dd className={`mt-1 font-mono text-2xl font-semibold tabular ${danger ? 'text-danger' : ''}`}>{value}</dd>
     </div>
   );
 }

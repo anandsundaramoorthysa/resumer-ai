@@ -39,7 +39,7 @@ export function SetPasswordForm({ email }: { email: string }) {
         </p>
         <Link
           href="/"
-          className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+          className="mt-4 btn btn-primary w-full"
         >
           Continue
         </Link>
@@ -106,13 +106,13 @@ export function SetPasswordForm({ email }: { email: string }) {
       <button
         type="submit"
         disabled={!canSubmit}
-        className="mt-4 min-h-11 w-full rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+        className="mt-4 btn btn-primary w-full"
       >
         {pending ? 'Saving…' : 'Set password'}
       </button>
 
       {result && !result.ok ? (
-        <p className="mt-3 text-sm text-danger" role="status">
+        <p className="mt-3 text-sm text-danger" role="alert">
           {result.message}
           {result.problems?.length ? (
             <span className="mt-1 block text-xs text-muted">{result.problems.join(' ')}</span>
@@ -124,4 +124,4 @@ export function SetPasswordForm({ email }: { email: string }) {
 }
 
 const INPUT =
-  'mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-brand';
+  'field mt-1';

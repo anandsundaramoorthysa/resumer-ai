@@ -64,7 +64,7 @@ export function ExtrasPanel({ snapshotId }: { snapshotId: string }) {
   };
 
   return (
-    <section className="mt-6 rounded-xl border border-line bg-surface p-5">
+    <section className="mt-6 border border-line bg-surface p-4 sm:p-5">
       <h2 className="font-display text-xl">Also from this resume</h2>
       <p className="mt-1 max-w-prose text-sm text-muted">
         Both are built from the resume above, so they can only say what it already says.
@@ -74,28 +74,24 @@ export function ExtrasPanel({ snapshotId }: { snapshotId: string }) {
         <button
           type="button"
           onClick={() => load('cover-letter')}
-          className={`min-h-11 rounded-lg border px-4 py-2 text-sm font-semibold ${
-            tab === 'letter' ? 'border-brand text-brand-dark' : 'border-line hover:bg-paper'
-          }`}
+          aria-pressed={tab === 'letter'}
+          className={`btn ${tab === 'letter' ? 'border-brand text-brand-dark' : ''}`}
         >
           Cover letter
         </button>
         <button
           type="button"
           onClick={() => load('interview')}
-          className={`min-h-11 rounded-lg border px-4 py-2 text-sm font-semibold ${
-            tab === 'interview'
-              ? 'border-brand text-brand-dark'
-              : 'border-line hover:bg-paper'
-          }`}
+          aria-pressed={tab === 'interview'}
+          className={`btn ${tab === 'interview' ? 'border-brand text-brand-dark' : ''}`}
         >
           Interview prep
         </button>
       </div>
 
-      {loading ? <p className="mt-4 text-sm text-muted">Generating…</p> : null}
+      {loading ? <p role="status" className="mt-4 text-sm text-muted">Generating…</p> : null}
       {error ? (
-        <p className="mt-4 rounded-lg bg-danger-tint px-3 py-2.5 text-sm text-danger">
+        <p role="alert" className="mt-4 bg-danger-tint px-3 py-2.5 text-sm text-danger">
           {error}
         </p>
       ) : null}
@@ -112,7 +108,7 @@ export function ExtrasPanel({ snapshotId }: { snapshotId: string }) {
             * comfortable line, and the length at which the eye loses the start of the
             * next line. The panel's buttons and warnings underneath still span the card.
             */}
-          <div className="max-w-prose whitespace-pre-wrap rounded-lg border border-line bg-paper p-4 text-sm leading-relaxed">
+          <div className="max-w-prose whitespace-pre-wrap border border-line bg-paper p-4 text-sm leading-relaxed">
             {letter.text}
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -123,7 +119,7 @@ export function ExtrasPanel({ snapshotId }: { snapshotId: string }) {
                 setCopied(true);
                 setTimeout(() => setCopied(false), 2000);
               }}
-              className="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:bg-paper"
+              className="btn"
             >
               {copied ? 'Copied' : 'Copy'}
             </button>
@@ -141,7 +137,7 @@ export function ExtrasPanel({ snapshotId }: { snapshotId: string }) {
       {tab === 'interview' && prep && !loading ? (
         <div className="mt-4">
           {prep.gapQuestions > 0 ? (
-            <p className="mb-3 rounded-lg bg-warning-tint px-3 py-2.5 text-sm text-warning">
+            <p className="mb-3 bg-warning-tint px-3 py-2.5 text-sm text-warning">
               {prep.gapQuestions} of these have no evidence in your resume. Those are the
               ones to prepare an honest answer for.
             </p>
@@ -155,7 +151,7 @@ export function ExtrasPanel({ snapshotId }: { snapshotId: string }) {
             {prep.questions.map((q, i) => (
               <li
                 key={i}
-                className={`rounded-lg border p-3.5 ${
+                className={`border p-3.5 ${
                   q.hasEvidence ? 'border-line' : 'border-warning bg-warning-tint/30'
                 }`}
               >

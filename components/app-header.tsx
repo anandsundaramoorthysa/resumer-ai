@@ -116,18 +116,18 @@ export async function AppHeader({
 
   if (!signedIn) {
     return (
-      <header className="border-b border-line bg-surface">
+      <header className="relative border-b border-line bg-paper">
         <div className={`${container} flex h-14 items-center justify-between gap-3`}>
           <Link
             href="/"
-            className="inline-flex min-h-11 items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            className="inline-flex min-h-11 items-center"
             aria-label="Resumer AI"
           >
             <Logo size={28} />
           </Link>
           <Link
             href="/sign-in"
-            className="inline-flex min-h-11 items-center rounded-lg border border-line px-3.5 text-sm font-semibold hover:bg-paper focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            className="btn"
           >
             Sign in
           </Link>
@@ -169,11 +169,11 @@ export async function AppHeader({
       {/* `relative` so the phone menu can position against the header rather than the
           page, which keeps it under the bar when the page is scrolled. It is the whole
           navigation below `lg`, and hidden at and above it. */}
-      <header className="relative border-b border-line bg-surface lg:hidden">
+      <header className="relative border-b border-line bg-paper lg:hidden">
         <div className={`${container} flex h-14 items-center gap-2 lg:gap-4`}>
           <Link
             href="/"
-            className="inline-flex min-h-11 shrink-0 items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            className="inline-flex min-h-11 shrink-0 items-center"
             aria-label="Resumer AI — dashboard"
           >
             {/* The name is dropped between `sm` and `md` only. That band is the one width
@@ -200,7 +200,7 @@ export async function AppHeader({
                     <Link
                       href={link.href}
                       aria-current={active ? 'page' : undefined}
-                      className={`relative inline-flex h-full min-h-11 items-center rounded-md px-1.5 text-sm md:px-2 transition-colors focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-brand lg:px-3 ${
+                      className={`relative inline-flex h-full min-h-11 items-center px-1.5 text-sm transition-colors md:px-2 lg:px-3 ${
                         active ? 'font-semibold text-ink' : 'font-medium text-muted hover:text-ink'
                       }`}
                     >
@@ -210,7 +210,7 @@ export async function AppHeader({
                           read as one line rather than a bar stacked on another bar. */}
                       <span
                         aria-hidden="true"
-                        className={`pointer-events-none absolute inset-x-1.5 -bottom-px h-0.5 rounded-full lg:inset-x-2.5 ${
+                        className={`pointer-events-none absolute inset-x-1.5 -bottom-px h-0.5 lg:inset-x-2.5 ${
                           active ? 'bg-brand' : 'bg-transparent'
                         }`}
                       />

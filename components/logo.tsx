@@ -1,13 +1,8 @@
 /**
  * Resumer AI logo.
  *
- * Concept: a document whose bottom line lifts off into a rising check — "resume,
- * verified, going up." Drawn as geometry rather than a font so it stays crisp at 16px
- * favicon size, and inline SVG so it is real markup a crawler can read (with a <title>
- * for both accessibility and SEO) rather than an opaque image request.
- *
- * Teal is the brand; the check is the gold accent, used here and almost nowhere else so
- * it keeps meaning "this passed."
+ * A flat vermilion square with a white check, matching app/icon.svg. Inline SVG so it is
+ * real markup with a <title>, and crisp at any size.
  */
 
 import * as React from 'react';
@@ -33,33 +28,8 @@ export function LogoMark({
       aria-label={title}
     >
       <title>{title}</title>
-      <rect width="32" height="32" rx="8" fill="url(#resumer-teal)" />
-      {/* document sheet */}
-      <path
-        d="M9 8.5A1.5 1.5 0 0 1 10.5 7h7.3a1.5 1.5 0 0 1 1.06.44l3.2 3.2A1.5 1.5 0 0 1 22.5 11.7V23.5A1.5 1.5 0 0 1 21 25H10.5A1.5 1.5 0 0 1 9 23.5v-15Z"
-        fill="#FFFFFF"
-        fillOpacity="0.96"
-      />
-      {/* folded corner */}
-      <path d="M18 7.2v3.3a1 1 0 0 0 1 1h3.3L18 7.2Z" fill="#B9DCDE" />
-      {/* text lines */}
-      <rect x="11.8" y="14.4" width="7.6" height="1.5" rx="0.75" fill="#0E7C86" fillOpacity="0.45" />
-      <rect x="11.8" y="17.4" width="5.2" height="1.5" rx="0.75" fill="#0E7C86" fillOpacity="0.45" />
-      {/* the third line lifts into a check */}
-      <path
-        d="M11.9 21.4h2.2l2.5 2.6 5.1-6.1"
-        stroke="#C9922F"
-        strokeWidth="2.1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-      <defs>
-        <linearGradient id="resumer-teal" x1="0" y1="0" x2="32" y2="32">
-          <stop stopColor="#12909B" />
-          <stop offset="1" stopColor="#0A5F67" />
-        </linearGradient>
-      </defs>
+      <rect width="32" height="32" fill="#B8301A" />
+      <path d="M8 17l5.5 5.5L24 10" stroke="#FFFFFF" strokeWidth="3.5" strokeLinecap="square" strokeLinejoin="miter" fill="none" />
     </svg>
   );
 }
@@ -86,8 +56,8 @@ export function Logo({
     <span className={`inline-flex items-center gap-2.5 ${className}`}>
       <LogoMark size={size} />
       {showWordmark ? (
-        <span className={`font-display text-[1.15rem] leading-none text-ink ${wordmarkClassName}`}>
-          Resumer <span className="text-brand-dark">AI</span>
+        <span className={`font-display text-lg leading-none text-ink ${wordmarkClassName}`}>
+          Resumer <span className="text-brand">AI</span>
         </span>
       ) : null}
     </span>

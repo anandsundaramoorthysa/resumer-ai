@@ -39,8 +39,9 @@ export default async function PortfolioSettingsPage({
     <div className="min-h-screen min-h-dvh">
       <AppHeader current="/settings/portfolio" width="6xl" />
 
-      <main className="mx-auto max-w-6xl px-5 py-8">
-        <h1 className="font-display text-3xl">Portfolio connection</h1>
+      <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
+        <p className="eyebrow">§ Settings</p>
+        <h1 className="mt-1 font-display text-4xl tracking-tight">Portfolio connection</h1>
         <p className="mt-2 max-w-prose text-sm text-muted">
           Resumer AI reads your skills, projects and experience from the repository behind
           your portfolio site. Before every draft it checks whether that repo has changed —
@@ -89,8 +90,9 @@ export default async function PortfolioSettingsPage({
             />
           </div>
 
-          <section className="rounded-xl border border-line bg-surface p-5">
-            <h2 className="font-display text-lg">What gets read, and what never changes</h2>
+          <section className="border-t border-line pt-4">
+            <p className="eyebrow">§ Policy</p>
+            <h2 className="mt-1 font-display text-lg">What gets read, and what never changes</h2>
             <ul className="mt-3 space-y-2.5 text-sm text-muted">
               <li>
                 <strong className="text-ink">Read-only.</strong> The app never writes to your

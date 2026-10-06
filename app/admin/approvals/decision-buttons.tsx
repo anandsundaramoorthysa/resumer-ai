@@ -21,7 +21,7 @@ export function DecisionButtons({ userId, current }: { userId: string; current?:
             type="button"
             disabled={pending}
             onClick={() => act('approved')}
-            className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+            className="btn btn-primary disabled:opacity-50"
           >
             {current === 'denied' ? 'Approve instead' : 'Approve'}
           </button>
@@ -31,7 +31,7 @@ export function DecisionButtons({ userId, current }: { userId: string; current?:
             type="button"
             disabled={pending}
             onClick={() => act('denied')}
-            className="min-h-11 rounded-lg border border-danger px-4 text-sm font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+            className="btn !border-danger !text-danger disabled:opacity-50"
           >
             {current === 'approved' ? 'Revoke' : 'Deny'}
           </button>

@@ -35,7 +35,7 @@ import type { ThemeChoice } from './theme-state';
 import type { NavLink } from './nav-links';
 
 const ROW =
-  'group relative flex min-h-11 items-center rounded-lg text-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand';
+  'relative flex min-h-11 items-center text-sm transition-colors';
 
 /**
  * The label beside a collapsed row, on hover or keyboard focus.
@@ -48,8 +48,6 @@ const ROW =
  * read every destination twice. `pointer-events-none` so the chip cannot swallow the click
  * aimed at the icon it is describing.
  */
-const TIP =
-  'pointer-events-none fixed left-[4.75rem] z-50 hidden whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 text-xs font-medium text-ink shadow-md group-hover:block group-focus-visible:block';
 
 export function DesktopSidebar({
   links,
@@ -87,7 +85,7 @@ export function DesktopSidebar({
       // `app-sidebar` and `data-collapsed` are what the stylesheet keys the page's own
       // left padding on. Renaming either without changing app/globals.css puts the
       // navigation on top of the page content.
-      className={`app-sidebar fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-line bg-surface transition-[width] duration-150 lg:flex ${
+      className={`app-sidebar fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-line bg-paper transition-[width] duration-150 lg:flex ${
         collapsed ? 'w-[4.5rem]' : 'w-60'
       }`}
       data-collapsed={collapsed ? 'true' : 'false'}
@@ -95,7 +93,7 @@ export function DesktopSidebar({
       <div className={`flex h-14 shrink-0 items-center border-b border-line ${collapsed ? 'justify-center px-0' : 'gap-2 px-3'}`}>
         <Link
           href="/"
-          className="inline-flex min-h-11 items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          className="inline-flex min-h-11 items-center"
           aria-label="Resumer AI — dashboard"
         >
           {collapsed ? <LogoMark size={28} /> : <Logo size={28} />}
@@ -111,17 +109,20 @@ export function DesktopSidebar({
                 <Link
                   href={link.href}
                   aria-current={active ? 'page' : undefined}
-                  aria-label={collapsed ? link.label : undefined}
-                  className={`${ROW} ${pad} ${
+                  title={collapsed ? link.label : undefined}
+                                    className={`${ROW} ${pad} ${
                     active
-                      ? 'bg-brand-tint font-semibold text-brand-dark'
+                      ? 'font-semibold text-ink'
                       : 'font-medium text-muted hover:bg-paper hover:text-ink'
                   }`}
                 >
+                  {/* The 3px vermilion rule is the active marker; aria-current says it to AT. */}
+                  <span
+                    aria-hidden="true"
+                    className={`absolute inset-y-1 left-0 w-[3px] ${active ? 'bg-brand' : 'bg-transparent'}`}
+                  />
                   <NavIcon href={link.href} className="shrink-0" />
-                  <span aria-hidden={collapsed} className={collapsed ? TIP : 'truncate'}>
-                    {link.label}
-                  </span>
+                  <span className={collapsed ? 'sr-only' : 'truncate'}>{link.label}</span>
                 </Link>
               </li>
             );
@@ -135,13 +136,13 @@ export function DesktopSidebar({
         <div className={`flex min-h-11 items-center ${pad}`}>
           <span
             aria-hidden="true"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line bg-brand-tint text-xs font-semibold tracking-wide text-brand-dark"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-rule bg-brand-tint text-xs font-semibold tracking-wide text-ink"
           >
             {initials(userName)}
           </span>
           {collapsed ? null : (
             <span className="min-w-0">
-              <span className="block text-[0.7rem] font-medium uppercase tracking-wide text-muted">
+              <span className="block font-mono text-xs uppercase tracking-wider text-muted">
                 Signed in as
               </span>
               <span className="block truncate text-sm font-semibold text-ink">
@@ -156,13 +157,11 @@ export function DesktopSidebar({
         <form action={signOut}>
           <button
             type="submit"
-            aria-label={collapsed ? 'Sign out' : undefined}
+            title={collapsed ? 'Sign out' : undefined}
             className={`${ROW} ${pad} w-full font-semibold text-danger hover:bg-danger-tint`}
           >
             <SignOutIcon />
-            <span aria-hidden={collapsed} className={collapsed ? TIP : ''}>
-              Sign out
-            </span>
+            <span className={collapsed ? 'sr-only' : ''}>Sign out</span>
           </button>
         </form>
 
@@ -171,13 +170,11 @@ export function DesktopSidebar({
           onClick={toggle}
           aria-expanded={!collapsed}
           aria-controls="app-sidebar"
-          aria-label={collapsed ? 'Expand' : undefined}
+          title={collapsed ? 'Expand' : undefined}
           className={`${ROW} ${pad} mt-0.5 w-full font-medium text-muted hover:bg-paper hover:text-ink`}
         >
           <ChevronIcon collapsed={collapsed} />
-          <span aria-hidden={collapsed} className={collapsed ? TIP : ''}>
-            {collapsed ? 'Expand' : 'Collapse'}
-          </span>
+          <span className={collapsed ? 'sr-only' : ''}>{collapsed ? 'Expand' : 'Collapse'}</span>
         </button>
       </div>
     </div>

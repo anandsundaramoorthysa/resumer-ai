@@ -69,14 +69,14 @@ export function BulletEditor({
               key={b.id}
               /* Stacked below `sm` for the same reason as the record rows: a bullet is
                  the longest text in the app and suffered worst from the squeeze. */
-              className="flex flex-col items-start gap-2 rounded-lg border border-line px-3.5 py-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
+              className="flex flex-col items-start gap-2 border border-line px-3.5 py-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
             >
               <span className="min-w-0 text-sm">{b.text}</span>
               <span className="flex flex-none gap-1 self-end sm:self-auto">
                 <button
                   type="button"
                   onClick={() => setEditing(b.id)}
-                  className="min-h-11 rounded-lg px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
+                  className="min-h-11 px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
                 >
                   Edit
                 </button>
@@ -102,7 +102,7 @@ export function BulletEditor({
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="mt-2 min-h-11 rounded-lg border border-line px-3.5 text-sm font-semibold hover:bg-paper"
+          className="btn mt-2 text-sm"
         >
           + Add an accomplishment to {roleLabel}
         </button>
@@ -170,7 +170,7 @@ function BulletForm({
   };
 
   return (
-    <div className="rounded-lg border border-brand-tint bg-paper p-3.5">
+    <div className="border border-brand-tint bg-paper p-3.5">
       <Field
         label="What did you do?"
         value={parts.action}
@@ -191,7 +191,7 @@ function BulletForm({
       />
 
       {assessment.text ? (
-        <p className="mt-3 rounded border border-line bg-surface px-3 py-2 text-sm">
+        <p className="mt-3 border border-line bg-surface px-3 py-2 text-sm">
           {assessment.text}
         </p>
       ) : null}
@@ -222,7 +222,7 @@ function BulletForm({
           type="button"
           onClick={submit}
           disabled={!canSave}
-          className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+          className="btn btn-primary text-sm"
         >
           {pending ? (stage === 'checking' ? 'Checking…' : 'Saving…') : recordId || check ? 'Save' : 'Add'}
         </button>
@@ -230,7 +230,7 @@ function BulletForm({
           <button
             type="button"
             onClick={onCancel}
-            className="min-h-11 rounded-lg px-4 text-sm font-semibold text-muted hover:text-ink"
+            className="min-h-11 px-4 text-sm font-semibold text-muted hover:text-ink"
           >
             Cancel
           </button>
@@ -258,7 +258,7 @@ function Field({
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-brand"
+        className="field mt-1"
       />
     </label>
   );
@@ -271,7 +271,7 @@ function DeleteButton({ id, onDone }: { id: string; onDone: (r: Result) => void 
       type="button"
       disabled={pending}
       onClick={() => startTransition(async () => onDone(await deleteProfileRecord(id)))}
-      className="min-h-11 rounded-lg px-2.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
+      className="min-h-11 px-2.5 text-xs font-semibold text-danger hover:bg-danger-tint disabled:opacity-50"
     >
       Remove
     </button>

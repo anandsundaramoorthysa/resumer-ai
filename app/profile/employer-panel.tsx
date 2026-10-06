@@ -31,11 +31,11 @@ import type { EmployerContext, RewriteProposal } from '@/lib/profile/employer-co
 import type { SelfEvidence } from '@/lib/profile/self-evidence';
 
 const INPUT =
-  'min-h-11 w-full rounded-lg border border-muted bg-surface px-3 text-sm outline-none focus:border-brand';
+  'field';
 const PRIMARY =
-  'min-h-11 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50';
+  'btn btn-primary text-sm';
 const QUIET =
-  'min-h-11 rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:text-ink disabled:opacity-50';
+  'min-h-11 px-3 py-2 text-sm font-semibold text-muted hover:text-ink disabled:opacity-50';
 
 export function EmployerPanel({ roleId, company }: { roleId: string; company: string }) {
   const [open, setOpen] = useState(false);
@@ -68,7 +68,7 @@ export function EmployerPanel({ roleId, company }: { roleId: string; company: st
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="mt-2 min-h-11 rounded-lg px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
+        className="mt-2 min-h-11 px-3 text-xs font-semibold text-brand-dark hover:bg-paper"
       >
         + Find numbers for these lines
       </button>
@@ -76,7 +76,7 @@ export function EmployerPanel({ roleId, company }: { roleId: string; company: st
   }
 
   return (
-    <div className="mt-3 rounded-lg border border-line bg-paper/60 p-3.5">
+    <div className="mt-3 border border-line bg-paper/60 p-3.5">
       <p className="text-sm font-semibold">Find numbers for your {company} lines</p>
       <p className="mt-1 max-w-prose text-xs text-muted">
         We search for what you have posted about this job yourself — a LinkedIn post, your
@@ -149,7 +149,7 @@ function Evidence({ evidence }: { evidence: SelfEvidence }) {
       {evidence.sources.length > 0 ? (
         <ul className="space-y-2.5">
           {evidence.sources.map((s, i) => (
-            <li key={s.url} className="rounded-lg border border-line bg-surface p-3">
+            <li key={s.url} className="border border-line bg-surface p-3">
               <label className="flex items-start gap-2.5 text-sm">
                 <input
                   type="checkbox"
@@ -251,7 +251,7 @@ function Proposal({
   };
 
   return (
-    <li className="rounded-lg border border-line bg-surface p-3">
+    <li className="border border-line bg-surface p-3">
       <p className="text-xs text-muted">Now: {proposal.before}</p>
 
       {proposal.after ? (
@@ -263,7 +263,7 @@ function Proposal({
               type="button"
               onClick={add}
               disabled={pending || saved || blocked !== null}
-              className="min-h-11 rounded-lg bg-brand px-3.5 py-2 text-xs font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+              className="btn btn-primary text-xs"
             >
               {saved ? 'Added' : pending ? 'Saving…' : 'Add'}
             </button>

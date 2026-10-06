@@ -31,7 +31,7 @@ export function ProfileAssistant({ empty }: { empty: boolean }) {
   const [tab, setTab] = useState<Tab>(empty ? 'add' : 'review');
 
   return (
-    <section className="mt-7 rounded-xl border border-brand bg-surface p-5" aria-labelledby="assistant-heading">
+    <section className="mt-8 border-t border-line pt-4" aria-labelledby="assistant-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 max-w-prose">
           <h2 id="assistant-heading" className="font-display text-lg">
@@ -45,7 +45,7 @@ export function ProfileAssistant({ empty }: { empty: boolean }) {
         </div>
       </div>
 
-      <div className="mt-4 flex w-full max-w-md rounded-lg border border-line p-1" role="tablist">
+      <div className="mt-4 flex w-full max-w-md border border-line p-1" role="tablist">
         {(
           [
             ['review', 'Review my profile'],
@@ -58,8 +58,8 @@ export function ProfileAssistant({ empty }: { empty: boolean }) {
             role="tab"
             aria-selected={tab === id}
             onClick={() => setTab(id)}
-            className={`min-h-11 flex-1 rounded-md px-2 text-sm font-semibold ${
-              tab === id ? 'bg-brand text-on-brand' : 'text-muted hover:text-ink'
+            className={`min-h-11 flex-1 px-2 text-sm font-semibold ${
+              tab === id ? 'btn btn-primary' : 'text-muted hover:text-ink'
             }`}
           >
             {label}
@@ -197,7 +197,7 @@ function ReviewTool() {
           <button
             type="button"
             onClick={() => start('normal')}
-            className="min-h-11 rounded-lg bg-brand px-5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
+            className="btn btn-primary text-sm"
           >
             Review my profile
           </button>
@@ -211,13 +211,21 @@ function ReviewTool() {
             Checking {run.current}… <span className="text-muted tabular">({run.done} of {run.total} steps)</span>
             {run.depth === 'deep' ? <span className="text-muted"> · everything, including what looks complete</span> : null}
           </p>
-          <div className="mt-2 h-2 w-full max-w-md overflow-hidden rounded-full bg-line" aria-hidden>
-            <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${Math.round((run.done / Math.max(1, run.total)) * 100)}%` }} />
+          <div
+            className="progress mt-2 max-w-md"
+            role="progressbar"
+            aria-label="Profile check progress"
+            aria-valuemin={0}
+            aria-valuemax={Math.max(1, run.total)}
+            aria-valuenow={Math.min(run.done, Math.max(1, run.total))}
+            aria-valuetext={`${run.done} of ${run.total} steps`}
+          >
+            <div className="transition-[width]" style={{ width: `${Math.round((run.done / Math.max(1, run.total)) * 100)}%` }} />
           </div>
         </div>
       ) : null}
 
-      {notice ? <p className="mt-3 rounded-lg bg-warning-tint px-3 py-2 text-sm text-warning">{notice}</p> : null}
+      {notice ? <p className="mt-3 bg-warning-tint px-3 py-2 text-sm text-warning">{notice}</p> : null}
 
       {run.phase === 'done' ? (
         <div className="flex flex-wrap items-center gap-3">
@@ -266,7 +274,7 @@ function ReviewTool() {
                   );
                 })
               }
-              className="min-h-11 rounded-lg border border-brand px-4 text-sm font-semibold text-brand-dark hover:bg-brand-tint disabled:opacity-50"
+              className="min-h-11 border border-brand px-4 text-sm font-semibold text-brand-dark hover:bg-brand-tint disabled:opacity-50"
             >
               {bulkPending ? 'Applying…' : `Apply ${quick.length} quick fix${quick.length === 1 ? '' : 'es'}`}
             </button>
@@ -274,7 +282,7 @@ function ReviewTool() {
           <button
             type="button"
             onClick={() => start(run.depth)}
-            className="min-h-11 rounded-lg px-3 text-sm font-semibold text-muted hover:text-ink"
+            className="min-h-11 px-3 text-sm font-semibold text-muted hover:text-ink"
           >
             Review again
           </button>
@@ -310,7 +318,7 @@ function ReviewTool() {
             <button
               type="button"
               onClick={() => start('deep')}
-              className="min-h-11 rounded-lg border border-line px-4 text-sm font-semibold hover:bg-paper"
+              className="btn text-sm"
             >
               Review everything, including what looks complete
             </button>
@@ -395,15 +403,15 @@ function SuggestionCard({ suggestion: s, onSettled }: { suggestion: Suggestion; 
     });
 
   return (
-    <li className="rounded-lg border border-line bg-paper px-3.5 py-3">
+    <li className="border border-line bg-paper px-3.5 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-xs text-muted [overflow-wrap:anywhere]">{s.label}</p>
           <p className="mt-0.5 text-sm font-semibold [overflow-wrap:anywhere]">{s.title}</p>
         </div>
         <span
-          className={`flex-none rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-            s.origin === 'ai' ? 'bg-brand-tint text-brand-dark' : 'bg-line text-muted'
+          className={`flex-none px-2 py-0.5 text-xs font-semibold ${
+            s.origin === 'ai' ? 'bg-brand-tint text-ink' : 'bg-line text-ink'
           }`}
         >
           {s.origin === 'ai' ? 'AI' : 'Check'}
@@ -413,11 +421,11 @@ function SuggestionCard({ suggestion: s, onSettled }: { suggestion: Suggestion; 
       {s.changes
         ? Object.entries(s.changes).map(([field, c]) => (
             <div key={field} className="mt-2 grid gap-1 text-sm sm:grid-cols-2 sm:gap-3">
-              <p className="rounded bg-danger-tint/40 px-2 py-1 text-muted line-through decoration-danger/60 [overflow-wrap:anywhere]">
+              <p className="bg-danger-tint px-2 py-1 text-ink line-through decoration-danger/60 [overflow-wrap:anywhere]">
                 <span className="sr-only">Before: </span>
                 {show(c.from)}
               </p>
-              <p className="rounded bg-success-tint/50 px-2 py-1 [overflow-wrap:anywhere]">
+              <p className="bg-success-tint px-2 py-1 [overflow-wrap:anywhere]">
                 <span className="sr-only">After: </span>
                 {show(c.to)}
               </p>
@@ -434,7 +442,7 @@ function SuggestionCard({ suggestion: s, onSettled }: { suggestion: Suggestion; 
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
             placeholder={s.ask!.placeholder}
-            className="mt-1 min-h-11 w-full rounded-lg border border-line bg-surface px-3 text-sm outline-none focus:border-brand"
+            className="field mt-1"
           />
           <span className="mt-1 block text-xs text-muted">Saved exactly as you type it.</span>
         </label>
@@ -445,7 +453,7 @@ function SuggestionCard({ suggestion: s, onSettled }: { suggestion: Suggestion; 
           type="button"
           onClick={apply}
           disabled={pending || (needsAnswer && !answer.trim())}
-          className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+          className="btn btn-primary text-sm"
         >
           {pending ? 'Working…' : APPLY_LABEL[s.kind]}
         </button>
@@ -453,7 +461,7 @@ function SuggestionCard({ suggestion: s, onSettled }: { suggestion: Suggestion; 
           type="button"
           onClick={dismiss}
           disabled={pending}
-          className="min-h-11 rounded-lg px-3 text-sm font-semibold text-muted hover:text-ink disabled:opacity-50"
+          className="min-h-11 px-3 text-sm font-semibold text-muted hover:text-ink disabled:opacity-50"
         >
           Dismiss
         </button>
@@ -541,7 +549,7 @@ function AddTool() {
         rows={4}
         maxLength={2000}
         placeholder="At D2R AI Labs I automated invoice processing with Python and n8n. I also earned the Google Data Analytics certificate in March 2025."
-        className="mt-1.5 w-full resize-y rounded-xl border border-line bg-paper px-3.5 py-3 text-sm outline-none focus:border-brand"
+        className="field mt-1.5 resize-y"
       />
       <p className="mt-1 text-xs text-muted">
         Only what you write is used. Anything it cannot trace back to your words is left out, and it tells you what.
@@ -551,7 +559,7 @@ function AddTool() {
           type="button"
           onClick={read}
           disabled={reading || text.trim().length < 10}
-          className="min-h-11 rounded-lg bg-brand px-5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+          className="btn btn-primary text-sm"
         >
           {reading ? 'Reading…' : 'Turn into profile entries'}
         </button>
@@ -563,7 +571,7 @@ function AddTool() {
       </div>
 
       {result ? (
-        <div className="mt-4 rounded-lg border border-line bg-paper p-3.5">
+        <div className="mt-4 border border-line bg-paper p-3.5">
           {result.records.length === 0 && result.roles.length === 0 ? (
             <p className="text-sm">Nothing in that could be turned into a profile entry. Name the skill, project or role, and what you did.</p>
           ) : (
@@ -601,7 +609,7 @@ function AddTool() {
                 type="button"
                 onClick={save}
                 disabled={saving || count === 0}
-                className="mt-3 min-h-11 rounded-lg bg-brand px-5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+                className="btn btn-primary mt-3 text-sm"
               >
                 {saving ? 'Adding…' : `Add ${count} to profile`}
               </button>

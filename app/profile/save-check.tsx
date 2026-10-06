@@ -21,7 +21,7 @@ export function SaveCheckPanel({
   const [used, setUsed] = useState<Set<number>>(new Set());
 
   return (
-    <div role="status" className="mt-3 rounded-lg border border-brand-tint bg-brand-tint/30 p-3">
+    <div role="status" className="mt-3 border border-brand-tint bg-brand-tint/30 p-3">
       <p className="text-sm font-semibold">Before you save</p>
       {check.notes.length > 0 ? (
         <ul className="mt-1.5 space-y-1 text-sm">
@@ -35,7 +35,7 @@ export function SaveCheckPanel({
       {check.rewrites.map((r, i) => (
         <div key={i} className="mt-2.5">
           <p className="text-xs font-medium text-muted">Suggested wording</p>
-          <p className="mt-1 rounded bg-surface px-2.5 py-1.5 text-sm [overflow-wrap:anywhere]">{r.to}</p>
+          <p className="mt-1 bg-surface px-2.5 py-1.5 text-sm [overflow-wrap:anywhere]">{r.to}</p>
           <p className="mt-1 text-xs text-muted">{r.reason}</p>
           <button
             type="button"
@@ -44,7 +44,7 @@ export function SaveCheckPanel({
               onUse(r.field, r.to);
               setUsed(new Set(used).add(i));
             }}
-            className="mt-1.5 min-h-11 rounded-lg border border-brand px-3.5 text-sm font-semibold text-brand-dark hover:bg-brand-tint disabled:opacity-50"
+            className="mt-1.5 min-h-11 border border-brand px-3.5 text-sm font-semibold text-brand-dark hover:bg-brand-tint disabled:opacity-50"
           >
             {used.has(i) ? 'Using this' : 'Use this wording'}
           </button>

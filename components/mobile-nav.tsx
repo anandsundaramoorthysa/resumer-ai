@@ -94,7 +94,7 @@ export function MobileNav({
         aria-controls="mobile-nav-panel"
         aria-label={open ? 'Close menu' : 'Open menu'}
         onClick={() => setOpen((value) => !value)}
-        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-line text-muted hover:bg-paper hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+        className="inline-flex min-h-11 min-w-11 items-center justify-center border border-rule text-muted hover:bg-paper hover:text-ink"
       >
         {/* Drawn rather than lettered, so it reads as a control at any text size. The
             bars become a cross when open, which is the state people check visually. */}
@@ -121,7 +121,7 @@ export function MobileNav({
           // `top-full` rather than the panel's static position: the containing block is
           // the header itself, so this pins the panel to the bar's bottom edge whatever
           // height the row happens to be.
-          className="absolute inset-x-0 top-full z-40 border-b border-line bg-surface px-4 pb-3 pt-2 shadow-lg"
+          className="absolute inset-x-0 top-full z-40 max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-b border-line bg-surface px-4 pb-3 pt-2 shadow-lg"
         >
           <nav aria-label="Main">
             <ul className="flex flex-col">
@@ -134,12 +134,16 @@ export function MobileNav({
                       href={link.href}
                       aria-current={active ? 'page' : undefined}
                       onClick={() => setOpen(false)}
-                      className={`flex min-h-11 items-center rounded-lg px-3 text-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand ${
+                      className={`relative flex min-h-11 items-center px-3 text-sm ${
                         active
-                          ? 'bg-brand-tint font-semibold text-brand-dark'
+                          ? 'font-semibold text-ink'
                           : 'font-medium text-ink hover:bg-paper'
                       }`}
                     >
+                      <span
+                        aria-hidden="true"
+                        className={`absolute inset-y-1 left-0 w-[3px] ${active ? 'bg-brand' : 'bg-transparent'}`}
+                      />
                       {link.label}
                     </Link>
                   </li>
@@ -161,7 +165,7 @@ export function MobileNav({
             <form action={signOut}>
               <button
                 type="submit"
-                className="flex min-h-11 w-full items-center rounded-lg px-3 text-sm font-semibold text-danger hover:bg-danger-tint focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
+                className="flex min-h-11 w-full items-center px-3 text-sm font-semibold text-danger hover:bg-danger-tint"
               >
                 Sign out
               </button>

@@ -1,0 +1,23 @@
+{
+  "search_metadata": {
+    "status": "Success"
+  },
+  "search_parameters": {
+    "engine": "google_jobs_listing",
+    "q": "eyJzYW1wbGUiOjF9"
+  },
+  "ratings": [
+    {
+      "source": "AmbitionBox",
+      "link": "https://www.ambitionbox.com/reviews/sample-reviews",
+      "rating": 4.2,
+      "reviews": "5.3K"
+    },
+    {
+      "source": "Glassdoor",
+      "link": "https://www.glassdoor.co.in/Reviews/sample.htm",
+      "rating": 4,
+      "reviews": 1250
+    }
+  ]
+}

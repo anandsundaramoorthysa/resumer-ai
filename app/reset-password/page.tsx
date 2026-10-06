@@ -20,8 +20,8 @@ export default async function ResetPasswordPage({
   const { token } = await searchParams;
 
   return (
-    <main className="grid min-h-screen min-h-dvh place-items-center px-5 py-10">
-      <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-8 text-center">
+    <main id="main" tabIndex={-1} className="grid min-h-screen min-h-dvh place-items-center px-5 py-10">
+      <div className="w-full max-w-md sheet p-6 text-center sm:p-8">
         <Logo size={40} showWordmark={false} className="mb-5" />
         <h1 className="font-display text-2xl">Set a new password</h1>
 
@@ -34,7 +34,7 @@ export default async function ResetPasswordPage({
             <ResetPasswordForm token={token} />
           </>
         ) : (
-          <p className="mt-2 text-sm text-danger">
+          <p className="mt-2 text-sm text-danger" role="alert">
             This page needs the link from your email — open it from there rather than
             typing the address.
           </p>

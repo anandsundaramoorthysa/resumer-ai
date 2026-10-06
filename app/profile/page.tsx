@@ -56,6 +56,9 @@ function labelFor(type: string): string {
 }
 
 export default async function ProfilePage() {
+  // Running § number for section labels; rendered top to bottom, so order is stable.
+  let secN = 0;
+  const sec = () => String(++secN).padStart(2, '0');
   const session = await requireApprovedUser();
   const userId = session.user.id;
 
@@ -186,11 +189,12 @@ export default async function ProfilePage() {
     <div className="min-h-screen min-h-dvh">
       <AppHeader current="/profile" width="6xl" />
 
-      <main className="mx-auto max-w-6xl px-5 py-8">
+      <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="font-display text-3xl">Your profile</h1>
-            <p className="mt-1 text-sm text-muted">
+            <p className="eyebrow">§ Profile</p>
+            <h1 className="mt-1 font-display text-4xl tracking-tight">Your profile</h1>
+            <p className="mt-2 text-sm text-muted">
               {active.length} fact{active.length === 1 ? '' : 's'} across {grouped.size}{' '}
               categor{grouped.size === 1 ? 'y' : 'ies'}
               {roles.length ? ` · ${roles.length} role${roles.length === 1 ? '' : 's'}` : ''}
@@ -202,34 +206,75 @@ export default async function ProfilePage() {
             fastest way to both fill a thin profile and fix a full one. */}
         <ProfileAssistant empty={decided.length === 0} />
 
+        {/* One banner for everything that asks something of you; each count jumps to its
+            section. The sections below are plain hairline blocks, not coloured banners. */}
+        {reviewCount + flagged.length + (queue.shown.length > 0 ? queue.total : 0) > 0 || gaps.headline ? (
+          <section
+            aria-labelledby="summary-heading"
+            className="mt-8 border-l-4 border-brand bg-brand-tint p-4 text-ink"
+          >
+            <h2 id="summary-heading" className="font-display text-lg">
+              Needs your attention
+            </h2>
+            <ul className="mt-2 space-y-1 text-sm">
+              {reviewCount > 0 ? (
+                <li>
+                  <a href="#review" className="inline-flex min-h-11 items-center font-semibold underline">
+                    {reviewCount} new item{reviewCount === 1 ? '' : 's'} from your portfolio to approve
+                  </a>
+                </li>
+              ) : null}
+              {flagged.length > 0 ? (
+                <li>
+                  <a href="#flagged" className="inline-flex min-h-11 items-center font-semibold underline">
+                    {flagged.length} item{flagged.length === 1 ? '' : 's'} no longer found in your portfolio
+                  </a>
+                </li>
+              ) : null}
+              {queue.shown.length > 0 ? (
+                <li>
+                  <a href="#questions" className="inline-flex min-h-11 items-center font-semibold underline">
+                    {queue.total} question{queue.total === 1 ? '' : 's'} from your last draft
+                  </a>
+                </li>
+              ) : null}
+              {gaps.headline ? (
+                <li>
+                  <a href="#experience" className="inline-flex min-h-11 items-center font-semibold underline">
+                    {gaps.headline}
+                  </a>
+                </li>
+              ) : null}
+            </ul>
+            {gaps.headline ? (
+              <p className="mt-2 max-w-prose text-xs">
+                Gaps are facts only you have: your portfolio says what you worked on, not
+                what changed as a result, and nothing here will invent that. Generate a
+                draft and the ones that cost you marks become specific questions.
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
         {decided.length === 0 && reviewCount === 0 ? (
-          <div className="mt-8 rounded-xl border border-dashed border-line p-8 text-center">
+          <div className="mt-8 border-t border-line pt-6">
             <p className="font-display text-xl">Nothing here yet</p>
-            <p className="mx-auto mt-2 max-w-md text-sm text-muted">
+            <p className="mt-2 max-w-md text-sm text-muted">
               Every resume is built only from facts in this profile — that&apos;s what keeps
               the output honest. Connect your portfolio and Resumer AI will read your
               skills, projects and experience from it.
             </p>
-            <div className="mt-5 flex flex-wrap justify-center gap-3">
-              <Link
-                href="/import"
-                className="inline-flex min-h-11 items-center rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark"
-              >
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Link href="/import" className="btn btn-primary">
                 Import an existing resume
               </Link>
-              <Link
-                href="/settings/portfolio"
-                className="inline-flex min-h-11 items-center rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
-              >
+              <Link href="/settings/portfolio" className="btn">
                 Connect your portfolio
               </Link>
               {/* The third route, which the dashboard's first-run card already promises
                   by name ("Add your details by hand") and which used to lead nowhere,
                   because every section was hidden while the profile was empty. */}
-              <a
-                href="#sections"
-                className="inline-flex min-h-11 items-center rounded-lg border border-line px-5 py-2.5 text-sm font-semibold hover:bg-paper"
-              >
+              <a href="#sections" className="btn">
                 Add your details by hand
               </a>
             </div>
@@ -247,8 +292,9 @@ export default async function ProfilePage() {
           * queue is the only place a person sees the claim before that happens.
           */}
         {reviewCount > 0 ? (
-          <section className="mt-7 rounded-xl border border-gold bg-gold-tint/40 p-5">
-            <h2 className="font-display text-lg text-gold">
+          <section id="review" className="mt-10 border-t border-line pt-4">
+            <p className="eyebrow">§ {sec()}</p>
+            <h2 className="mt-1 font-display text-xl">
               {reviewCount} new item{reviewCount === 1 ? '' : 's'} from your portfolio,
               waiting for you
             </h2>
@@ -306,8 +352,9 @@ export default async function ProfilePage() {
         ) : null}
 
         {flagged.length > 0 ? (
-          <section className="mt-7 rounded-xl border border-warning bg-warning-tint/40 p-5">
-            <h2 className="font-display text-lg text-warning">
+          <section id="flagged" className="mt-10 border-t border-line pt-4">
+            <p className="eyebrow">§ {sec()}</p>
+            <h2 className="mt-1 font-display text-xl">
               {flagged.length} item{flagged.length === 1 ? '' : 's'} no longer found in your
               portfolio
             </h2>
@@ -350,8 +397,9 @@ export default async function ProfilePage() {
           * — otherwise `off` would hide the only control that undoes `off`.
           */}
         {queue.shown.length > 0 || queue.mode !== 'all' ? (
-          <section className="mt-7 rounded-xl border border-brand bg-brand-tint/40 p-5">
-            <h2 className="font-display text-lg text-brand-dark">
+          <section id="questions" className="mt-10 border-t border-line pt-4">
+            <p className="eyebrow">§ {sec()}</p>
+            <h2 className="mt-1 font-display text-xl">
               {/*
                 * Worded by mode, not by emptiness: `current-job` with nothing to ask used
                 * to say the questions were "turned off", which the radio right below
@@ -409,23 +457,11 @@ export default async function ProfilePage() {
           </section>
         ) : null}
 
-        {gaps.headline ? (
-          <section className="mt-7 rounded-xl border border-warning bg-warning-tint/40 p-5">
-            <h2 className="font-display text-lg text-warning">{gaps.headline}</h2>
-            <p className="mt-1.5 max-w-prose text-sm text-muted">
-              These are facts only you have. Your portfolio states what you worked on but
-              not what changed as a result, and nothing here will invent that — so a role
-              with nothing recorded simply cannot appear on a resume. Generate a draft and
-              the pipeline will turn the ones that actually cost you marks into specific
-              questions, above.
-            </p>
-          </section>
-        ) : null}
-
         {/* Always rendered: with no jobs yet, this is where the first one is added. */}
-        <section className="mt-5 rounded-xl border border-line bg-surface p-5">
+        <section id="experience" className="mt-10 border-t border-line pt-4">
+            <p className="eyebrow">§ {sec()}</p>
             <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-display text-lg">Experience</h2>
+              <h2 className="font-display text-xl">Experience</h2>
               <span className="font-mono text-xs text-muted tabular">
                 {roles.length} role{roles.length === 1 ? '' : 's'}
               </span>
@@ -483,7 +519,7 @@ export default async function ProfilePage() {
           * broke the dashboard's own first-run card: it links here promising "Add your
           * details by hand" and landed on a page with no way to do that.
           */}
-        <div id="sections" className="mt-7 space-y-5">
+        <div id="sections" className="mt-10 space-y-10">
           {SECTION_ORDER.filter((type) => (grouped.get(type) ?? []).length > 0).map((type) => {
             const form = RECORD_FORMS[type];
             const list: EditableRecord[] = (grouped.get(type) ?? []).map((r) => ({
@@ -493,9 +529,10 @@ export default async function ProfilePage() {
             }));
 
             return (
-              <section key={type} className="rounded-xl border border-line bg-surface p-5">
+              <section key={type} className="border-t border-line pt-4">
+                <p className="eyebrow">§ {sec()}</p>
                 <div className="flex items-baseline justify-between gap-3">
-                  <h2 className="font-display text-lg">{form.plural}</h2>
+                  <h2 className="font-display text-xl">{form.plural}</h2>
                   <span className="font-mono text-xs text-muted tabular">{list.length}</span>
                 </div>
                 <RecordEditor
@@ -512,8 +549,9 @@ export default async function ProfilePage() {
             const empty = SECTION_ORDER.filter((type) => (grouped.get(type) ?? []).length === 0);
             if (empty.length === 0) return null;
             return (
-              <section className="rounded-xl border border-dashed border-line p-5">
-                <h2 className="font-display text-lg">Add something else</h2>
+              <section className="border-t border-line pt-4">
+                <p className="eyebrow">§ {sec()}</p>
+                <h2 className="font-display text-xl">Add something else</h2>
                 <p className="mt-1 max-w-prose text-sm text-muted">
                   Nothing recorded under these yet. Anything you add here is yours — a
                   sync will never overwrite it.
@@ -562,9 +600,10 @@ export default async function ProfilePage() {
           {[...grouped.entries()]
             .filter(([type]) => type !== 'experience-bullet' && !RECORD_FORMS[type])
             .map(([type, list]) => (
-              <section key={type} className="rounded-xl border border-line bg-surface p-5">
+              <section key={type} className="border-t border-line pt-4">
+                <p className="eyebrow">§ {sec()}</p>
                 <div className="flex items-baseline justify-between gap-3">
-                  <h2 className="font-display text-lg">{labelFor(type)}</h2>
+                  <h2 className="font-display text-xl">{labelFor(type)}</h2>
                   <span className="font-mono text-xs text-muted tabular">{list.length}</span>
                 </div>
                 <ul className="mt-3 space-y-2">

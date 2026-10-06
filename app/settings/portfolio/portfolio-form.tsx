@@ -89,13 +89,13 @@ export function PortfolioForm({
 
   return (
     <div className="mt-6 space-y-5">
-      <div className="rounded-xl border border-line bg-surface p-5">
+      <div className="border-t border-line pt-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-display text-lg">
             {currentRepo ? 'Connected repository' : 'Connect a repository'}
           </h2>
           {currentRepo ? (
-            <span className="rounded-full bg-success-tint px-2.5 py-1 text-xs font-semibold text-success">
+            <span className="bg-success-tint px-2.5 py-1 text-xs font-semibold text-success">
               ✓ Connected
             </span>
           ) : null}
@@ -111,12 +111,12 @@ export function PortfolioForm({
               name="repo"
               defaultValue={currentRepo ?? ''}
               placeholder="owner/name"
-              className="min-h-11 min-w-0 flex-1 rounded-lg border border-muted bg-paper px-3 py-2.5 font-mono text-sm outline-none focus:border-brand"
+              className="field min-w-0 flex-1 font-mono"
             />
             <button
               type="submit"
               disabled={connecting}
-              className="min-h-11 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+              className="btn btn-primary text-sm"
             >
               {connecting ? 'Checking…' : currentRepo ? 'Update' : 'Connect'}
             </button>
@@ -129,7 +129,7 @@ export function PortfolioForm({
 
         {connectState ? (
           <p
-            className={`mt-3 rounded-lg px-3 py-2.5 text-sm ${
+            className={`mt-3 px-3 py-2.5 text-sm ${
               connectState.ok
                 ? 'bg-success-tint text-success'
                 : 'bg-danger-tint text-danger'
@@ -141,7 +141,7 @@ export function PortfolioForm({
       </div>
 
       {currentRepo ? (
-        <div className="rounded-xl border border-line bg-surface p-5">
+        <div className="border-t border-line pt-4">
           <h2 className="font-display text-lg">Sync</h2>
           <dl className="mt-3 text-sm">
             <Row k="Last checked" v={formatWhen(lastSyncedAt)} />
@@ -160,14 +160,14 @@ export function PortfolioForm({
               type="button"
               onClick={runSync}
               disabled={pending || syncing}
-              className="min-h-11 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-brand hover:bg-brand-dark disabled:opacity-50"
+              className="btn btn-primary text-sm"
             >
               {syncing ? 'Syncing…' : 'Sync now'}
             </button>
             {pendingCount > 0 ? (
               <Link
                 href="/profile"
-                className="inline-flex min-h-11 items-center rounded-lg border border-gold px-4 py-2.5 text-sm font-semibold text-gold hover:bg-gold-tint"
+                className="btn text-sm !border-blue"
               >
                 Approve {pendingCount} new
               </Link>
@@ -175,14 +175,14 @@ export function PortfolioForm({
             {flaggedCount > 0 ? (
               <Link
                 href="/profile"
-                className="inline-flex min-h-11 items-center rounded-lg border border-warning px-4 py-2.5 text-sm font-semibold text-warning hover:bg-warning-tint"
+                className="btn text-sm !border-warning"
               >
                 Review {flaggedCount} flagged
               </Link>
             ) : (
               <Link
                 href="/profile"
-                className="inline-flex min-h-11 items-center rounded-lg border border-line px-4 py-2.5 text-sm font-semibold hover:bg-paper"
+                className="btn inline-flex text-sm"
               >
                 View profile
               </Link>
@@ -191,7 +191,7 @@ export function PortfolioForm({
               type="button"
               onClick={runDisconnect}
               disabled={pending}
-              className="min-h-11 rounded-lg px-4 py-2.5 text-sm font-semibold text-muted hover:text-danger disabled:opacity-50"
+              className="min-h-11 px-4 py-2.5 text-sm font-semibold text-muted hover:text-danger disabled:opacity-50"
             >
               Disconnect
             </button>
@@ -205,9 +205,17 @@ export function PortfolioForm({
                   {progress.step}/{progress.totalSteps}
                 </span>
               </div>
-              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line">
+              <div
+                className="progress mt-1.5"
+                role="progressbar"
+                aria-label="Sync progress"
+                aria-valuemin={0}
+                aria-valuemax={progress.totalSteps}
+                aria-valuenow={progress.step}
+                aria-valuetext={`${progress.message}, step ${progress.step} of ${progress.totalSteps}`}
+              >
                 <div
-                  className="h-full rounded-full bg-brand transition-all"
+                  className="transition-[width]"
                   style={{ width: `${(progress.step / progress.totalSteps) * 100}%` }}
                 />
               </div>
@@ -216,7 +224,7 @@ export function PortfolioForm({
 
           {syncResult ? (
             <p
-              className={`mt-3 rounded-lg px-3 py-2.5 text-sm ${
+              className={`mt-3 px-3 py-2.5 text-sm ${
                 syncResult.ok ? 'bg-success-tint text-success' : 'bg-danger-tint text-danger'
               }`}
             >
@@ -236,7 +244,7 @@ export function PortfolioForm({
 
 function Row({ k, v, warn }: { k: string; v: string; warn?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-dashed border-line py-2 last:border-b-0">
+    <div className="flex items-center justify-between gap-3 border-b border-line py-2 last:border-b-0">
       <dt className="text-muted">{k}</dt>
       <dd className={`font-semibold ${warn ? 'text-warning' : ''}`}>{v}</dd>
     </div>
@@ -251,5 +259,5 @@ function formatWhen(iso: string | null): string {
   if (min < 60) return `${min} min ago`;
   const hr = Math.floor(min / 60);
   if (hr < 24) return `${hr} hour${hr === 1 ? '' : 's'} ago`;
-  return new Date(iso).toLocaleDateString();
+  return new Date(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
 }

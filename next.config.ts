@@ -23,6 +23,11 @@ const nextConfig: NextConfig = {
    * locally the real package is one directory away. It is bundled now, which is what a
    * pure-JS package should be.
    */
+  // Replay-mode fixtures are read from disk at runtime, which the file tracer cannot see.
+  outputFileTracingIncludes: {
+    '/api/radar': ['./fixtures/serpapi/**/*'],
+  },
+
   serverExternalPackages: [
     'pdf-parse',
     'pdfjs-dist',

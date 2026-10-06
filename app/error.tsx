@@ -17,20 +17,17 @@ export default function PageError({ error, reset }: { error: Error & { digest?: 
   }, [error]);
 
   return (
-    <main className="mx-auto max-w-lg px-5 py-24">
-      <h1 className="font-display text-3xl">This page hit a problem</h1>
-      <p className="mt-3 text-sm text-muted">
-        Nothing you saved was lost. It has been reported — try again, or go back to the dashboard.
+    <main id="main" tabIndex={-1} className="mx-auto max-w-lg px-5 py-24">
+      <p className="eyebrow">§ Error</p>
+      <h1 className="mt-2 font-display text-3xl tracking-tight">This page hit a problem</h1>
+      <p className="mt-3 text-sm text-muted" role="alert">
+        Nothing you saved was lost. It has been reported. Try again, or go back to the dashboard.
       </p>
-      <div className="mt-6 flex gap-3">
-        <button
-          type="button"
-          onClick={reset}
-          className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-on-brand hover:bg-brand-dark"
-        >
+      <div className="mt-6 flex flex-wrap gap-3">
+        <button type="button" onClick={reset} className="btn btn-primary">
           Try again
         </button>
-        <Link href="/" className="inline-flex min-h-11 items-center rounded-lg border border-line px-4 text-sm font-semibold hover:bg-paper">
+        <Link href="/" className="btn">
           Dashboard
         </Link>
       </div>

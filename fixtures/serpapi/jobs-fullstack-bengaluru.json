@@ -1,0 +1,172 @@
+{
+  "search_metadata": {
+    "status": "Success",
+    "google_domain": "google.co.in"
+  },
+  "search_parameters": {
+    "engine": "google_jobs",
+    "q": "full stack developer Bengaluru",
+    "gl": "in",
+    "hl": "en",
+    "google_domain": "google.co.in"
+  },
+  "jobs_results": [
+    {
+      "title": "Full Stack Developer",
+      "company_name": "Zoho Corporation",
+      "location": "Bengaluru, Karnataka",
+      "via": "via Naukri",
+      "share_link": "https://www.google.com/search?q=sample-1",
+      "extensions": [
+        "3 days ago",
+        "12–18 LPA",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "3 days ago",
+        "schedule_type": "Full-time"
+      },
+      "description": "Build customer-facing features with React, TypeScript and Node.js. You will own APIs on PostgreSQL, write tests and ship weekly. 2-4 years of experience. Compensation: 12-18 LPA based on experience. Skills: React, Node.js, TypeScript, SQL, REST, Git.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "2-4 years with React and Node.js",
+            "Strong SQL and REST design"
+          ]
+        },
+        {
+          "title": "Responsibilities",
+          "items": [
+            "Own features end to end",
+            "Review code and write tests"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "Apply on Naukri",
+          "link": "https://www.naukri.com/job-listings-full-stack-developer-zoho-1"
+        },
+        {
+          "title": "Apply on Zoho Careers",
+          "link": "https://careers.zohocorp.com/jobs/full-stack-developer"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=2016"
+    },
+    {
+      "title": "Full Stack Developer",
+      "company_name": "Zoho Corporation",
+      "location": "Bengaluru, Karnataka",
+      "via": "via LinkedIn",
+      "share_link": "https://www.google.com/search?q=sample-2",
+      "extensions": [
+        "5 days ago",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "5 days ago",
+        "schedule_type": "Full-time"
+      },
+      "description": "Full stack role on React and Node.js.",
+      "job_highlights": [],
+      "apply_options": [
+        {
+          "title": "Apply on LinkedIn",
+          "link": "https://www.linkedin.com/jobs/view/1001"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=2016"
+    },
+    {
+      "title": "Software Engineer - Full Stack",
+      "company_name": "Razorpay",
+      "location": "Bengaluru, Karnataka",
+      "via": "via Razorpay Careers",
+      "share_link": "https://www.google.com/search?q=sample-3",
+      "extensions": [
+        "1 week ago",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "1 week ago",
+        "schedule_type": "Full-time"
+      },
+      "description": "Work on payments dashboards using React, Next.js and Go services. Strong fundamentals in data structures and system design. CTC: 20,00,000 - 30,00,000 per annum for 3+ years. Docker and AWS exposure is a plus.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "3+ years in web development",
+            "React, Next.js, Go"
+          ]
+        },
+        {
+          "title": "Responsibilities",
+          "items": [
+            "Ship dashboards for merchants"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "Apply on Razorpay Careers",
+          "link": "https://razorpay.com/jobs/software-engineer-full-stack"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=308"
+    },
+    {
+      "title": "Junior Web Developer",
+      "company_name": "Pixel Foundry Studio",
+      "location": "Bengaluru, Karnataka",
+      "via": "via Indeed",
+      "share_link": "https://www.google.com/search?q=sample-4",
+      "extensions": [
+        "Today",
+        "Internship"
+      ],
+      "detected_extensions": {
+        "posted_at": "Today",
+        "schedule_type": "Internship"
+      },
+      "description": "Fresher friendly. HTML, CSS, JavaScript and basic React. Stipend ₹25,000 per month for the first six months.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "Basic React and JavaScript"
+          ]
+        },
+        {
+          "title": "Responsibilities",
+          "items": [
+            "Support the web team"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "Apply on Indeed",
+          "link": "https://in.indeed.com/viewjob?jk=sample4"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOiR7aX0=2020"
+    },
+    {
+      "title": "Frontend Engineer",
+      "company_name": "Swiggy",
+      "location": "Bengaluru, Karnataka",
+      "via": "via Swiggy Careers",
+      "description": "Build fast mobile web experiences with React and TypeScript. Salary range 18 to 26 lakhs per annum.",
+      "apply_options": [
+        {
+          "title": "Apply directly",
+          "link": "https://careers.swiggy.com/frontend-engineer"
+        }
+      ],
+      "job_id": "eyJzYW1wbGUiOjV9"
+    }
+  ]
+}
