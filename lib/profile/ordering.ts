@@ -39,6 +39,8 @@ const DATE_FIELD: Record<string, string> = {
   volunteering: 'date',
 };
 
+const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
 /**
  * A date as a sortable number, newest highest. Anything unreadable is `null` — the caller
  * sends those to the end.
@@ -55,7 +57,18 @@ export function dateRank(value: unknown): number | null {
   if (!match) return null;
   const year = Number(match[1]);
   if (!Number.isFinite(year) || year < 1900 || year > 2200) return null;
-  const month = match[2] ? Math.min(12, Math.max(1, Number(match[2]))) : 6;
+  let month = match[2] ? Math.min(12, Math.max(1, Number(match[2]))) : 6;
+  // "Dec 2024", "September 2023", "06/2024": a month written as a word or before the year.
+  // Without this "Dec 2024" and "Mar 2024" both ranked as the year's middle month and a
+  // newest-first sort left them in arbitrary order.
+  if (!match[2]) {
+    const word = /(?<![a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?/.exec(raw);
+    if (word) month = MONTH_NAMES.indexOf(word[1]) + 1;
+    else {
+      const numeric = /(?<!\d)(\d{1,2})[-/.]\d{4}/.exec(raw);
+      if (numeric && Number(numeric[1]) >= 1 && Number(numeric[1]) <= 12) month = Number(numeric[1]);
+    }
+  }
   return year * 100 + month;
 }
 

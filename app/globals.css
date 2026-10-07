@@ -357,3 +357,19 @@ body {
     padding-left: 4.5rem;
   }
 }
+
+/* Inline links in prose: a 24px+ hit area with no change to line layout (padding offset by margin). */
+.legal-prose a,
+.consent-text a {
+  display: inline-block;
+  padding-block: 0.4em;
+  margin-block: -0.4em;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 40rem) {
+  .legal-prose a,
+  .consent-text a {
+    padding-block: 0.6em;
+    margin-block: -0.6em;
+  }
+}

@@ -3,17 +3,13 @@ import { requireApprovedUser } from '@/lib/server/approval';
 import { AppHeader } from '@/components/app-header';
 import { getActivity } from '@/lib/server/activity';
 import { effectiveRunStatus } from '@/lib/server/draft-run';
+import { formatDateTime } from '@/lib/format';
 
 export const metadata = { title: 'Activity' };
 export const dynamic = 'force-dynamic';
 
-/**
- * Times print in UTC and say so. This is a server component with no idea of the reader's
- * zone, and a local-looking time that is silently five and a half hours off is worse than
- * one that names its zone.
- */
-const when = (d: Date) =>
-  `${d.toLocaleString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} UTC`;
+/** Times print in India Standard Time and say so (lib/format.ts). */
+const when = formatDateTime;
 
 const STATUS: Record<ReturnType<typeof effectiveRunStatus>, { label: string; tone: string }> = {
   success: { label: 'Finished', tone: 'bg-success-tint text-success' },
@@ -42,7 +38,7 @@ export default async function ActivityPage() {
 
   return (
     <div className="min-h-screen min-h-dvh">
-      <AppHeader current="/activity" width="6xl" />
+      <AppHeader current="/activity" width="6xl" session={session} />
 
       <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
         <p className="eyebrow">§ Activity</p>

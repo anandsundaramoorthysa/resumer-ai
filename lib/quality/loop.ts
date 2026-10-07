@@ -73,16 +73,21 @@ export interface ScoreBreakdown {
   weakBullets: EvidenceResult['weakBullets'];
   /** True when the evidence call could not finish, so `overall` is a floor, not a grade. */
   evidenceUngraded?: boolean;
+  /** True when a model produced the evidence score — only those are noisy enough to confirm. */
+  modelGraded?: boolean;
 }
 
 /**
  * How much the overall score has to move for an iteration to have been worth its calls.
  *
  * The evidence sub-score is the only one a model produces, and asking the same model the
- * same question twice moves it by a few hundredths on its own. Below this, the loop is
- * measuring that noise rather than an improvement it caused.
+ * same question twice moved the overall by sd 0.11-0.22 in a stub simulation of the judge.
+ * The old 0.05 sat well inside that, so the stop rule fired on noise and a pass at a true
+ * 8.4 happened 16-32% of the time. Below this, the loop is measuring noise rather than an
+ * improvement it caused; evidence is now two votes (lower grade wins) and winners are
+ * re-graded, which brings the noise down further.
  */
-export const MIN_MEANINGFUL_GAIN = 0.05;
+export const MIN_MEANINGFUL_GAIN = 0.2;
 
 /** Consecutive iterations that may fail to move the score before the loop gives up. */
 const MAX_STAGNANT_ITERATIONS = 2;
@@ -221,7 +226,40 @@ export async function scoreDocument(
     genuineGaps,
     weakBullets: evidence.weakBullets,
     evidenceUngraded: evidenceUngraded !== null,
+    modelGraded: evidenceUngraded === null && evidence.provider !== 'n/a',
   };
+}
+
+/**
+ * A new best, or a pass, is the score most likely to have been lifted by luck: of several
+ * noisy measurements, the one that wins is the one that came out high (winner's curse).
+ * So a winner is graded a second time and keeps the LOWER of the two. A gain this large is
+ * not noise and is not re-graded.
+ */
+const CONFIRM_BELOW_GAIN = 0.6;
+/** What a re-grade is allowed to cost in time: one judge call on the fast tier. */
+const CONFIRM_MS = 7_000;
+
+async function confirmWinner(
+  first: ScoreBreakdown,
+  doc: ResumeDocument,
+  records: ProfileRecord[],
+  budget: DraftBudget | undefined,
+  alreadyTried: readonly string[],
+): Promise<ScoreBreakdown> {
+  if (!first.modelGraded || first.evidenceUngraded) return first;
+  if (budget && !budget.hasTimeForAnotherIteration(CONFIRM_MS)) return first;
+  try {
+    const again = await scoreDocument(doc, records, budget, alreadyTried);
+    if (again.evidenceUngraded) return first;
+    const lower = again.result.overall < first.result.overall ? again : first;
+    lower.result.iterations = first.result.iterations;
+    return lower;
+  } catch (err) {
+    // Out of time or budget during the confirmation: the first grade stands.
+    if (outOfTime(err)) return first;
+    throw err;
+  }
 }
 
 /**
@@ -373,6 +411,16 @@ export async function runQualityGate(args: {
         const halt = outOfTime(err);
         if (halt) return seal(haltForBudget(best, current, history, weakSeen, halt), true);
         throw err;
+      }
+
+      // Winner's curse: confirm a pass, or a small step up over the best so far, before
+      // believing it.
+      const risesOverBest =
+        best !== null &&
+        breakdown.result.overall > best.breakdown.result.overall &&
+        breakdown.result.overall - best.breakdown.result.overall < CONFIRM_BELOW_GAIN;
+      if (breakdown.result.passed || risesOverBest) {
+        breakdown = await confirmWinner(breakdown, current, records, budget, [...unimprovable]);
       }
 
       for (const w of breakdown.weakBullets) {

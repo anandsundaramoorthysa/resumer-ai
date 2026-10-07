@@ -14,7 +14,9 @@ import type { RadarDeps, RadarStatus } from '@/lib/radar/runs';
 import { MAX_EVENTS } from '@/lib/radar/events';
 import { MAX_JOB_INPUT_CHARS } from '@/lib/intake/job-input';
 import { BudgetExceededError } from '@/lib/ai/budget';
-import type { Posting, SerpResult } from '@/lib/serp/types';
+import type { Posting, SearchPoll, SearchSubmit, SerpResult } from '@/lib/serp/types';
+
+type StubSearch = (q: string, o: { userId: string; fromQuery: number }) => Promise<SerpResult<Posting[]>>;
 
 const posting = (n: number, fromQuery = 0, description = 'Build React apps.'): Posting => ({
   key: `k${n}`,
@@ -34,7 +36,8 @@ const posting = (n: number, fromQuery = 0, description = 'Build React apps.'): P
 
 interface Calls { search: string[]; intel: string[]; plan: number; rank: number; warm: number }
 
-function make(over: Partial<RadarDeps> = {}) {
+function make(over: Partial<RadarDeps> & { searchJobs?: StubSearch } = {}) {
+  const { searchJobs: stubSearch, ...depsOver } = over;
   const calls: Calls = { search: [], intel: [], plan: 0, rank: 0, warm: 0 };
   let clock = Date.UTC(2026, 9, 6, 12);
   const now = () => (clock += 1);
@@ -42,6 +45,14 @@ function make(over: Partial<RadarDeps> = {}) {
   const ok = <T,>(data: T, mode: 'live' | 'replay' = 'live', credits = 1): SerpResult<T> => ({
     ok: true, data, cached: false, mode, credits,
   });
+  const stub: { searchJobs: StubSearch } = {
+    searchJobs:
+      stubSearch ??
+      (async (q, o) => {
+        calls.search.push(q);
+        return ok([posting(o.fromQuery * 10 + 1, o.fromQuery), posting(o.fromQuery * 10 + 2, o.fromQuery)]);
+      }),
+  };
   const deps: RadarDeps = {
     store,
     now,
@@ -70,10 +81,13 @@ function make(over: Partial<RadarDeps> = {}) {
       salaryLpa: { p25: 0, median: 0, p75: 0, n: 0 },
       topSkills: [], gapSkills: [],
     }),
-    searchJobs: async (q, o) => {
-      calls.search.push(q);
-      return ok([posting(o.fromQuery * 10 + 1, o.fromQuery), posting(o.fromQuery * 10 + 2, o.fromQuery)]);
+    // The stepped orchestrator submits then polls; this default answers at submit time (a cache or replay hit).
+    submitSearch: async (q, o): Promise<SearchSubmit> => {
+      if (!(await o.reserve())) return { kind: 'declined' }; // as the live path does, right before sending
+      return { kind: 'result', result: await stub.searchJobs(q, o) };
     },
+    pollSearch: async (): Promise<SearchPoll> => ({ kind: 'pending' }),
+    sleep: async () => {},
     companyIntel: async (company) => {
       calls.intel.push(company);
       return ok({ company, rating: 4, ratingSource: 'x', reviewsCount: 1, headlines: [] }, 'live', 2);
@@ -81,7 +95,7 @@ function make(over: Partial<RadarDeps> = {}) {
     newBudget: () => ({}) as never,
     aiAssert: async () => {},
     aiRecord: async () => {},
-    ...over,
+    ...depsOver,
   };
   /** Advance until the run stops running; returns the final status. */
   const drive = async (s: RadarStatus, userId = 'u1'): Promise<RadarStatus> => {
@@ -96,7 +110,7 @@ function make(over: Partial<RadarDeps> = {}) {
     s = await drive(s, userId);
     return selectPosting(userId, s.runId, s.state.postings[0].key, deps);
   };
-  return { deps, calls, store, drive, finish, now };
+  return { deps, calls, store, drive, finish, now, stub };
 }
 
 await suiteAsync('radar state machine', async () => {
@@ -301,8 +315,8 @@ await suiteAsync('radar state machine', async () => {
     s = await t.drive(await approveQueries('u1', s.runId, ['a', 'b'], t.deps));
     const stored = t.store.runs[0].state.postings;
     assert.equal(stored.length, 30);
-    assert.ok(stored.every((p) => p.description.length <= 4_000));
-    assert.ok(JSON.stringify(t.store.runs[0].state).length < 200_000);
+    assert.ok(stored.every((p, i) => p.description.length <= (i < 5 ? 6_000 : 1_500)), 'long text only for the first 5');
+    assert.ok(new TextEncoder().encode(JSON.stringify(t.store.runs[0].state)).length < 150_000);
     assert.ok(s.state.postings.every((p) => p.description.length <= 300), 'polls stay light');
     const sel = await selectPosting('u1', s.runId, stored[0].key, t.deps);
     assert.ok(sel.jobText.length <= MAX_JOB_INPUT_CHARS);
@@ -328,8 +342,8 @@ await suiteAsync('radar state machine', async () => {
     s = await selectPosting('u1', s.runId, 'k1', t.deps);
     seen.push(s.phase);
     assert.deepEqual(seen, ['plan', 'awaiting-queries', 'search', 'rank', 'intel', 'select', 'done']);
-    assert.equal(total, 6);
-    assert.equal(s.step, 6, 'done lands on totalSteps');
+    assert.equal(total, 7, 'plan, G1, search, poll, rank, intel, G2/done');
+    assert.equal(s.step, 6, 'no poll round needed (answered at submit): one short of the total');
     assert.ok(s.state.market && s.state.ranked.length > 0, 'market computed in the rank step');
     assert.equal(t.calls.rank, 1);
   });
@@ -337,7 +351,7 @@ await suiteAsync('radar state machine', async () => {
   await testAsync('intel off: rank goes straight to the select gate', async () => {
     const t = make();
     let s = await t.drive(await startRadar('u1', { intel: false }, t.deps));
-    assert.equal(s.totalSteps, 5);
+    assert.equal(s.totalSteps, 6);
     s = await approveQueries('u1', s.runId, ['a'], t.deps);
     s = await advanceRadar('u1', s.runId, s.step, t.deps);
     assert.equal(s.phase, 'rank');
@@ -465,7 +479,7 @@ await suiteAsync('radar state machine', async () => {
     let inflight = 0;
     let peak = 0;
     const t = make();
-    t.deps.searchJobs = async (q, o) => {
+    t.stub.searchJobs = async (q, o) => {
       inflight += 1; peak = Math.max(peak, inflight);
       await new Promise((r) => setTimeout(r, 10));
       inflight -= 1;
@@ -483,7 +497,7 @@ await suiteAsync('radar state machine', async () => {
     assert.equal(s.state.postings.length, 2);
     assert.equal(s.events.filter((e) => e.level === 'warn').length, 1);
     assert.ok(!/SECRET|serpapi\.com/.test(JSON.stringify([s.events, s.error, s.message])));
-    assert.equal(s.creditsUsed, 2);
+    assert.equal(s.creditsUsed, 3, 'the call that threw may have been billed: its reservation stands');
   });
 
   await testAsync('intel looks up both companies in one step', async () => {

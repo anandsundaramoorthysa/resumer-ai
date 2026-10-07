@@ -13,9 +13,16 @@
  */
 
 import { assert, report, testAsync, suiteAsync } from './harness.mjs';
-import { runQualityGate, scoreDocument, MAX_ITERATIONS, type ReviseOutcome } from '@/lib/quality/loop';
+import { runQualityGate, scoreDocument, MAX_ITERATIONS, MIN_MEANINGFUL_GAIN, type ReviseOutcome } from '@/lib/quality/loop';
 import { DraftBudget } from '@/lib/ai/budget';
-import { AllProvidersFailedError } from '@/lib/ai/chain';
+import {
+  AllProvidersFailedError,
+  setChainDeps,
+  setCooldownBackend,
+  resetCooldownCache,
+  resetBreakers,
+  setTelemetrySink,
+} from '@/lib/ai/chain';
 import type { JobRequirement, ProfileRecord, ResumeDocument } from '@/lib/types';
 
 /* ------------------------------------------------------------- fixtures ---- */
@@ -365,6 +372,89 @@ await suiteAsync('quality gate — running out of time keeps the resume', async 
       threw = true;
     }
     assert.equal(threw, true, 'a real error must not be silently swallowed');
+  });
+});
+
+/* ------------------------------------------------- judge noise and stuffing --- */
+
+await suiteAsync('quality gate — a noisy judge and a stuffed Skills section', async () => {
+  await testAsync('the stall threshold sits above the judge noise', async () => {
+    // Measured sd of the overall score from the judge alone was 0.11-0.22; 0.05 was inside it.
+    assert(MIN_MEANINGFUL_GAIN >= 0.2, `MIN_MEANINGFUL_GAIN is ${MIN_MEANINGFUL_GAIN}`);
+  });
+
+  await testAsync('listing the posting\'s terms without holding them cannot score', async () => {
+    // The candidate holds none of Erlang / Mainframe COBOL, but the Skills section lists both.
+    const stuffed = thinDocument('Erlang, Mainframe COBOL');
+    stuffed.jobRequirement = jobWithGaps;
+    const b = await scoreDocument(stuffed, records);
+    assert.equal(b.result.skillsCompletenessScore, 0, 'stuffed skills must not earn credit');
+    assert.equal(b.result.passed, false);
+    assert.deepEqual([...b.genuineGaps].sort(), ['Erlang', 'Mainframe COBOL']);
+
+    // And a candidate holding none of them, with an honest Skills section, is not handed 1.0 either.
+    const honest = thinDocument('React');
+    honest.jobRequirement = jobWithGaps;
+    assert.equal((await scoreDocument(honest, records)).result.skillsCompletenessScore, 0);
+
+    // The held-and-listed case is unchanged.
+    const real = thinDocument('Kubernetes, Terraform');
+    assert.equal((await scoreDocument(real, records)).result.skillsCompletenessScore, 1);
+  });
+
+  await testAsync('a lucky score that would become the best is re-graded and the LOWER one kept', async () => {
+    process.env.GROQ_API_KEY = 'placeholder';
+    for (const k of ['FIREWORKS_API_KEY', 'TOGETHER_API_KEY', 'DEEPINFRA_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY']) delete process.env[k];
+    delete process.env.AI_DISABLED_PROVIDERS;
+    delete process.env.AI_PROVIDER_ORDER;
+    setCooldownBackend(null);
+    resetCooldownCache();
+    resetBreakers();
+    setTelemetrySink(null);
+
+    const doc = thinDocument('Kubernetes, Terraform');
+    doc.sections.push({
+      key: 'experience',
+      heading: 'Experience',
+      items: Array.from({ length: 8 }, (_, i) => ({ text: `Built service ${i} on Kubernetes`, sourceRecordId: null })),
+    } as never);
+
+    // Votes arrive in pairs: iteration 1, iteration 2, then the confirmation of iteration 2.
+    // Iteration 2 gets one strong line by luck; the confirmation sees what is really there.
+    let call = 0;
+    setChainDeps({
+      resolveModel: (() => ({})) as never,
+      generateText: (async () => {
+        const pair = Math.floor(call / 2);
+        call += 1;
+        const luckyOne = pair === 1;
+        const grades = Array.from({ length: 8 }, (_, i) => ({
+          id: `L${i + 1}`,
+          grade: luckyOne && i === 0 ? 'strong' : 'weak',
+          missing: 'specifics',
+        }));
+        return { text: JSON.stringify({ grades }), usage: { totalTokens: 10 }, finishReason: 'stop' };
+      }) as never,
+    });
+
+    let revisions = 0;
+    const outcome = await runQualityGate({
+      document: doc,
+      records,
+      revise: async (d) => {
+        revisions += 1;
+        if (revisions > 1) return didNothing(d);
+        const next = structuredClone(d);
+        next.sections[0].items[0].text += ', Kubernetes';
+        return { document: next, changed: true, unimprovable: [] };
+      },
+    });
+    setChainDeps(null);
+    delete process.env.GROQ_API_KEY;
+
+    assert.equal(call, 6, 'two votes per grade, and the winner graded again');
+    const first = outcome.history[0].overall;
+    assert.equal(outcome.history[1].overall, first, 'the lucky 8.x was replaced by the lower re-grade');
   });
 });
 

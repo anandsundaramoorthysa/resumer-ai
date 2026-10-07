@@ -37,7 +37,7 @@ export default async function PortfolioSettingsPage({
 
   return (
     <div className="min-h-screen min-h-dvh">
-      <AppHeader current="/settings/portfolio" width="6xl" />
+      <AppHeader current="/settings/portfolio" width="6xl" session={session} />
 
       <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
         <p className="eyebrow">§ Settings</p>

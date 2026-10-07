@@ -523,7 +523,9 @@ suite('document length (AUDIT #7)', () => {
 
   test('a two-page-worthy posting gets two pages of budget', () => {
     const mid = doc({ jobRequirement: { ...job, seniority: 'entry' } });
-    mid.sections[1].groups![0].items = Array.from({ length: 40 }, (_, i) => ({
+    // 30, not 40: the clean fixture's own bullets are 100-140 characters and wrap to two
+    // printed lines (lib/quality/length.ts estimatedLines), so 40 more genuinely overflow two pages.
+    mid.sections[1].groups![0].items = Array.from({ length: 30 }, (_, i) => ({
       text: `Shipped a thing that mattered to somebody, number ${i}`,
       sourceRecordId: null,
     }));
@@ -615,12 +617,14 @@ suite('skills completeness (REQ-5.2, weight 0.40)', () => {
     assert.equal(r.score, 1);
   });
 
-  test('an empty profile turns every keyword into a genuine gap, score still 1', () => {
+  test('an empty profile turns every keyword into a genuine gap, and scores 0 (not a free 1.0)', () => {
     const r = scoreSkillsCompleteness(doc({ sections: [cleanSections()[1]] }), []);
     assert.equal(r.present.length, 0);
     assert.equal(r.missingButHeld.length, 0);
     assert.equal(r.genuineGaps.length, 4);
-    assert.equal(r.score, 1);
+    // Holding none of the posting's skills must not be rewarded: otherwise stuffing a
+    // posting's terms into Skills, or having no profile, would max the heaviest sub-score.
+    assert.equal(r.score, 0);
   });
 });
 

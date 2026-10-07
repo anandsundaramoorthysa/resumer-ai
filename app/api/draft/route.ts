@@ -17,7 +17,17 @@ import { auth } from '@/auth';
 import { runDraftPipeline, newDraftRunTrace, PipelineError } from '@/lib/pipeline/run';
 import { loadProfileForUser, persistDraft, buildSyncStep } from '@/lib/server/profile';
 import { recordEnrichmentQuestions } from '@/lib/server/enrichment';
-import { recordDraftRun, startDraftRun } from '@/lib/server/draft-run';
+import { recordDraftRun } from '@/lib/server/draft-run';
+import {
+  claimDraftRun,
+  drizzleDraftRunStore,
+  markRunSnapshot,
+  runningFreshMs,
+  normalizeIdempotencyKey,
+  replayCompletePayload,
+} from '@/lib/server/draft-idempotency';
+import { salvagedCompletePayload } from '@/lib/pipeline/early-persist';
+import type { GeneratedDraft } from '@/lib/pipeline/run';
 import { readJobSubmission, jsonError } from '@/lib/server/job-submission';
 import { eventStream } from '@/lib/server/sse';
 import { AssessmentTokenError, openAssessment } from '@/lib/fit/token';
@@ -32,6 +42,26 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) return jsonError('Sign in first.', 401);
+
+  /*
+   * Idempotency. The browser sends one `Idempotency-Key` per attempt and reuses it when it
+   * retries after a dropped connection (see lib/server/draft-idempotency.ts for the four
+   * cases). A peek first, before the body is read: a retry whose sealed assessment has since
+   * expired must still be handed the resume that already exists.
+   */
+  const key = normalizeIdempotencyKey(req.headers.get('idempotency-key'));
+  const store = drizzleDraftRunStore();
+  const replay = async (snapshotId: string): Promise<Response> => {
+    const payload = await replayCompletePayload(userId, snapshotId);
+    if (!payload) return jsonError('That draft is no longer available. Start a new one.', 410);
+    return eventStream({ run: async ({ send }) => send('complete', payload) });
+  };
+  if (key) {
+    const existing = await store.find(userId, key);
+    if (existing?.snapshotId && (existing.status === 'success' || existing.status === 'running')) {
+      return replay(existing.snapshotId);
+    }
+  }
 
   const submission = await readJobSubmission(req, userId);
   if (!submission.ok) return submission.response;
@@ -61,11 +91,27 @@ export async function POST(req: NextRequest) {
   let snapshotId: string | null = null;
   /** Set on every path that does not finish with a resume; null means it did. */
   let failure: { error?: unknown; kind?: string } | null = null;
-  let runId: string | null = null;
+
+  // The claim IS the run row: a new key inserts it, a duplicate is answered here.
+  const claim = await claimDraftRun(store, userId, key);
+  if (claim.kind === 'done') return replay(claim.snapshotId);
+  if (claim.kind === 'running') {
+    return Response.json(
+      {
+        error: 'This draft is already running.',
+        running: true,
+        pollForMs: runningFreshMs(),
+        statusUrl: `/api/draft/status?key=${encodeURIComponent(key ?? '')}`,
+      },
+      { status: 409 },
+    );
+  }
+  const runId: string | null = claim.runId;
+  /** Filled by the pipeline's `onGenerated` hook — present once the resume is saved. */
+  const saved: { generated: GeneratedDraft | null } = { generated: null };
 
   return eventStream({
-    run: async ({ send, emit, startedAt }) => {
-      runId = await startDraftRun(userId, startedAt);
+    run: async ({ send, emit }) => {
       try {
         const profile = await loadProfileForUser(userId);
 
@@ -95,11 +141,28 @@ export async function POST(req: NextRequest) {
             trace,
             job: assessed?.job,
             fit: assessed?.fit,
+            // Saved the moment the gate finishes, before the render: a kill or a throw in
+            // the seconds after still leaves the user their resume.
+            onGenerated: async (g) => {
+              saved.generated = g;
+              snapshotId = await persistDraft(userId, {
+                document: g.document,
+                score: g.score,
+                job: g.job,
+                fit: g.fit,
+                files: { pdf: Buffer.alloc(0), docx: Buffer.alloc(0), pdfName: g.pdfName, docxName: g.docxName },
+              });
+              await markRunSnapshot(runId, userId, snapshotId);
+            },
           },
           emit,
         );
 
-        snapshotId = await persistDraft(userId, result);
+        // Only when the hook did not already save it (a pipeline without the hook).
+        if (!snapshotId) {
+          snapshotId = await persistDraft(userId, result);
+          await markRunSnapshot(runId, userId, snapshotId);
+        }
 
         /*
          * File what this draft could not evidence against the records it concerns.
@@ -135,6 +198,18 @@ export async function POST(req: NextRequest) {
           fit: result.fit,
         });
       } catch (err) {
+        // The resume was saved and something after the save threw (the render, the
+        // enrichment bookkeeping above is guarded separately). Tell the user the truth:
+        // they have a draft. Logged for the developer; recorded as a success.
+        const persisted = snapshotId as string | null;
+        const generated = saved.generated;
+        if (persisted && generated) {
+          console.error('[draft] failed after the resume was saved, returning it for user', userId, err);
+          failure = null;
+          send('complete', salvagedCompletePayload(generated, persisted));
+          return;
+        }
+
         // `PipelineError` messages are written to be read by the person who uploaded
         // the job — they name the stage and what to do next, and nothing else. Every
         // other exception reaching here was written for a developer: a Drizzle or

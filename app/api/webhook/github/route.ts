@@ -11,8 +11,8 @@
  * and set GITHUB_WEBHOOK_SECRET to the same secret.
  */
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { NextRequest } from 'next/server';
+import { decideWebhook, verifySignature } from '@/lib/sync/webhook';
 import { sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
@@ -49,14 +49,15 @@ export async function POST(req: NextRequest) {
    * of quiet lie that makes a permissions screen worthless.
    */
   if (event === 'installation' || event === 'installation_repositories') {
-    const body = JSON.parse(raw) as {
+    const body = parseJsonBody<{
       action?: string;
       installation?: {
         id?: number;
         account?: { login?: string; type?: string };
         repository_selection?: string;
       };
-    };
+    }>(raw);
+    if (!body) return Response.json({ error: 'Body must be JSON.' }, { status: 400 });
 
     const id = body.installation?.id;
     if (!id) return Response.json({ ok: true, ignored: 'no installation id' });
@@ -71,6 +72,8 @@ export async function POST(req: NextRequest) {
     // cached token is dropped: it carries the old repository list.
     forgetInstallation(id);
 
+    const reactivates =
+      body.action === 'unsuspend' || (event === 'installation_repositories' && body.action === 'added');
     if (body.action === 'unsuspend' || event === 'installation_repositories') {
       // The row is only updated, never created, from a webhook: an installation reaches
       // us first through the redirect, where a signed-in user proves it is theirs. A
@@ -79,7 +82,7 @@ export async function POST(req: NextRequest) {
       await db.execute(
         sql`update github_installation
             set repository_selection = ${body.installation?.repository_selection ?? 'selected'},
-                removed_at = null
+                removed_at = case when ${reactivates} then null else removed_at end
             where id = ${id}`,
       );
     }
@@ -87,11 +90,22 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true, installation: id });
   }
 
-  const payload = JSON.parse(raw) as {
-    repository?: { full_name?: string };
-  };
-  const repo = payload.repository?.full_name;
-  if (!repo) return Response.json({ ok: true, ignored: 'no repository' });
+  const payload = parseJsonBody<Parameters<typeof decideWebhook>[1]>(raw);
+  if (!payload) return Response.json({ error: 'Body must be JSON.' }, { status: 400 });
+
+  // Only a push to the default branch can change what the sync reads (lib/sync/webhook.ts).
+  const action = decideWebhook(event, payload);
+  if (action.kind === 'ignore') return Response.json({ ok: true, ignored: action.reason });
+
+  if (action.kind === 'rename') {
+    // Follow the repository to its new name, so later pushes match again.
+    const moved = await db
+      .update(users)
+      .set({ portfolioRepo: action.to, lastSyncedSha: null })
+      .where(sql`lower(${users.portfolioRepo}) = lower(${action.from})`)
+      .returning({ id: users.id });
+    return Response.json({ ok: true, renamed: moved.length });
+  }
 
   // Clearing the cached SHA is all that's needed — the next draft's gate sees a
   // mismatch and re-parses. No work is done on the webhook's thread.
@@ -99,15 +113,18 @@ export async function POST(req: NextRequest) {
     .update(users)
     .set({ lastSyncedSha: null })
     // Case-insensitively: a user who typed "Owner/Repo" never had their cache cleared.
-    .where(sql`lower(${users.portfolioRepo}) = lower(${repo})`)
+    .where(sql`lower(${users.portfolioRepo}) = lower(${action.fullName})`)
     .returning({ id: users.id });
 
   return Response.json({ ok: true, invalidated: updated.length });
 }
 
-function verifySignature(body: string, signature: string, secret: string): boolean {
-  const expected = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
-  const a = Buffer.from(expected);
-  const b = Buffer.from(signature);
-  return a.length === b.length && timingSafeEqual(a, b);
+/** Null for anything that is not a JSON object (e.g. a form-encoded `payload=` body). */
+function parseJsonBody<T>(raw: string): T | null {
+  try {
+    const v: unknown = JSON.parse(raw);
+    return v && typeof v === 'object' ? (v as T) : null;
+  } catch {
+    return null;
+  }
 }

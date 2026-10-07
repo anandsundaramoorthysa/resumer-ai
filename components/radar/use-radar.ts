@@ -17,6 +17,8 @@ export interface Credits {
   left: number;
   hourUsed: number;
   mode: 'live' | 'replay';
+  /** The server's spend guard could not be read: search is paused, and this is NOT sample data. */
+  unavailable?: boolean;
 }
 export type Query = { q: string; why: string };
 

@@ -62,14 +62,13 @@ export default async function ProfilePage() {
   const session = await requireApprovedUser();
   const userId = session.user.id;
 
-  const records = await db
-    .select()
-    .from(profileRecords)
-    .where(eq(profileRecords.userId, userId));
-  const allRoles = await db
-    .select()
-    .from(rolesTable)
-    .where(eq(rolesTable.userId, userId));
+  // Three independent reads in one round trip rather than three. (The enrichment queue
+  // below needs the records first, so it cannot join them.)
+  const [records, allRoles, removed] = await Promise.all([
+    db.select().from(profileRecords).where(eq(profileRecords.userId, userId)),
+    db.select().from(rolesTable).where(eq(rolesTable.userId, userId)),
+    listDismissed(userId),
+  ]);
 
   /*
    * Three states, and the page has to keep them apart.
@@ -89,7 +88,6 @@ export default async function ProfilePage() {
   const proposedRoles = allRoles.filter((r) => r.reviewState === 'pending');
   const reviewCount = proposed.length + proposedRoles.length;
 
-  const removed = await listDismissed(userId);
   const flagged = decided.filter((r) => r.flaggedForRemoval);
   const active = decided.filter((r) => !r.flaggedForRemoval);
 
@@ -187,7 +185,7 @@ export default async function ProfilePage() {
 
   return (
     <div className="min-h-screen min-h-dvh">
-      <AppHeader current="/profile" width="6xl" />
+      <AppHeader current="/profile" width="6xl" session={session} />
 
       <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
         <div className="flex flex-wrap items-end justify-between gap-3">

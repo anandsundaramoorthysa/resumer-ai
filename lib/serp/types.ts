@@ -70,4 +70,21 @@ export type MarketSignal = z.infer<typeof MarketSignalSchema>;
 export type SerpMode = 'live' | 'replay';
 export type SerpResult<T> =
   | { ok: true; data: T; cached: boolean; mode: SerpMode; credits: number }
-  | { ok: false; reason: 'budget' | 'not-configured' | 'failed' | 'rate'; message: string };
+  | {
+      ok: false;
+      /** unavailable = our spend guard's storage is down (nothing was sent; NOT sample data). */
+      reason: 'budget' | 'not-configured' | 'failed' | 'rate' | 'unavailable';
+      message: string;
+      /** True only when SerpApi definitively answered with an error, so the reserved credit was not billed. */
+      refund?: boolean;
+    };
+
+/** Result of submitting an async search (lib/serp/client.ts). */
+export type SearchSubmit =
+  | { kind: 'result'; result: SerpResult<Posting[]> } // cache hit, replay, or a synchronous fallback
+  | { kind: 'pending'; searchId: string; shared: boolean } // shared = another caller's search, no credit reserved
+  | { kind: 'declined' }; // the caller's reserve() hook said no (credit cap)
+
+export type SearchPoll =
+  | { kind: 'pending' }
+  | { kind: 'result'; result: SerpResult<Posting[]> };

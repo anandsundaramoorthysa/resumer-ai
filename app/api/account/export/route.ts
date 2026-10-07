@@ -2,24 +2,17 @@
  * Everything this app holds about the signed-in user, as one JSON file.
  *
  * The other half of account deletion: leaving should not mean losing the profile you
- * spent an evening writing. Scoped by `userId` on every table, like every other read.
+ * spent an evening writing. Scoped by the user id on every table, like every other read.
+ * The table list is lib/legal/export-tables.ts, which a test keeps complete. Password
+ * hashes, OAuth tokens and other people's data are never included.
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, getTableColumns, sql } from 'drizzle-orm';
+import type { PgColumn } from 'drizzle-orm/pg-core';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
-import {
-  applicationFormFields,
-  applications,
-  auditLog,
-  contactInfo,
-  draftRuns,
-  enrichmentQuestions,
-  profileRecords,
-  resumeSnapshots,
-  roles,
-  users,
-} from '@/lib/db/schema';
+import { users } from '@/lib/db/schema';
+import { EXPORT_TABLES } from '@/lib/legal/export-tables';
 import { attachmentHeader } from '@/lib/render/filename';
 
 export const runtime = 'nodejs';
@@ -30,23 +23,34 @@ export async function GET() {
   const userId = session?.user?.id;
   if (!userId) return Response.json({ error: 'Sign in first.' }, { status: 401 });
 
-  const [account, contact, records, jobs, snapshots, apps, answers, questions, runs, audit] = await Promise.all([
-    db.select({ id: users.id, name: users.name, email: users.email, portfolioRepo: users.portfolioRepo }).from(users).where(eq(users.id, userId)),
-    db.select().from(contactInfo).where(eq(contactInfo.userId, userId)),
-    db.select().from(profileRecords).where(eq(profileRecords.userId, userId)),
-    db.select().from(roles).where(eq(roles.userId, userId)),
-    // The stored PDFs are re-rendered from the document on demand, so the document is
-    // the thing worth exporting; the binaries are not kept.
-    db.select({ id: resumeSnapshots.id, createdAt: resumeSnapshots.createdAt, fileName: resumeSnapshots.fileName, jobRequirement: resumeSnapshots.jobRequirement, document: resumeSnapshots.document, scoreDetail: resumeSnapshots.scoreDetail }).from(resumeSnapshots).where(eq(resumeSnapshots.userId, userId)),
-    db.select().from(applications).where(eq(applications.userId, userId)),
-    db.select().from(applicationFormFields).where(eq(applicationFormFields.userId, userId)),
-    db.select().from(enrichmentQuestions).where(eq(enrichmentQuestions.userId, userId)),
-    db.select().from(draftRuns).where(eq(draftRuns.userId, userId)),
-    db.select().from(auditLog).where(eq(auditLog.userId, userId)),
-  ]);
+  const [account] = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      emailVerified: users.emailVerified,
+      githubLogin: users.githubLogin,
+      portfolioRepo: users.portfolioRepo,
+      lastSyncedAt: users.lastSyncedAt,
+      approval: users.approval,
+      createdAt: users.createdAt,
+      hasPassword: sql<boolean>`${users.passwordHash} is not null`, // whether one is set, never the hash
+    })
+    .from(users)
+    .where(eq(users.id, userId));
+  const safeAccount = account ?? null;
+
+  const sections = await Promise.all(
+    EXPORT_TABLES.map(async (e) => {
+      const all = getTableColumns(e.table) as Record<string, PgColumn>;
+      const picked = e.columns ? Object.fromEntries(e.columns.map((c) => [c, all[c]])) : all;
+      const rows = await db.select(picked).from(e.table).where(eq(all[e.userColumn], userId));
+      return [e.key, e.single ? (rows[0] ?? null) : rows] as const;
+    }),
+  );
 
   const body = JSON.stringify(
-    { exportedAt: new Date().toISOString(), account: account[0] ?? null, contact: contact[0] ?? null, records, jobs, snapshots, applications: apps, applicationAnswers: answers[0] ?? null, questions, draftRuns: runs, auditLog: audit },
+    { exportedAt: new Date().toISOString(), account: safeAccount, ...Object.fromEntries(sections) },
     null,
     1,
   );

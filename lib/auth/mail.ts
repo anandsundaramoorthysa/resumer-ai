@@ -13,7 +13,7 @@
  */
 
 import 'server-only';
-import { sendViaSmtp, smtpConfig } from './smtp';
+import { describeSmtpError, sendViaSmtp, smtpConfig, smtpTransport } from './smtp';
 
 export interface MailResult {
   ok: boolean;
@@ -40,19 +40,40 @@ export function describeMailProvider(): string {
   return c ? `SMTP via ${c.host}, sending as ${c.from}` : 'not configured';
 }
 
-async function deliver(to: string, subject: string, text: string): Promise<MailResult> {
+async function deliver(to: string, subject: string, text: string, html?: string): Promise<MailResult> {
   const config = smtpConfig();
 
   // Without SMTP the link goes to the server log. In development that is the whole flow
   // working without an account anywhere; in production the sign-in page hides the email
   // option rather than offering one that would strand whoever used it.
   if (!config) {
-    console.warn(`[mail] SMTP is not configured. To: ${to}\nSubject: ${subject}\n${text}`);
+    // The body holds a live verify/reset link, i.e. a credential. It is only ever logged
+    // in development; in production nothing but the fact of the skip is recorded.
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`[mail] SMTP is not configured. To: ${to}\nSubject: ${subject}\n${text}`);
+    } else {
+      console.warn('[mail] SMTP is not configured; a message was not sent.');
+    }
     return { ok: true, loggedOnly: true };
   }
 
+  // With an html body the message goes out multipart (text + html); without one it is the
+  // plain-text message it has always been.
+  if (html) {
+    try {
+      await smtpTransport(config).sendMail({ from: config.from, to, subject, text, html });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: describeSmtpError(err) };
+    }
+  }
   const sent = await sendViaSmtp(config, to, subject, text);
   return sent.ok ? { ok: true } : { ok: false, error: sent.error };
+}
+
+/** A multipart (text + HTML) message built by lib/auth/templates.ts. */
+export function sendTemplatedEmail(to: string, email: { subject: string; text: string; html: string }): Promise<MailResult> {
+  return deliver(to, email.subject, email.text, email.html);
 }
 
 /** A plain-text notice to the site operator — draft-failure alerts (lib/server/draft-alerts.ts). */

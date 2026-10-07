@@ -43,11 +43,17 @@ import { accounts, sessions, users, verificationTokens } from '@/lib/db/schema';
 import { verifyPassword } from '@/lib/auth/password';
 import { normalizeEmail } from '@/lib/auth/email-policy';
 import { linkedAccountPatch } from '@/lib/auth/account-linking';
-import { sessionSurvivesReset } from '@/lib/auth/session-validity';
+import {
+  SESSION_MAX_AGE_SECONDS,
+  SESSION_UPDATE_AGE_SECONDS,
+  sessionIsLive,
+} from '@/lib/auth/session-validity';
 import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
 import { encryptIfPossible } from '@/lib/auth/secret-box';
 import { isGitHubAppConfigured } from '@/lib/github/app';
 import { notifyOwnerOfSignup } from '@/lib/server/signup-notice';
+import { flagOn } from '@/lib/server/flags';
+import { mayCreateOAuthUser, SignupsPausedError } from '@/lib/auth/signup-gate';
 
 const githubConfigured =
   Boolean(process.env.AUTH_GITHUB_ID) && Boolean(process.env.AUTH_GITHUB_SECRET);
@@ -129,6 +135,9 @@ function normalizingAdapter(base: Adapter): Adapter {
     // and both providers have verified the address — so this is the moment to tell the
     // owner there is someone to approve. See lib/server/approval.ts.
     createUser: async (user) => {
+      // Kill switch: OAuth must not create accounts while sign-ups are paused (existing
+      // users never reach createUser). flagOn fails open on a database error.
+      if (!mayCreateOAuthUser(await flagOn('signups_enabled'))) throw new SignupsPausedError();
       const created = await base.createUser!({ ...user, email: user.email ? normalizeEmail(user.email) : user.email });
       await notifyOwnerOfSignup(created, 'Google or GitHub');
       return created;
@@ -172,7 +181,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }),
       )
     : undefined,
-  session: { strategy: 'jwt' },
+  session: {
+    strategy: 'jwt',
+    maxAge: SESSION_MAX_AGE_SECONDS,
+    updateAge: SESSION_UPDATE_AGE_SECONDS,
+  },
   providers: [
     ...(githubConfigured
       ? [
@@ -210,7 +223,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       : []),
     ...(isDatabaseConfigured ? [credentialsProvider] : []),
   ],
-  pages: { signIn: '/sign-in' },
+  pages: { signIn: '/sign-in', error: '/sign-in' },
   callbacks: {
     /**
      * An OAuth sign-in is proof the provider delivered mail to that address, so it also
@@ -283,7 +296,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           .where(eq(users.id, token.sub))
           .limit(1);
 
-        if (!sessionSurvivesReset(token.authAt, row?.sessionsValidFrom)) {
+        // A missing row (deleted account) is a dead session, same as a reset.
+        if (!sessionIsLive(token.authAt, row)) {
           // Auth.js gives this callback no way to say "the token is dead" — the
           // signature returns a session, not null. A session with no user and an expiry
           // already past is the same thing to everything downstream: every guard in this

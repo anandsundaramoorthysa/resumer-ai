@@ -11,9 +11,13 @@ import { makeRadarHandlers } from '@/lib/radar/handlers';
 import { advanceRadar, approveQueries, cancelRadar, getRadar, selectPosting, startRadar } from '@/lib/radar/runs';
 import { creditStatus } from '@/lib/serp/budget';
 import { approvalFor } from '@/lib/server/approval';
+import { hasCurrentConsent } from '@/lib/legal/consent';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// maxDuration is honoured on VERCEL only. On NETLIFY (free) a synchronous function is cut at
+// ~26-30s regardless, so every radar step is built for that (see STEP_BUDGET_MS in lib/radar/runs.ts):
+// each SerpApi http call is <= 8s and a step never waits on SerpApi for longer.
 export const maxDuration = 60;
 
 const authHost = () => {
@@ -27,6 +31,7 @@ const authHost = () => {
 const handlers = makeRadarHandlers({
   userId: async () => (await auth())?.user?.id ?? null,
   approval: approvalFor,
+  consent: hasCurrentConsent,
   assertBurst: (userId) => assertBurst(userId),
   credits: creditStatus,
   get extraHosts() {

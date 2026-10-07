@@ -17,19 +17,39 @@
  */
 
 /** Corporate suffixes that carry no identity — the same company with or without them. */
-const COMPANY_SUFFIXES =
-  /\b(pvt|private|ltd|limited|llp|llc|inc|incorporated|corp|corporation|co|gmbh|technologies|technology|solutions|labs|lab|software|systems|services|self[-\s]?published|self[-\s]?employed)\b/g;
+// Word boundaries are Unicode-aware lookarounds, not \b: \b only knows ASCII word characters.
+const W_OPEN = '(?<![\\p{L}\\p{N}\\p{M}])';
+const W_CLOSE = '(?![\\p{L}\\p{N}\\p{M}])';
+const COMPANY_SUFFIXES = new RegExp(
+  `${W_OPEN}(pvt|private|ltd|limited|llp|llc|inc|incorporated|corp|corporation|co|gmbh|technologies|technology|solutions|labs|lab|software|systems|services|self[-\\s]?published|self[-\\s]?employed)${W_CLOSE}`,
+  'gu',
+);
 
 /** Parenthetical qualifiers on a job title: "(Paid Intern)", "(Contract)", "(Remote)". */
 const TITLE_QUALIFIERS = /\([^)]*\)/g;
 
 /** Seniority and engagement words that vary between tellings of the same job. */
-const TITLE_NOISE = /\b(intern|internship|paid|unpaid|trainee|part[-\s]?time|full[-\s]?time|contract|freelance|remote)\b/g;
+const TITLE_NOISE = new RegExp(
+  `${W_OPEN}(intern|internship|paid|unpaid|trainee|part[-\\s]?time|full[-\\s]?time|contract|freelance|remote)${W_CLOSE}`,
+  'gu',
+);
+const INTERN_WORDS = new RegExp(`${W_OPEN}(intern|internship|trainee)${W_CLOSE}`, 'iu');
 
+/**
+ * Lowercased NFKC text keeping letters, digits and combining marks of every script.
+ *
+ * The old class was `[^a-z0-9\s/]`, which erased every non-ASCII character: Tamil, Hindi and
+ * CJK company and title names all reduced to "", so `roleIdentity` returned "::" for any
+ * two of them and `dedupeRoles` merged unrelated jobs. Marks (\p{M}) are kept because Indic
+ * vowel signs and viramas are marks — dropping them changes the word. Joiners (ZWJ/ZWNJ)
+ * are removed, not spaced, so a conjunct is not cut in two.
+ */
 function squash(s: string): string {
   return s
+    .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^a-z0-9\s/]/g, ' ')
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, '')
+    .replace(/[^\p{L}\p{N}\p{M}\s/]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -89,8 +109,64 @@ export function normalizeTitle(title: string): string {
     .trim();
 }
 
-export function roleIdentity(company: string, title: string): string {
-  return `${normalizeCompany(company)}::${normalizeTitle(title)}`;
+/**
+ * The identity key of a job.
+ *
+ * Two safeguards against merging jobs that are merely hard to read:
+ *  - An empty half (a name that normalises to nothing — a lone emoji, punctuation) means
+ *    there is NO identity to compare. The key falls back to the raw NFKC text of both
+ *    fields, so only a byte-identical pair can ever collide; "::" used to collide with
+ *    every other empty pair.
+ *  - `startDate`, when given, adds the start YEAR, so an internship and a later full-time
+ *    role under the same title at the same company are two jobs. Callers that compare
+ *    stored roles should pass it; `dedupeRoles` applies the stronger date test (`sameJob`).
+ */
+export function roleIdentity(company: string, title: string, startDate?: string): string {
+  const c = normalizeCompany(company);
+  const t = normalizeTitle(title);
+  if (!c || !t) {
+    return `raw:${company.normalize('NFKC').trim().toLowerCase()}|${title.normalize('NFKC').trim().toLowerCase()}`;
+  }
+  const year = startDate && ROLE_DATE.test(startDate) ? `@${startDate.slice(0, 4)}` : '';
+  return `${c}::${t}${year}`;
+}
+
+/** A role date as a month number (year * 12 + month0); a bare year spans Jan..Dec. */
+function monthSpan(value: string | undefined, edge: 'start' | 'end'): number | null {
+  const v = (value ?? '').trim().toLowerCase();
+  if (v === 'present' || v === 'current' || v === 'ongoing') return edge === 'end' ? Number.MAX_SAFE_INTEGER : null;
+  const m = /^(\d{4})(?:-(0[1-9]|1[0-2]))?$/.exec(v);
+  if (!m) return null;
+  const month = m[2] ? Number(m[2]) - 1 : edge === 'start' ? 0 : 11;
+  return Number(m[1]) * 12 + month;
+}
+
+interface Span { start: number | null; end: number | null }
+
+const spanOf = (r: { startDate: string; endDate: string }): Span => ({
+  start: monthSpan(r.startDate, 'start'),
+  end: monthSpan(r.endDate, 'end') ?? monthSpan(r.startDate, 'end'),
+});
+
+/**
+ * Whether two roles with the SAME title identity are the same job, by date.
+ *
+ * Decision: merge only when the date ranges overlap or sit within one month of each other;
+ * a role with no usable dates on either side is compatible (it cannot be told apart, and
+ * merging an undated row onto its dated twin is what the live-profile cleanup needs). A
+ * gap of more than a month is a different engagement: an internship in 2022 and a full-time
+ * role in 2024 under the same title at the same company are two jobs. Back to back
+ * (adjacent) stays merged unless one telling says intern and the other does not — that is a
+ * conversion to full-time, which is a second role.
+ */
+function datesCompatible(a: RoleLike, b: RoleLike, aSpan: Span, bSpan: Span): boolean {
+  if (aSpan.start === null || bSpan.start === null) return true;
+  const aEnd = aSpan.end ?? aSpan.start;
+  const bEnd = bSpan.end ?? bSpan.start;
+  const gap = Math.max(aSpan.start, bSpan.start) - Math.min(aEnd, bEnd);
+  if (gap <= 0) return true; // overlapping
+  if (gap > 1) return false;
+  return INTERN_WORDS.test(a.title) === INTERN_WORDS.test(b.title);
 }
 
 /**
@@ -137,18 +213,41 @@ export function mergeRoles(a: RoleLike, b: RoleLike): RoleLike {
   };
 }
 
+/** Identity AND dates agree — the test `dedupeRoles` applies, for callers matching stored rows. */
+export function sameJob(a: RoleLike, b: RoleLike): boolean {
+  return (
+    roleIdentity(a.company, a.title) === roleIdentity(b.company, b.title) &&
+    datesCompatible(a, b, spanOf(a), spanOf(b))
+  );
+}
+
 /** Collapses a list of roles to one entry per real job. */
 export function dedupeRoles(roles: RoleLike[]): RoleLike[] {
-  const byIdentity = new Map<string, RoleLike>();
+  // Several clusters per identity: same title identity + incompatible dates = separate jobs.
+  const byIdentity = new Map<string, Array<{ role: RoleLike; span: Span }>>();
+  const order: Array<{ role: RoleLike; span: Span }> = [];
 
   for (const role of roles) {
     for (const title of splitMergedTitles(role.title)) {
       const candidate = { ...role, title };
       const key = roleIdentity(candidate.company, candidate.title);
-      const existing = byIdentity.get(key);
-      byIdentity.set(key, existing ? mergeRoles(existing, candidate) : candidate);
+      const span = spanOf(candidate);
+      const clusters = byIdentity.get(key) ?? [];
+      const hit = clusters.find((c) => datesCompatible(c.role, candidate, c.span, span));
+      if (hit) {
+        hit.role = mergeRoles(hit.role, candidate);
+        hit.span = {
+          start: hit.span.start === null ? span.start : span.start === null ? hit.span.start : Math.min(hit.span.start, span.start),
+          end: hit.span.end === null ? span.end : span.end === null ? hit.span.end : Math.max(hit.span.end, span.end),
+        };
+        continue;
+      }
+      const fresh = { role: candidate, span };
+      clusters.push(fresh);
+      byIdentity.set(key, clusters);
+      order.push(fresh);
     }
   }
 
-  return [...byIdentity.values()];
+  return order.map((c) => c.role);
 }

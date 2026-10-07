@@ -184,11 +184,84 @@ function orderedChain(): ProviderConfig[] {
   return [...front, ...PROVIDER_CHAIN.filter((p) => !front.includes(p))];
 }
 
-/** Providers that actually have a key configured, in routing order. */
-export function availableProviders(): ProviderConfig[] {
+const ALIASES: Record<string, ProviderId> = {
+  gemini: 'google',
+  together: 'togetherai',
+  fireworksai: 'fireworks',
+  deepinfra: 'deepinfra',
+};
+
+/** A comma list of provider ids (or common short names), read at call time, never cached. */
+function idList(raw: string | undefined): Set<ProviderId> | null {
+  if (!raw?.trim()) return null;
+  const out = new Set<ProviderId>();
+  for (const s of raw.split(',')) {
+    const k = s.trim().toLowerCase();
+    const id = ALIASES[k] ?? PROVIDER_CHAIN.find((p) => p.id === k)?.id;
+    if (id) out.add(id);
+  }
+  return out;
+}
+
+/**
+ * Providers that actually have a key configured, in routing order.
+ *
+ * Two switches, both read per call so flipping an env var needs a restart at most, never a
+ * deploy of code:
+ *   AI_DISABLED_PROVIDERS — never use these (e.g. 'google,together').
+ *   AI_PII_PROVIDERS      — when `containsPii` is set, only these may receive the prompt.
+ *                           Unset means every provider is allowed.
+ */
+export function availableProviders(opts: { containsPii?: boolean } = {}): ProviderConfig[] {
+  const disabled = idList(process.env.AI_DISABLED_PROVIDERS);
+  const pii = opts.containsPii ? idList(process.env.AI_PII_PROVIDERS) : null;
   return orderedChain().filter((p) => {
+    if (disabled?.has(p.id)) return false;
+    if (pii && !pii.has(p.id)) return false;
     const v = process.env[p.envKey];
     return typeof v === 'string' && v.trim().length > 0;
+  });
+}
+
+const MODEL_ENV: Record<ProviderId, { std: string; fast: string }> = {
+  groq: { std: 'GROQ_MODEL', fast: 'GROQ_FAST_MODEL' },
+  fireworks: { std: 'FIREWORKS_MODEL', fast: 'FIREWORKS_FAST_MODEL' },
+  togetherai: { std: 'TOGETHER_MODEL', fast: 'TOGETHER_FAST_MODEL' },
+  deepinfra: { std: 'DEEPINFRA_MODEL', fast: 'DEEPINFRA_FAST_MODEL' },
+  google: { std: 'GEMINI_MODEL', fast: 'GEMINI_FAST_MODEL' },
+};
+
+/** The env var that overrides a provider's model — what a "model retired" alert should name. */
+export function modelEnvName(id: ProviderId, tier: 'standard' | 'fast' = 'standard'): string {
+  return MODEL_ENV[id][tier === 'fast' ? 'fast' : 'std'];
+}
+
+/**
+ * provider -> model -> where the id came from, for the deep health check. Never includes
+ * keys; says only whether one is set.
+ */
+export function describeModelConfig(): Array<{
+  provider: ProviderId;
+  keyConfigured: boolean;
+  disabled: boolean;
+  models: Record<'standard' | 'fast', { model: string; source: 'env' | 'default'; envVar: string }>;
+}> {
+  const disabled = idList(process.env.AI_DISABLED_PROVIDERS);
+  return PROVIDER_CHAIN.map((p) => {
+    const m = (tier: 'standard' | 'fast') => {
+      const envVar = modelEnvName(p.id, tier);
+      return {
+        model: tier === 'fast' ? p.fastModel : p.model,
+        source: (process.env[envVar] ? 'env' : 'default') as 'env' | 'default',
+        envVar,
+      };
+    };
+    return {
+      provider: p.id,
+      keyConfigured: !!process.env[p.envKey]?.trim(),
+      disabled: !!disabled?.has(p.id),
+      models: { standard: m('standard'), fast: m('fast') },
+    };
   });
 }
 

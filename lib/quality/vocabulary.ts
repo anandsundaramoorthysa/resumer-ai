@@ -19,8 +19,12 @@
 
 function normalize(s: string): string {
   return s
+    .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}+#.\s-]/gu, ' ')
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, '')
+    // Marks are kept (Indic vowel signs are \p{M}) and so is "&": "R&D" must stay one
+    // token, or the short-keyword rule in containsPhrase never sees the ampersand.
+    .replace(/[^\p{L}\p{N}\p{M}+#.&\s-]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -39,9 +43,30 @@ export function containsPhrase(haystack: string, needle: string): boolean {
   if (haystack === needle) return true;
   if (!needle) return false;
 
-  const boundary = (c: string | undefined) => c === undefined || !/[\p{L}\p{N}]/u.test(c);
+  const boundary = (c: string | undefined) => c === undefined || !/[\p{L}\p{N}\p{M}]/u.test(c);
+  const isWord = (c: string | undefined) => c !== undefined && /[\p{L}\p{N}\p{M}]/u.test(c);
+  // A very short keyword ("R", "Go", "C", "Net") is a word only when nothing glues it to
+  // its neighbour. Punctuation alone is not a boundary: "R" is inside "R&D", "Go" inside
+  // "go-to-market", "C" inside "C++"/"C#", "Net" inside "ASP.NET". The gate counted all
+  // four as the skill.
+  const short = needle.length <= 2 && /^[\p{L}\p{N}\p{M}]+$/u.test(needle);
+  const dotted = needle.length === 3 && /^[\p{L}\p{N}]+$/u.test(needle);
+  // A hyphen joins "AI-powered" to a genuine "AI", so it only disqualifies keywords that
+  // are also ordinary words ("go-to-market", "it-works"); & # + . disqualify any short one.
+  const GLUE = needle.length === 1 || /^(go|it|be|do|my|no|so|me)$/.test(needle) ? /[&#+.-]/ : /[&#+.]/;
   for (let idx = haystack.indexOf(needle); idx !== -1; idx = haystack.indexOf(needle, idx + 1)) {
-    if (boundary(haystack[idx - 1]) && boundary(haystack[idx + needle.length])) return true;
+    const before = haystack[idx - 1];
+    const after = haystack[idx + needle.length];
+    if (!boundary(before) || !boundary(after)) continue;
+    if (short) {
+      // "c++" / "c#": the sign itself continues the name.
+      if (after !== undefined && /[+#]/.test(after)) continue;
+      if (after !== undefined && GLUE.test(after) && isWord(haystack[idx + needle.length + 1])) continue;
+      if (before !== undefined && GLUE.test(before) && isWord(haystack[idx - 2])) continue;
+    } else if (dotted && before === '.' && isWord(haystack[idx - 2])) {
+      continue; // "asp.net", "vb.net": a namespace suffix, not the word on its own
+    }
+    return true;
   }
   return false;
 }

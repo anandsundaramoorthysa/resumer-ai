@@ -10,9 +10,11 @@
  *   presentation          The same document with small vector icons beside the contact
  *                         fields, for a human reader rather than a parser (REQ-6.2).
  *
- * Helvetica is react-pdf's built-in metric-compatible stand-in for Arial; using a
- * built-in font avoids an embedded-subset failure mode where a parser can't decode
- * glyphs it has no mapping for.
+ * Fonts are embedded Noto Sans (Latin, with the rupee sign), Noto Sans Devanagari and
+ * Noto Sans Tamil (./pdf-fonts.ts). Helvetica, used before, has no glyph for those: it
+ * printed ₹ as ¹ and Hindi or Tamil as garbage. The fonts carry a ToUnicode map, so the
+ * text layer a parser reads is still the real characters; tests/pdf-fonts.test.mts renders
+ * a PDF and reads it back to prove it.
  */
 
 import React from 'react';
@@ -30,6 +32,8 @@ import {
   renderToBuffer,
 } from '@react-pdf/renderer';
 import type { ResumeDocument } from '../types';
+import { PDF_FONT_STACK, registerPdfFonts } from './pdf-fonts';
+import { stripUnrenderable } from './unrenderable';
 
 /**
  * Never break a word across lines.
@@ -45,6 +49,7 @@ import type { ResumeDocument } from '../types';
  * a fair trade against losing keywords, and invisible next to what it prevents.
  */
 Font.registerHyphenationCallback((word) => [word]);
+registerPdfFonts();
 import { coerceHeading } from './headings';
 import { tidyResumeText } from '../generate/display-text';
 import { rendersAsPlainLine } from './sections';
@@ -62,16 +67,16 @@ const styles = StyleSheet.create({
     paddingTop: 40,
     paddingBottom: 40,
     paddingHorizontal: 48,
-    fontFamily: 'Helvetica',
+    fontFamily: [...PDF_FONT_STACK],
     fontSize: 10.5,
     lineHeight: 1.4,
     color: '#000000',
   },
-  name: { fontSize: 18, fontFamily: 'Helvetica-Bold', lineHeight: 1.2, marginBottom: 6, textAlign: 'center' },
+  name: { fontSize: 18, fontWeight: 'bold', lineHeight: 1.2, marginBottom: 6, textAlign: 'center' },
   contactLine: { fontSize: 9.5, marginBottom: 2, textAlign: 'center' },
   sectionHeading: {
     fontSize: 11.5,
-    fontFamily: 'Helvetica-Bold',
+    fontWeight: 'bold',
     marginTop: 14,
     marginBottom: 5,
     borderBottomWidth: 0.75,
@@ -80,16 +85,16 @@ const styles = StyleSheet.create({
   },
   // Title left, dates right, on one line.
   groupTitleRow: { marginTop: 7, flexDirection: 'row', justifyContent: 'space-between' },
-  groupTitle: { fontSize: 10.5, fontFamily: 'Helvetica-Bold', flex: 1, paddingRight: 8 },
+  groupTitle: { fontSize: 10.5, fontWeight: 'bold', flex: 1, paddingRight: 8 },
   // "Label:" in a fixed column, values beside it — wrapped lines stay aligned.
   skillRow: { flexDirection: 'row', marginTop: 2.5 },
-  skillLabel: { width: 135, fontFamily: 'Helvetica-Bold' },
+  skillLabel: { width: 135, fontWeight: 'bold' },
   skillValue: { flex: 1 },
   // The degree under an institution.
-  eduLine: { fontFamily: 'Helvetica-Oblique', marginTop: 1, paddingLeft: 10 },
-  // Regular weight set explicitly: nested in the bold title, it inherited Helvetica-Bold
+  eduLine: { marginTop: 1, paddingLeft: 10 },
+  // Regular weight set explicitly: nested in the bold title, it inherited the bold weight
   // and printed project stacks bold, unlike the DOCX.
-  groupSubtitle: { fontSize: 10, fontFamily: 'Helvetica' },
+  groupSubtitle: { fontSize: 10, fontWeight: 'normal' },
   groupDates: { fontSize: 9.5 },
   bulletRow: { flexDirection: 'row', marginTop: 2.5, paddingRight: 4 },
   bulletMark: { width: 10 },
@@ -338,10 +343,49 @@ function ResumePdf({ doc }: { doc: ResumeDocument }) {
   );
 }
 
+/**
+ * The document with emoji and pictographs removed. No embedded font draws them, and the
+ * alternative is a box in the file; the user is told in the server log, not in the file.
+ */
+export function withoutUnrenderable(doc: ResumeDocument): ResumeDocument {
+  let removed = 0;
+  const clean = (t: string): string => {
+    const r = stripUnrenderable(t);
+    removed += r.removed;
+    return r.text;
+  };
+  const out: ResumeDocument = {
+    ...doc,
+    contact: Object.fromEntries(
+      Object.entries(doc.contact).map(([k, v]) => [k, typeof v === 'string' ? clean(v) : v]),
+    ) as ResumeDocument['contact'],
+    sections: doc.sections.map((s) => ({
+      ...s,
+      heading: clean(s.heading),
+      items: s.items.map((i) => ({ ...i, text: clean(i.text) })),
+      ...(s.groups
+        ? {
+            groups: s.groups.map((g) => ({
+              ...g,
+              title: clean(g.title),
+              ...(g.subtitle ? { subtitle: clean(g.subtitle) } : {}),
+              ...(g.dateRange ? { dateRange: clean(g.dateRange) } : {}),
+              items: g.items.map((i) => ({ ...i, text: clean(i.text) })),
+            })),
+          }
+        : {}),
+    })),
+  };
+  if (removed > 0) {
+    console.warn(`[pdf] removed ${removed} emoji/pictograph character(s) no embedded font can draw`);
+  }
+  return out;
+}
+
 export async function renderResumePdf(doc: ResumeDocument): Promise<Buffer> {
   // Capitalised at render time, so text from the assembler, a revision or the editor is
   // all covered. Scorers compare case-insensitively, so they are unaffected.
-  return renderToBuffer(<ResumePdf doc={tidyResumeText(doc)} />);
+  return renderToBuffer(<ResumePdf doc={withoutUnrenderable(tidyResumeText(doc))} />);
 }
 
 /**

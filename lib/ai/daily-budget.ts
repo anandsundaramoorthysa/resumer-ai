@@ -23,8 +23,17 @@ import { db } from '@/lib/db';
 import { aiUsageDaily, users } from '@/lib/db/schema';
 import { BudgetExceededError, DAILY_BUDGET, type BudgetLimits, type BudgetUsage } from './budget';
 import { callerIp, rateLimit } from '@/lib/auth/rate-limit';
+import { flagOn } from '@/lib/server/flags';
+import { hasCurrentConsent } from '@/lib/legal/consent';
+import { CONSENT_REQUIRED_MESSAGE } from '@/lib/legal/config';
 
-/** UTC, so the window does not move with the user's timezone or the server's. */
+export const AI_PAUSED_MESSAGE = 'AI features are paused for maintenance.';
+
+/**
+ * The AI daily budget runs on the UTC day (it resets at 00:00 UTC, which is 05:30 IST), so
+ * the window does not move with the user's timezone or the server's. The per-IST-day caps
+ * (radar runs, invite auto-approvals) use lib/time/ist.ts instead.
+ */
 export function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -84,7 +93,11 @@ export async function ownerUserIds(): Promise<string[]> {
       const rows = await db
         .select({ id: users.id })
         .from(users)
-        .where(sql`lower(${users.email}) in (${sql.join(emails.map((e) => sql`${e}`), sql`, `)})`);
+        // Verified only, matching isOwnerSession: an unverified password signup with an
+        // owner's address is a claim, not the owner, and must not inherit the exemption.
+        .where(
+          sql`lower(${users.email}) in (${sql.join(emails.map((e) => sql`${e}`), sql`, `)}) and ${users.emailVerified} is not null`,
+        );
       ids = rows.map((r) => r.id);
     } catch (err) {
       // Fails closed toward the shared pool: an owner not recognised is treated like
@@ -161,6 +174,15 @@ export async function assertDailyBudget(
   /** 'sync' for the portfolio sync, which has its own, larger burst bucket. */
   purpose: AiPurpose = 'general',
 ): Promise<void> {
+  // Kill switch `ai_enabled`: the one choke point every AI route passes. Stops everyone,
+  // the owner included. Fails open on a settings-table error (see lib/server/flags.ts).
+  // Thrown as a BudgetExceededError so every route's existing handling shows the sentence.
+  if (!(await flagOn('ai_enabled'))) {
+    const paused = new BudgetExceededError('daily', 'paused');
+    paused.message = AI_PAUSED_MESSAGE;
+    throw paused;
+  }
+
   const owners = await ownerUserIds();
   const isOwner = owners.includes(userId);
 
@@ -168,6 +190,16 @@ export async function assertDailyBudget(
   // stops a bot on a stolen session or a script looping a route. Four buckets — owner or
   // not, sync or everything else — in LIMITS (lib/auth/rate-limit.ts).
   await assertBurst(userId, purpose);
+
+  // No AI without a current consent record, for EVERYONE including the owner (consent is a
+  // legal record, not a quota). One indexed lookup (user_consent_user_version_idx). Thrown
+  // as a BudgetExceededError so every route's existing handling shows the sentence; the
+  // consent page, account deletion and export never pass through here.
+  if (!(await hasCurrentConsent(userId))) {
+    const e = new BudgetExceededError('approval', 'consent');
+    e.message = CONSENT_REQUIRED_MESSAGE;
+    throw e;
+  }
 
   // An account the owner has not approved spends nothing. This is the lock behind every
   // page's redirect to /pending (lib/server/approval.ts), for a request that skips pages.

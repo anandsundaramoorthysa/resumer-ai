@@ -18,8 +18,9 @@ export default async function RadarPage({ searchParams }: { searchParams: Promis
   const publicDemo = canShowPublicDemo(process.env, demo);
 
   let hasProfile = false;
+  let session: Awaited<ReturnType<typeof requireApprovedUser>> | undefined;
   if (!publicDemo) {
-    const session = await requireApprovedUser();
+    session = await requireApprovedUser();
     const [row] = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(profileRecords)
@@ -44,7 +45,7 @@ export default async function RadarPage({ searchParams }: { searchParams: Promis
           </div>
         </header>
       ) : (
-        <AppHeader current="/radar" width="6xl" />
+        <AppHeader current="/radar" width="6xl" session={session} />
       )}
       <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
         <p className="eyebrow">§ Job Radar</p>

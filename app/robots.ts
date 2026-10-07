@@ -8,9 +8,21 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: '*',
-        allow: '/',
+        allow: ['/', '/privacy', '/terms', '/contact', '/accessibility'],
         // Everything behind auth is user data, not content — keep it out of the index.
-        disallow: ['/api/', '/profile', '/applications', '/settings'],
+        disallow: [
+          '/api/',
+          '/radar',
+          '/resume',
+          '/activity',
+          '/import',
+          '/profile',
+          '/applications',
+          '/settings',
+          '/admin',
+          '/consent',
+          '/pending',
+        ],
       },
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,

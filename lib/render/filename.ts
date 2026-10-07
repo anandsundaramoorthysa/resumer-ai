@@ -5,15 +5,25 @@
 
 import type { ResumeDocument } from '../types';
 
+/** Longest name part, in code points — a 5,000-character "name" must not become a path. */
+const MAX_NAME_CHARS = 60;
+
+/**
+ * NFC, not NFKD + strip-marks: NFKD splits and then \p{M} deleted Indic vowel signs and
+ * viramas, so 'आनंद शर्मा' became 'आनद_शरम'. Letters, combining marks (\p{M}) and digits are
+ * all kept; only characters unsafe in a filename (separators, quotes, controls, emoji,
+ * reserved punctuation) are replaced by a word break.
+ */
 function slug(s: string): string {
-  return s
-    .normalize('NFKD')
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+  const words = s
+    .normalize('NFC')
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, (c) => (c === '\u200c' || c === '\u200d' ? c : ''))
+    .replace(/[^\p{L}\p{M}\p{N}\u200c\u200d\s-]/gu, ' ')
     .trim()
     .split(/[\s-]+/)
     .filter(Boolean)
-    .map((w) => w[0].toUpperCase() + w.slice(1))
-    .join('_');
+    .map((w) => (/^\p{Ll}/u.test(w) ? w.charAt(0).toUpperCase() + w.slice(1) : w));
+  return Array.from(words.join('_')).slice(0, MAX_NAME_CHARS).join('').replace(/_+$/, '');
 }
 
 export function resumeFileName(
@@ -47,5 +57,7 @@ export function attachmentHeader(fileName: string): string {
     .replace(/[^A-Za-z0-9_-]/g, '')
     .replace(/_{2,}/g, '_')
     .replace(/^_|_$/g, '');
-  return `attachment; filename="${base || 'Resume'}${ext}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  // RFC 5987 attr-char excludes ' ( ) * which encodeURIComponent leaves alone.
+  const encoded = encodeURIComponent(fileName).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${base || 'Resume'}${ext}"; filename*=UTF-8''${encoded}`;
 }

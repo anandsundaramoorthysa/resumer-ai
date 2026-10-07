@@ -39,15 +39,41 @@ function validSegment(segment: string): boolean {
   return true;
 }
 
+const GITHUB_HOST = /^(www\.)?github\.com$/i;
+
+/**
+ * "owner/repo", "github.com/owner/repo" (no scheme, as people paste it),
+ * "https://github.com/owner/repo.git/", "git@github.com:owner/repo.git" — and nothing
+ * from another host: `https://gitlab.com/o/r` used to parse as owner "gitlab.com", repo
+ * "o", and the sync would go looking for a repository that is not the one named.
+ */
 export function parseRepoRef(input: string): RepoRef | null {
-  const cleaned = input
-    .trim()
-    .replace(/^https?:\/\/github\.com\//i, '')
-    .replace(/\.git$/i, '')
-    .replace(/\/$/, '');
-  const parts = cleaned.split('/');
-  if (parts.length < 2) return null;
-  const [owner, repo] = parts;
+  let s = input.trim();
+  const ssh = /^git@github\.com:(.+)$/i.exec(s);
+  let rest: string[];
+  if (ssh) {
+    rest = ssh[1].split('/');
+  } else {
+    const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(s);
+    if (scheme && !/^https?:\/\//i.test(s)) return null;
+    if (scheme) s = s.slice(scheme[0].length);
+    const parts = s.split('/');
+    if (scheme) {
+      if (!GITHUB_HOST.test(parts[0])) return null;
+      rest = parts.slice(1);
+    } else if (GITHUB_HOST.test(parts[0])) {
+      rest = parts.slice(1);
+    } else if (parts[0].includes('.')) {
+      // A host-looking first segment that is not GitHub. GitHub accounts cannot
+      // contain a dot, so this is never an owner.
+      return null;
+    } else {
+      rest = parts;
+    }
+  }
+  if (rest.length < 2) return null;
+  const owner = rest[0];
+  const repo = rest[1].replace(/\.git$/i, '');
   if (!validSegment(owner) || !validSegment(repo)) return null;
   return { owner, repo };
 }
@@ -58,7 +84,51 @@ export function parseRepoRef(input: string): RepoRef | null {
  * the encoding is the second half of that: validation says what may be sent, encoding
  * says it cannot be read as anything but one segment.
  */
+/**
+ * GitHub said "slow down" — not "no such repository" and not "empty". Kept distinct so no
+ * caller can mistake an exhausted allowance for a repo with nothing in it.
+ */
+export class GithubRateLimitError extends Error {
+  constructor(readonly resetAt: Date) {
+    super(rateLimitMessage(resetAt));
+    this.name = 'GithubRateLimitError';
+  }
+}
+
+export function rateLimitMessage(resetAt: Date): string {
+  const hh = String(resetAt.getUTCHours()).padStart(2, '0');
+  const mm = String(resetAt.getUTCMinutes()).padStart(2, '0');
+  return `GitHub rate limit — try again at ${hh}:${mm} UTC`;
+}
+
+/**
+ * When the allowance is back, from the headers GitHub sends: Retry-After (seconds) wins,
+ * then X-RateLimit-Reset (epoch seconds). With neither, a minute from now.
+ */
+function resetFrom(headers: Headers, nowMs: number): Date {
+  const retry = Number(headers.get('retry-after'));
+  if (headers.get('retry-after') && Number.isFinite(retry) && retry >= 0) {
+    return new Date(nowMs + retry * 1000);
+  }
+  const reset = Number(headers.get('x-ratelimit-reset'));
+  if (Number.isFinite(reset) && reset > 0) return new Date(reset * 1000);
+  return new Date(nowMs + 60_000);
+}
+
+function isRateLimited(res: Response): boolean {
+  if (res.status === 429) return true;
+  if (res.status !== 403) return false;
+  return res.headers.get('x-ratelimit-remaining') === '0' || res.headers.get('retry-after') !== null;
+}
+
 async function gh<T>(path: string, token: string): Promise<T> {
+  return (await ghFull<T>(path, token)).data;
+}
+
+async function ghFull<T>(
+  path: string,
+  token: string,
+): Promise<{ data: T; exhaustedUntil: Date | null }> {
   const res = await fetch(`${GH}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -71,6 +141,7 @@ async function gh<T>(path: string, token: string): Promise<T> {
     signal: AbortSignal.timeout(8_000),
   });
   if (!res.ok) {
+    if (isRateLimited(res)) throw new GithubRateLimitError(resetFrom(res.headers, Date.now()));
     // The body goes to the log, not into the error: this message reaches the user through
     // the sync job and the fit check, and GitHub's JSON is not a sentence.
     console.warn(`[github] ${res.status} on ${path}:`, (await res.text().catch(() => '')).slice(0, 300));
@@ -80,7 +151,11 @@ async function gh<T>(path: string, token: string): Promise<T> {
         : `GitHub answered ${res.status} while reading the repository.`,
     );
   }
-  return res.json() as Promise<T>;
+  // A success that used up the last request of the window: say so, so the caller stops
+  // before the next call is refused rather than after.
+  const exhaustedUntil =
+    res.headers.get('x-ratelimit-remaining') === '0' ? resetFrom(res.headers, Date.now()) : null;
+  return { data: (await res.json()) as T, exhaustedUntil };
 }
 
 /** REQ-2.2 — the cheap gate. */
@@ -140,14 +215,101 @@ const SKIP_PATTERNS = [
 
 const MAX_FILES = 40;
 const MAX_FILE_BYTES = 120_000;
+/** Everything read, together — the corpus is sliced and sent to a model, so it is bounded. */
+const MAX_TOTAL_BYTES = 1_000_000;
 
-export async function fetchPortfolioFiles(
+export interface TreeNode {
+  path: string;
+  type: string;
+  size?: number;
+  sha: string;
+}
+
+export interface Selection {
+  selected: TreeNode[];
+  /** Files that matched but were left out because a count or size budget ran out. */
+  dropped: number;
+  /** Files that matched but are too big to read at all. */
+  oversize: number;
+}
+
+const dirOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '.');
+
+/**
+ * Which files to read, fairly.
+ *
+ * It used to be the first 40 in tree order, which is alphabetical: a repository with 45
+ * files under `components/` read `components/*` and never reached `content/*`, where the
+ * resume data usually lives — and, before the sync learned to tell "unread" from
+ * "removed", flagged all of it. Now the budget is dealt out one file per directory per
+ * round, so every directory with content is represented before any one gets a second
+ * file. The total size is capped as well as the count.
+ */
+export function selectCandidates(nodes: TreeNode[]): Selection {
+  const matching = nodes
+    .filter((n) => n.type === 'blob')
+    .filter((n) => !SKIP_PATTERNS.some((p) => p.test(n.path)))
+    .filter((n) => CONTENT_PATTERNS.some((p) => p.test(n.path)));
+  const readable = matching.filter((n) => (n.size ?? 0) < MAX_FILE_BYTES);
+  const oversize = matching.length - readable.length;
+
+  const byDir = new Map<string, TreeNode[]>();
+  for (const n of [...readable].sort((a, b) => a.path.localeCompare(b.path))) {
+    const d = dirOf(n.path);
+    byDir.set(d, [...(byDir.get(d) ?? []), n]);
+  }
+  const queues = [...byDir.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, q]) => q);
+
+  const selected: TreeNode[] = [];
+  let bytes = 0;
+  let progressed = true;
+  while (selected.length < MAX_FILES && progressed) {
+    progressed = false;
+    for (const q of queues) {
+      if (selected.length >= MAX_FILES) break;
+      const n = q.shift();
+      if (!n) continue;
+      progressed = true;
+      const size = n.size ?? 0;
+      if (bytes + size > MAX_TOTAL_BYTES) continue;
+      bytes += size;
+      selected.push(n);
+    }
+  }
+  return {
+    selected,
+    dropped: readable.length - selected.length,
+    oversize,
+  };
+}
+
+export interface Corpus {
+  files: RepoFile[];
+  /**
+   * Reasons the corpus is a PARTIAL read of the repository (a blob that would not load, a
+   * truncated tree, a rate limit). While this is non-empty "not found" proves nothing.
+   */
+  incomplete: string[];
+  /** Files deliberately not read (budgets, size). Nothing may be flagged missing either. */
+  unread: string[];
+}
+
+/**
+ * Reads the portfolio's content files, and says how much of it it could not read.
+ *
+ * A rate limit stops the fetch gracefully with a partial result and a message naming the
+ * time; it is never reported as an empty repository. When nothing at all could be read
+ * because of it, the limit is thrown instead (`GithubRateLimitError`) so the caller fails
+ * with that sentence rather than with "no content files found".
+ */
+export async function fetchPortfolioCorpus(
   ref: RepoRef,
   token: string,
   sha: string,
-): Promise<RepoFile[]> {
-  const tree = await gh<{
-    tree: Array<{ path: string; type: string; size?: number; sha: string }>;
+): Promise<Corpus> {
+  const { data: tree, exhaustedUntil: treeExhausted } = await ghFull<{
+    tree: TreeNode[];
+    truncated?: boolean;
   }>(
     `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(
       ref.repo,
@@ -155,25 +317,37 @@ export async function fetchPortfolioFiles(
     token,
   );
 
-  const candidates = tree.tree
-    .filter((n) => n.type === 'blob')
-    .filter((n) => !SKIP_PATTERNS.some((p) => p.test(n.path)))
-    .filter((n) => (n.size ?? 0) < MAX_FILE_BYTES)
-    .filter((n) => CONTENT_PATTERNS.some((p) => p.test(n.path)))
-    .slice(0, MAX_FILES);
+  const incomplete: string[] = [];
+  const unread: string[] = [];
+
+  if (tree.truncated) {
+    // GitHub cuts a recursive listing at ~100k entries. Files past the cut are invisible,
+    // so a record living in one looks exactly like a record that was deleted.
+    console.warn(`[github] tree for ${ref.owner}/${ref.repo} was truncated — sync is partial`);
+    incomplete.push('GitHub returned only part of this repository’s file list');
+  }
+
+  const { selected, dropped, oversize } = selectCandidates(tree.tree ?? []);
+  const unreadCount = dropped + oversize;
+  if (unreadCount > 0) {
+    unread.push(
+      `${unreadCount} content file${unreadCount === 1 ? ' was' : 's were'} over the size or count limit and not read.`,
+    );
+  }
 
   // Fetched with bounded concurrency rather than one at a time: sequential blob
   // fetches measured ~5s for a dozen files, almost all of it waiting on the network.
   // The cap keeps us well inside GitHub's rate limits.
   const CONCURRENCY = 6;
   const files: RepoFile[] = [];
-  let cursor = 0;
+  let cursor = treeExhausted ? selected.length : 0;
+  let limitedUntil: Date | null = treeExhausted;
 
   async function worker() {
-    while (cursor < candidates.length) {
-      const node = candidates[cursor++];
+    while (cursor < selected.length) {
+      const node = selected[cursor++];
       try {
-        const blob = await gh<{ content: string; encoding: string }>(
+        const { data: blob, exhaustedUntil } = await ghFull<{ content: string; encoding: string }>(
           `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(
             ref.repo,
           )}/git/blobs/${encodeURIComponent(node.sha)}`,
@@ -184,20 +358,48 @@ export async function fetchPortfolioFiles(
             ? Buffer.from(blob.content, 'base64').toString('utf8')
             : blob.content;
         files.push({ path: node.path, content });
-      } catch {
-        // One unreadable file must not fail the whole sync.
+        if (exhaustedUntil) {
+          limitedUntil = exhaustedUntil;
+          cursor = selected.length;
+        }
+      } catch (err) {
+        // One unreadable file does not fail the sync, but it is counted: the corpus is
+        // partial and nothing may be flagged missing on the strength of it.
+        if (err instanceof GithubRateLimitError) {
+          limitedUntil = err.resetAt;
+          cursor = selected.length; // stop every worker: the next call would be refused too
+        }
       }
     }
   }
 
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, candidates.length) }, worker),
+    Array.from({ length: Math.min(CONCURRENCY, selected.length) }, worker),
   );
+
+  const unreadBlobs = selected.length - files.length;
+  if (limitedUntil && unreadBlobs > 0) {
+    if (files.length === 0) throw new GithubRateLimitError(limitedUntil);
+    incomplete.push(rateLimitMessage(limitedUntil));
+  } else if (unreadBlobs > 0) {
+    incomplete.push(
+      `${unreadBlobs} file${unreadBlobs === 1 ? '' : 's'} could not be read from GitHub`,
+    );
+  }
 
   // Stable order regardless of which worker finished first, so the corpus (and the
   // content hashes derived from it) don't churn between syncs.
   files.sort((a, b) => a.path.localeCompare(b.path));
-  return files;
+  return { files, incomplete, unread };
+}
+
+/** The files alone — for callers that do not care how complete the read was. */
+export async function fetchPortfolioFiles(
+  ref: RepoRef,
+  token: string,
+  sha: string,
+): Promise<RepoFile[]> {
+  return (await fetchPortfolioCorpus(ref, token, sha)).files;
 }
 
 /**

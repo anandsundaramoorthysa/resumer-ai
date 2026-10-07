@@ -10,7 +10,7 @@
  * table there has the measurements and the reasoning.
  */
 
-import { generateObject, generateText, type LanguageModel } from 'ai';
+import { generateObject, generateText, NoObjectGeneratedError, type LanguageModel } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { createDeepInfra } from '@ai-sdk/deepinfra';
@@ -18,14 +18,45 @@ import { createTogetherAI } from '@ai-sdk/togetherai';
 import { createFireworks } from '@ai-sdk/fireworks';
 import { z } from 'zod';
 
-import { availableProviders, type ProviderConfig, type ProviderId } from './models';
-import { BudgetExceededError, DraftBudget } from './budget';
+import { availableProviders, modelEnvName, type ProviderConfig, type ProviderId } from './models';
+import { BudgetExceededError, DraftBudget, estimateTokens, tokensFor } from './budget';
 import {
   isCoolingDown,
   loadCooldowns,
+  modelGoneProviders,
   noteBench,
   type BenchReason,
 } from './cooldowns';
+import { breakerAllows, breakerFailure, breakerSuccess } from './breaker';
+import { recordAiCall } from './telemetry';
+
+export { modelGoneProviders };
+// Test seams, re-exported so a suite reaches the SAME module instances the chain uses (under
+// tsx a .mts suite and the .ts chain can otherwise load separate copies of each module).
+export { setTelemetrySink } from './telemetry';
+export { setBreakerClock, resetBreakers, breakerAllows, breakerFailure, breakerSuccess } from './breaker';
+export { setCooldownBackend, resetCooldownCache } from './cooldowns';
+
+/** Test seam: the SDK entry points, so the chain can be exercised without a provider. */
+// On globalThis so a suite and the modules under test share one set even if the loader
+// gives them separate copies of this file.
+const deps = ((globalThis as Record<symbol, unknown>)[Symbol.for('resumer.chainDeps')] ??= {
+  generateObject,
+  generateText,
+  resolveModel: (c: ProviderConfig, t: 'standard' | 'fast') => resolveModel(c, t),
+}) as { generateObject: typeof generateObject; generateText: typeof generateText; resolveModel: (c: ProviderConfig, t: 'standard' | 'fast') => LanguageModel };
+export function setChainDeps(d: Partial<typeof deps> | null): void {
+  deps.generateObject = d?.generateObject ?? generateObject;
+  deps.generateText = d?.generateText ?? generateText;
+  deps.resolveModel = d?.resolveModel ?? ((c, t) => resolveModel(c, t));
+}
+
+/**
+ * Output caps used when a call site states none, so no call is ever unbounded. Call sites
+ * should pass their own, sized to what they ask for (judge ~800, rewrite ~1500, extraction
+ * ~3000, import chunk ~4000, planner ~600).
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = Number(process.env.AI_DEFAULT_MAX_OUTPUT_TOKENS ?? 4_000);
 
 export class AllProvidersFailedError extends Error {
   constructor(public readonly attempts: Array<{ provider: string; error: string }>) {
@@ -40,7 +71,7 @@ export class AllProvidersFailedError extends Error {
   }
 }
 
-function resolveModel(cfg: ProviderConfig, tier: 'standard' | 'fast'): LanguageModel {
+export function resolveModel(cfg: ProviderConfig, tier: 'standard' | 'fast'): LanguageModel {
   const apiKey = process.env[cfg.envKey] as string;
   const modelId = tier === 'fast' ? cfg.fastModel : cfg.model;
 
@@ -81,6 +112,20 @@ export interface CallOptions {
    * state it here and the chain stops trying rather than overrunning it.
    */
   deadlineMs?: number;
+  /** Cap on generated tokens, for both provider paths. Defaults to DEFAULT_MAX_OUTPUT_TOKENS. */
+  maxOutputTokens?: number;
+  /**
+   * Called at most once per provider path when a response is cut off by the output cap.
+   * Return a smaller prompt and/or limit to retry once on the SAME provider, or null to
+   * give up on it. Without a hook a truncated answer falls through to the next provider.
+   */
+  shrink?: () => { prompt?: string; maxOutputTokens?: number } | null;
+  /** The prompt carries personal data: only AI_PII_PROVIDERS (if set) may receive it. */
+  containsPii?: boolean;
+  /** Sampling seed, where the provider supports one. */
+  seed?: number;
+  /** Labels for the per-attempt telemetry row. Never includes prompt text. */
+  telemetry?: { stage: string; promptVersion?: string; draftRunId?: string; userId?: string };
 }
 
 // 10s, what production runs with. 25s — most of a 30s function on one provider — was the
@@ -208,15 +253,75 @@ export type { BenchReason };
  */
 export function benchReason(message: string, cutShort = false): BenchReason | null {
   if (LOCAL_FAULT.test(message)) return null;
+  if (isModelGone(message)) return 'model-gone';
   if (isQuotaError(message)) return 'quota';
   if (isOverloadError(message)) return 'overload';
   if (!cutShort && isTimeoutError(message)) return 'slow';
   return null;
 }
 
-function noteFailure(id: ProviderId, message: string, cutShort = false): boolean {
+/**
+ * A retired or unknown model id. Providers retire ids on a schedule; before this, a 404
+ * was "says nothing about the provider", so a retired model failed quietly on every call
+ * and the chain silently ran one provider short, forever.
+ */
+const MODEL_GONE_SIGNATURES = [
+  'model_not_found',
+  'does not exist',
+  'decommissioned',
+  'deprecated',
+  'has been retired',
+  'not found for api version',
+  'model not found',
+  'unknown model',
+];
+const STATUS_404 = /(?<!\d)404(?!\d)/;
+
+function isModelGone(message: string): boolean {
+  const m = message.toLowerCase();
+  // Loose wording only counts when it is about a model: a schema complaint that says
+  // "deprecated" must not bench a healthy provider for six hours.
+  if (m.includes('model_not_found') || m.includes('not found for api version')) return true;
+  if (STATUS_404.test(m)) return true;
+  if (!m.includes('model')) return false;
+  return MODEL_GONE_SIGNATURES.some((s) => m.includes(s));
+}
+
+const goneReportedAt = new Map<string, number>();
+let goneReporter: (message: string) => void = (message) => {
+  console.error(`[ai] ${message}`);
+  import('@sentry/nextjs')
+    .then((S) => S.captureMessage(message, 'error'))
+    .catch(() => {});
+};
+
+/** Test seam. `undefined` restores the console + Sentry reporter. */
+export function setModelGoneReporter(fn: ((message: string) => void) | undefined): void {
+  goneReporter = fn ?? goneReporter;
+  goneReportedAt.clear();
+}
+
+/** Once per process-hour per provider: loud, but not a page per failed call. */
+function reportModelGone(id: ProviderId, tier: 'standard' | 'fast', detail: string): void {
+  const now = Date.now();
+  const last = goneReportedAt.get(id);
+  if (last !== undefined && now - last < 3_600_000) return;
+  goneReportedAt.set(id, now);
+  const env = modelEnvName(id, tier);
+  goneReporter(
+    `AI model for ${id} appears retired: set ${env} (provider said: ${detail.slice(0, 100)})`,
+  );
+}
+
+function noteFailure(
+  id: ProviderId,
+  message: string,
+  cutShort = false,
+  tier: 'standard' | 'fast' = 'standard',
+): boolean {
   const reason = benchReason(message, cutShort);
   if (!reason) return false;
+  if (reason === 'model-gone') reportModelGone(id, tier, message);
   // Quota gets the longer cooldown; overload — "usually temporary" in the provider's own
   // words — and slow get the shorter one. noteBench applies that and, unlike the Map this
   // replaced, tells the other instances.
@@ -249,13 +354,132 @@ export function attemptWindow(
  * see the note where it is called. Exported so a verification script can show the chain
  * skipping a provider benched by a different process.
  */
-export function usableProviders(): ProviderConfig[] {
+export function usableProviders(opts: { containsPii?: boolean } = {}): ProviderConfig[] {
   const now = Date.now();
-  const all = availableProviders();
+  const all = availableProviders(opts);
   const ready = all.filter((p) => !isCoolingDown(p.id, now));
   // If everything is cooling down, try anyway rather than failing outright — a stale
   // cooldown must never be the reason a request gets no answer at all.
   return ready.length > 0 ? ready : all;
+}
+
+/** What the attempt helpers share for one call. */
+interface Ctx {
+  budget?: DraftBudget;
+  tier: 'standard' | 'fast';
+  options: CallOptions;
+  attempts: Attempt[];
+}
+
+type Fail = { ok: false; truncated: boolean; benched: boolean; countable: boolean };
+type Done<T> = { ok: true; data: T };
+type Window = ReturnType<typeof attemptWindow>;
+type Emit = (inTokens: number, outTokens: number, errorClass: string | null, finish: string | null) => void;
+
+function tracker(ctx: Ctx, cfg: ProviderConfig, path: 'structured' | 'json' | 'text'): Emit {
+  const started = Date.now();
+  const model = ctx.tier === 'fast' ? cfg.fastModel : cfg.model;
+  return (inTokens, outTokens, errorClass, finishReason) =>
+    recordAiCall({
+      ...(ctx.options.telemetry ?? { stage: 'unknown' }),
+      provider: cfg.id,
+      model,
+      path,
+      inTokens,
+      outTokens,
+      latencyMs: Date.now() - started,
+      errorClass,
+      finishReason,
+    });
+}
+
+function errorClassOf(msg: string, cutShort: boolean, schemaFault: boolean): string {
+  const r = benchReason(msg, cutShort);
+  if (r === 'model-gone' || r === 'quota' || r === 'overload') return r;
+  if (isTimeoutError(msg)) return 'timeout';
+  return schemaFault ? 'schema' : 'error';
+}
+
+/** A call that threw. The prompt was sent and may have been billed, so it is counted. */
+function failed(
+  ctx: Ctx,
+  cfg: ProviderConfig,
+  label: string,
+  err: unknown,
+  w: Window,
+  promptChars: number,
+  emit: Emit,
+): Fail {
+  ctx.budget?.recordFailedAttempt(estimateTokens(promptChars));
+  const msg = errText(err);
+  const benched = noteFailure(cfg.id, msg, w.cutShort, ctx.tier);
+  emit(estimateTokens(promptChars), 0, errorClassOf(msg, w.cutShort, NoObjectGeneratedError.isInstance(err)), null);
+  ctx.attempts.push({ provider: label, error: msg });
+  // Our own deadline ending the attempt says nothing about the provider.
+  return { ok: false, truncated: false, benched, countable: !(w.cutShort && isTimeoutError(msg)) };
+}
+
+/** A response cut off by the output cap: the caller's sizing, not the provider's health. */
+function truncatedAttempt(
+  ctx: Ctx,
+  label: string,
+  usage: Parameters<typeof tokensFor>[0],
+  promptChars: number,
+  outChars: number,
+  emit: Emit,
+): Fail {
+  const t = tokensFor(usage, promptChars, outChars);
+  ctx.budget?.record(t.total);
+  emit(t.input, t.output, 'truncated', 'length');
+  ctx.attempts.push({ provider: label, error: 'truncated' });
+  return { ok: false, truncated: true, benched: false, countable: false };
+}
+
+/** Provider bookkeeping once a provider has been given every path it gets. */
+function settle(cfg: ProviderConfig, ok: boolean, countable: boolean): void {
+  if (ok) breakerSuccess(cfg.id);
+  else if (countable && breakerFailure(cfg.id)) noteBench(cfg.id, 'breaker');
+}
+
+/**
+ * The providers to try, with the breaker applied. When every one is open the call fails
+ * here, at once, rather than spending the deadline on providers that just failed 3 times.
+ */
+function liveProviders(opts: CallOptions): ProviderConfig[] {
+  const providers = usableProviders({ containsPii: opts.containsPii });
+  const live = providers.filter((p) => breakerAllows(p.id));
+  if (providers.length > 0 && live.length === 0) {
+    throw new AllProvidersFailedError(
+      providers.map((p) => ({ provider: p.label, error: 'circuit open after repeated failures' })),
+    );
+  }
+  return live;
+}
+
+/**
+ * Runs one path, and — only when a `shrink` hook exists and the answer was cut off by the
+ * output cap — once more on the same provider with what the hook returns.
+ */
+async function drive<R extends { ok: boolean; truncated?: boolean }>(
+  deadlineAt: number,
+  timeoutMs: number,
+  options: CallOptions,
+  prompt: string,
+  attempt: (prompt: string, maxTokens: number, w: Window) => Promise<R>,
+): Promise<R | 'no-time'> {
+  let p = prompt;
+  let max = options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  for (let i = 0; i < 2; i++) {
+    const w = attemptWindow(deadlineAt, timeoutMs);
+    if (!w.viable) return 'no-time';
+    const r = await attempt(p, max, w);
+    if (r.ok || !r.truncated || i === 1) return r;
+    const s = options.shrink?.();
+    if (!s) return r;
+    p = s.prompt ?? p;
+    max = s.maxOutputTokens ?? max;
+  }
+  return 'no-time';
 }
 
 /**
@@ -277,6 +501,7 @@ export async function generateStructured<T>(args: {
     deadlineMs,
   } = options;
   const deadlineAt = deadlineFrom(deadlineMs);
+  const maxRetries = options.maxRetriesPerProvider ?? 1;
 
   // Once per call, before the order is chosen — never once per attempt. A round trip in
   // front of each of five providers would cost more than the benching saves, and this one
@@ -284,107 +509,123 @@ export async function generateStructured<T>(args: {
   // database, or a failing one, it resolves having changed nothing.
   await loadCooldowns();
 
-  const providers = usableProviders();
+  const providers = liveProviders(options);
   const attempts: Attempt[] = [];
+  const ctx: Ctx = { budget, tier, options, attempts };
 
-  // Asked once, for the whole call, rather than before every provider attempt.
-  //
-  // The counter now moves on failures too (see `recordFailedAttempt`), and asking again
-  // mid-chain would read that as "the budget is spent" and abandon the remaining
-  // providers — turning one slow provider into a failed call, which is precisely what the
-  // fallback chain exists to prevent. Callers with a one-call budget (the importer, and
-  // now the sync) would have lost their fallback entirely. So the budget answers "may
-  // this call start", and what bounds the inside of a call is the deadline above.
+  // Asked once, for the whole call, rather than before every provider attempt: the counter
+  // moves on failures too, and asking mid-chain would turn one slow provider into a failed
+  // call. The budget answers "may this call start"; the deadline bounds the inside.
   budget?.assertCanSpend();
 
-  // Providers benched by a failure inside THIS call. Kept separate from the global
-  // cooldown map on purpose: usableProviders() deliberately hands back everything when
-  // every provider is cooling down, and that safety valve must not be re-closed here.
-  const benched = new Set<ProviderId>();
-
   for (const cfg of providers) {
+    let countable = false;
+
     // Path A — native structured output, but only where it can actually work.
     //
     // `structuredOutput: false` is a measured property of the provider, not a guess (the
-    // table in ./models.ts has the numbers). Asking anyway is not a harmless retry: it
-    // spends an attempt of the budget, and on Together it spent 5.1 seconds before the
-    // SDK reported that the feature is unsupported. Two of the five providers here can
-    // never answer this call, and both answer the text path below — so the request that
-    // cannot succeed is simply not made.
+    // table in ./models.ts has the numbers). Asking anyway spends an attempt of the budget:
+    // on Together it spent 5.1 seconds before the SDK reported the feature unsupported.
     if (cfg.structuredOutput) {
-      const a = attemptWindow(deadlineAt, timeoutMs);
-      if (!a.viable) break;
-
-      try {
-        const result = await generateObject({
-          model: resolveModel(cfg, tier),
-          schema,
-          system,
-          prompt,
-          temperature,
-          maxRetries: options.maxRetriesPerProvider ?? 1,
-          abortSignal: AbortSignal.timeout(a.ms),
-        });
-        budget?.record(result.usage?.totalTokens ?? 0);
-        return { data: result.object as T, provider: cfg.label };
-      } catch (err) {
-        if (err instanceof BudgetExceededError) throw err;
-        // The prompt went out and was billed before this failed, so it counts.
-        budget?.recordFailedAttempt();
-        const msg = errText(err);
-        if (noteFailure(cfg.id, msg, a.cutShort)) benched.add(cfg.id);
-        attempts.push({ provider: cfg.label, error: msg });
+      const r = await drive<Done<T> | Fail>(deadlineAt, timeoutMs, options, prompt, async (p, max, w) => {
+        const promptChars = system.length + p.length;
+        const emit = tracker(ctx, cfg, 'structured');
+        try {
+          const result = await deps.generateObject({
+            model: deps.resolveModel(cfg, tier),
+            schema,
+            system,
+            prompt: p,
+            temperature,
+            seed: options.seed,
+            maxOutputTokens: max,
+            maxRetries,
+            abortSignal: AbortSignal.timeout(w.ms),
+          });
+          const t = tokensFor(result.usage, promptChars, JSON.stringify(result.object ?? '').length);
+          budget?.record(t.total);
+          emit(t.input, t.output, null, result.finishReason ?? null);
+          return { ok: true, data: result.object as T };
+        } catch (err) {
+          if (err instanceof BudgetExceededError) throw err;
+          if (NoObjectGeneratedError.isInstance(err) && err.finishReason === 'length') {
+            return truncatedAttempt(ctx, cfg.label, err.usage, promptChars, err.text?.length ?? 0, emit);
+          }
+          return failed(ctx, cfg, cfg.label, err, w, promptChars, emit);
+        }
+      });
+      if (r === 'no-time') break;
+      if (r.ok) {
+        settle(cfg, true, false);
+        return { data: r.data, provider: cfg.label };
       }
-
-      // Path A just benched this provider — it is out of quota, or too slow to be worth
-      // the wait. Asking the very same provider again, immediately, cannot succeed, and
-      // that doubled cost was a measured part of why extraction overran its budget.
-      if (benched.has(cfg.id)) continue;
+      countable ||= r.countable;
+      // Path A just benched this provider — it is out of quota, retired or too slow to be
+      // worth the wait. Asking the same provider again immediately cannot succeed.
+      if (r.benched) {
+        settle(cfg, false, countable);
+        continue;
+      }
     }
-
-    const b = attemptWindow(deadlineAt, timeoutMs);
-    if (!b.viable) break;
 
     // Path B — ask for JSON as text, then parse and validate ourselves.
     //
     // Open-weight models behind DeepInfra/Together/Fireworks frequently don't support
-    // JSON-schema response formats, or emit JSON wrapped in prose or a code fence.
-    // Rather than treat that as "this provider is broken", we take the text and do the
-    // structuring on our side. Zod still validates, so nothing malformed gets through —
-    // this widens which models work, it does not weaken the contract.
-    try {
-      const result = await generateText({
-        model: resolveModel(cfg, tier),
-        system: `${system}\n\nRespond with a single JSON object and nothing else. No prose, no markdown code fence.`,
-        prompt: `${prompt}\n\nReturn JSON matching this shape:\n${describeSchema(schema)}`,
-        temperature,
-        maxRetries: options.maxRetriesPerProvider ?? 1,
-        abortSignal: AbortSignal.timeout(b.ms),
-      });
-      budget?.record(result.usage?.totalTokens ?? 0);
-
-      const parsed = schema.safeParse(extractJson(result.text));
-      if (parsed.success) {
-        return { data: parsed.data, provider: `${cfg.label} (json)` };
+    // JSON-schema response formats, or emit JSON wrapped in prose or a code fence. Zod
+    // still validates, so nothing malformed gets through.
+    const label = `${cfg.label} (json)`;
+    const r = await drive<Done<T> | Fail>(deadlineAt, timeoutMs, options, prompt, async (p, max, w) => {
+      const sys = `${system}\n\nRespond with a single JSON object and nothing else. No prose, no markdown code fence.`;
+      const prm = `${p}\n\nReturn JSON matching this shape:\n${describeSchema(schema)}`;
+      const promptChars = sys.length + prm.length;
+      const emit = tracker(ctx, cfg, 'json');
+      try {
+        const result = await deps.generateText({
+          model: deps.resolveModel(cfg, tier),
+          system: sys,
+          prompt: prm,
+          temperature,
+          seed: options.seed,
+          maxOutputTokens: max,
+          maxRetries,
+          abortSignal: AbortSignal.timeout(w.ms),
+        });
+        const t = tokensFor(result.usage, promptChars, result.text.length);
+        const parsed = schema.safeParse(extractJson(result.text));
+        if (parsed.success) {
+          budget?.record(t.total);
+          emit(t.input, t.output, null, result.finishReason ?? null);
+          return { ok: true, data: parsed.data };
+        }
+        if (result.finishReason === 'length') {
+          return truncatedAttempt(ctx, label, result.usage, promptChars, result.text.length, emit);
+        }
+        budget?.record(t.total);
+        emit(t.input, t.output, 'schema', result.finishReason ?? null);
+        attempts.push({
+          provider: label,
+          error: parsed.error.issues
+            .slice(0, 3)
+            .map((i) => `${i.path.join('.')}: ${i.message}`)
+            .join(', '),
+        });
+        return { ok: false, truncated: false, benched: false, countable: true };
+      } catch (err) {
+        if (err instanceof BudgetExceededError) throw err;
+        return failed(ctx, cfg, label, err, w, promptChars, emit);
       }
-      attempts.push({
-        provider: `${cfg.label} (json)`,
-        error: parsed.error.issues
-          .slice(0, 3)
-          .map((i) => `${i.path.join('.')}: ${i.message}`)
-          .join(', '),
-      });
-    } catch (err) {
-      if (err instanceof BudgetExceededError) throw err;
-      budget?.recordFailedAttempt();
-      const msg = errText(err);
-      if (noteFailure(cfg.id, msg, b.cutShort)) benched.add(cfg.id);
-      attempts.push({ provider: `${cfg.label} (json)`, error: msg });
+    });
+    if (r === 'no-time') break;
+    if (r.ok) {
+      settle(cfg, true, false);
+      return { data: r.data, provider: label };
     }
+    settle(cfg, false, countable || r.countable);
   }
 
   throw new AllProvidersFailedError(attempts);
 }
+
 
 /**
  * A caller's overall deadline as an absolute instant.
@@ -468,33 +709,45 @@ export async function generatePlainText(args: {
   // Once for the call, not once per provider — same reasoning as generateStructured.
   await loadCooldowns();
 
-  const providers = usableProviders();
+  const providers = liveProviders(options);
   const attempts: Attempt[] = [];
+  const ctx: Ctx = { budget, tier, options, attempts };
 
   budget?.assertCanSpend();
 
   for (const cfg of providers) {
-    const a = attemptWindow(deadlineAt, timeoutMs);
-    if (!a.viable) break;
-
-    try {
-      const result = await generateText({
-        model: resolveModel(cfg, tier),
-        system,
-        prompt,
-        temperature,
-        maxRetries: options.maxRetriesPerProvider ?? 1,
-        abortSignal: AbortSignal.timeout(a.ms),
-      });
-      budget?.record(result.usage?.totalTokens ?? 0);
-      return { text: result.text, provider: cfg.label };
-    } catch (err) {
-      if (err instanceof BudgetExceededError) throw err;
-      budget?.recordFailedAttempt();
-      const msg = errText(err);
-      noteFailure(cfg.id, msg, a.cutShort);
-      attempts.push({ provider: cfg.label, error: msg });
+    const r = await drive<Done<string> | Fail>(deadlineAt, timeoutMs, options, prompt, async (p, max, w) => {
+      const promptChars = system.length + p.length;
+      const emit = tracker(ctx, cfg, 'text');
+      try {
+        const result = await deps.generateText({
+          model: deps.resolveModel(cfg, tier),
+          system,
+          prompt: p,
+          temperature,
+          seed: options.seed,
+          maxOutputTokens: max,
+          maxRetries: options.maxRetriesPerProvider ?? 1,
+          abortSignal: AbortSignal.timeout(w.ms),
+        });
+        if (result.finishReason === 'length') {
+          return truncatedAttempt(ctx, cfg.label, result.usage, promptChars, result.text.length, emit);
+        }
+        const t = tokensFor(result.usage, promptChars, result.text.length);
+        budget?.record(t.total);
+        emit(t.input, t.output, null, result.finishReason ?? null);
+        return { ok: true, data: result.text };
+      } catch (err) {
+        if (err instanceof BudgetExceededError) throw err;
+        return failed(ctx, cfg, cfg.label, err, w, promptChars, emit);
+      }
+    });
+    if (r === 'no-time') break;
+    if (r.ok) {
+      settle(cfg, true, false);
+      return { text: r.data, provider: cfg.label };
     }
+    settle(cfg, false, r.countable);
   }
 
   throw new AllProvidersFailedError(attempts);

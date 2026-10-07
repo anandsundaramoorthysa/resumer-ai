@@ -37,7 +37,7 @@ import type { ProviderId } from './models';
  * @see chain.ts `benchReason` — quota gets the longer cooldown, overload and slow the
  * shorter one, and a failure that says nothing about the provider gets none at all.
  */
-export type BenchReason = 'quota' | 'overload' | 'slow';
+export type BenchReason = 'quota' | 'overload' | 'slow' | 'model-gone' | 'breaker';
 
 /**
  * A provider that just told us it is out of quota will still be out of quota a second
@@ -61,7 +61,12 @@ export const SLOW_COOLDOWN_MS = Number(process.env.AI_SLOW_COOLDOWN_MS ?? 60_000
  */
 export const READ_CACHE_MS = Number(process.env.AI_COOLDOWN_CACHE_MS ?? 5_000);
 
+/** A retired model id stays retired until someone sets AI_MODEL_*; do not ask again for hours. */
+export const MODEL_GONE_COOLDOWN_MS = Number(process.env.AI_MODEL_GONE_COOLDOWN_MS ?? 6 * 3_600_000);
+
 export function cooldownMsFor(reason: BenchReason): number {
+  if (reason === 'model-gone') return MODEL_GONE_COOLDOWN_MS;
+  if (reason === 'breaker') return Number(process.env.AI_BREAKER_OPEN_MS ?? 30_000);
   return reason === 'quota' ? QUOTA_COOLDOWN_MS : SLOW_COOLDOWN_MS;
 }
 
@@ -280,6 +285,10 @@ function installMerged(entries: readonly CooldownEntry[], now: number): void {
  */
 export function noteBench(providerId: ProviderId, reason: BenchReason, now = Date.now()): number {
   const until = now + cooldownMsFor(reason);
+  // A shorter bench must never replace a longer one in force: a breaker opening on top of
+  // a 6h model-gone would otherwise un-bench it.
+  const held = cooldowns.get(providerId);
+  if (held && held.until > until) return held.until;
   cooldowns.set(providerId, { until, reason });
 
   const write = resolveBackend()
@@ -311,6 +320,11 @@ export async function flushCooldownWrites(): Promise<void> {
 /** True when this provider is currently benched. Synchronous — reads only memory. */
 export function isCoolingDown(providerId: ProviderId, now = Date.now()): boolean {
   return (cooldowns.get(providerId)?.until ?? 0) > now;
+}
+
+/** Providers whose model id has been reported retired — for /api/health. */
+export function modelGoneProviders(now = Date.now()): ProviderId[] {
+  return cooldownSnapshot(now).filter((c) => c.reason === 'model-gone').map((c) => c.providerId);
 }
 
 /** What this process currently believes, for scripts and diagnostics. */

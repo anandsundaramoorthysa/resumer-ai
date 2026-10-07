@@ -75,7 +75,7 @@ export function RunView({
       )}
 
       <div role="status" aria-live="polite" className="sr-only">
-        {run ? `Step ${run.step} of ${run.totalSteps}: ${run.message}` : ''}
+        {run ? `Step ${Math.min(run.step, run.totalSteps)} of ${run.totalSteps}: ${run.message}` : ''}
       </div>
       {r.notice && (
         <p role="status" className="mb-4 border border-warning bg-warning-tint p-3 text-sm">
@@ -132,7 +132,7 @@ export function RunView({
                     void r.cancel();
                   }}
                 >
-                  Stop
+                  {run.status === 'awaiting' ? 'Cancel run' : 'Stop'}
                 </button>
               )}
               {(failed || run.status === 'done') && (

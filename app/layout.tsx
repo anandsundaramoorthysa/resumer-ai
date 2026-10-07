@@ -2,13 +2,17 @@ import type { Metadata, Viewport } from 'next';
 import { Fraunces, Instrument_Sans, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
 import { getSiteUrl } from '@/lib/site-url';
+import { MaintenanceBanner } from '@/components/maintenance-banner';
 
 const SITE_URL = getSiteUrl();
 
+// Slimmed: no italic file (nothing sets italic on a font-display element) and no SOFT axis
+// (never referenced). opsz stays: browsers apply it automatically (font-optical-sizing: auto),
+// and it is what keeps large headings crisp.
 const fraunces = Fraunces({
   subsets: ['latin'],
-  axes: ['opsz', 'SOFT'],
-  style: ['normal', 'italic'],
+  axes: ['opsz'],
+  style: ['normal'],
   display: 'swap',
   variable: '--font-fraunces',
 });
@@ -138,6 +142,7 @@ export default function RootLayout({
         <a href="#main" className="skip-link">
           Skip to main content
         </a>
+        <MaintenanceBanner />
         {children}
       </body>
     </html>

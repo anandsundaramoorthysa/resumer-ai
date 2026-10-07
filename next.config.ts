@@ -89,6 +89,12 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
           { key: 'Content-Security-Policy', value: csp },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()',
+          },
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+          { key: 'Cross-Origin-Resource-Policy', value: 'same-site' },
         ],
       },
       {
@@ -114,5 +120,12 @@ export default withSentryConfig(nextConfig, {
   sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
   widenClientFileUpload: true,
   telemetry: false,
+  // Replay and tracing helpers are never used (errors only), so keep them out of the bundle.
+  bundleSizeOptimizations: {
+    excludeReplayIframe: true,
+    excludeReplayShadowDom: true,
+    excludeReplayWorker: true,
+    excludeDebugStatements: true,
+  },
   silent: !process.env.SENTRY_AUTH_TOKEN,
 });

@@ -8,6 +8,7 @@ import { authoredMessage } from '@/lib/server/user-message';
 
 export const MAX_EVENTS = 60;
 export const MAX_POSTINGS = 30;
+/** Superseded by byte caps in boundPostings; kept for importers. */
 export const MAX_DESCRIPTION_CHARS = 4_000;
 
 export interface RadarEvent {
@@ -38,6 +39,21 @@ export interface RunState {
   selectedKey: string;
   /** Consecutive transient failures of the current step; 0 after any success. */
   retries: number;
+  /** Progress of each approved query through the async search (authoritative for the poll step). */
+  searches: SearchTrack[];
+}
+
+/** One approved query: submitted -> pending (polling) -> done | failed. */
+export interface SearchTrack {
+  /** Index into `queries`. */
+  i: number;
+  q: string;
+  searchId: string;
+  /** ms epoch of the (first) submit, from which the poll cap runs. */
+  submittedAt: number;
+  status: 'pending' | 'done' | 'failed';
+  /** Credits this run reserved for it (0 when it shares another caller's search or hit the cache). */
+  credits: number;
 }
 
 export const emptyState = (intelOn: boolean): RunState => ({
@@ -53,6 +69,7 @@ export const emptyState = (intelOn: boolean): RunState => ({
   market: null,
   selectedKey: '',
   retries: 0,
+  searches: [],
 });
 
 export interface RadarStatus {
@@ -99,17 +116,39 @@ const MAX_LINKS = 5;
 const MAX_HIGHLIGHTS = 8;
 const MAX_HEADLINES = 5;
 
-/** Bound what is stored in jsonb: upstream strings are untrusted and sizes are capped. */
+const enc = new TextEncoder();
+const bytes = (s: string) => enc.encode(s).length;
+/** Truncate to at most `n` UTF-8 BYTES without splitting a character (chars are not bytes: CJK is 3 each). */
+export function cutBytes(s: string, n: number): string {
+  if (bytes(s) <= n) return s;
+  return new TextDecoder().decode(enc.encode(s).subarray(0, Math.max(0, n))).replace(/�+$/, '');
+}
+
+/** Whole stored postings array, serialized. Keeps the run state far under 150KB (events, ranks, intel ~30KB). */
+export const MAX_POSTINGS_BYTES = 100_000;
+/** The first TOP_POSTINGS (the search engine's best, the likely top-ranked) keep a long description for the job-text handoff. */
+export const TOP_POSTINGS = 5;
+const DESC_TIERS: [top: number, rest: number][] = [[6_000, 1_500], [3_000, 500], [1_500, 0]];
+
+/** Bound what is stored in jsonb: upstream strings are untrusted and sizes are capped in bytes. */
 export function boundPostings(list: Posting[]): Posting[] {
-  return list.slice(0, MAX_POSTINGS).map((p) => ({
+  const base = list.slice(0, MAX_POSTINGS).map((p) => ({
     ...p,
     title: cut(p.title, 200),
     company: cut(p.company, 120),
     via: cut(p.via, 60),
-    description: cut(p.description, MAX_DESCRIPTION_CHARS),
     applyLinks: p.applyLinks.slice(0, MAX_LINKS).map((l) => ({ title: cut(l.title, 200), link: cut(l.link, 500) })),
     highlights: p.highlights.slice(0, MAX_HIGHLIGHTS).map((h) => cut(h, 200)),
   }));
+  const size = (l: Posting[]) => bytes(JSON.stringify(l));
+  let out = base;
+  for (const [top, rest] of DESC_TIERS) {
+    out = base.map((p, i) => ({ ...p, description: cutBytes(p.description, i < TOP_POSTINGS ? top : rest) }));
+    if (size(out) <= MAX_POSTINGS_BYTES) return out;
+  }
+  // Metadata alone is too big (CJK links and highlights): drop the tail rather than the run.
+  while (out.length > 1 && size(out) > MAX_POSTINGS_BYTES) out = out.slice(0, -1);
+  return out;
 }
 
 export function boundIntel(i: EmployerIntel): EmployerIntel {

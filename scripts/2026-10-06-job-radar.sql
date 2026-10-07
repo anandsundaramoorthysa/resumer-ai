@@ -36,11 +36,27 @@ CREATE TABLE IF NOT EXISTS agent_run (
   error         text NOT NULL DEFAULT '',
   created_at    timestamp NOT NULL DEFAULT now(),
   updated_at    timestamp NOT NULL DEFAULT now(),
-  leased_until  timestamptz
+  leased_until  timestamptz,
+  -- times the current step was claimed; reset on commit (poison-step guard)
+  attempts      integer NOT NULL DEFAULT 0
 );
 
--- A table created by an earlier version of this script or db:push may lack the lease.
+-- A table created by an earlier version of this script or db:push may lack these.
 ALTER TABLE agent_run ADD COLUMN IF NOT EXISTS leased_until timestamptz;
+ALTER TABLE agent_run ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;
+
+-- Submission ledger (see scripts/2026-10-07-radar-reliability.sql, which is the same DDL for
+-- databases that already applied an older copy of this file).
+CREATE TABLE IF NOT EXISTS radar_search (
+  run_id        text NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
+  key           text NOT NULL,
+  engine        text NOT NULL,
+  q             text NOT NULL DEFAULT '',
+  search_id     text NOT NULL DEFAULT '',
+  credits       integer NOT NULL DEFAULT 0,
+  submitted_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT radar_search_run_id_key_pk PRIMARY KEY (run_id, key)
+);
 
 CREATE INDEX IF NOT EXISTS agent_run_user_created_idx
   ON agent_run (user_id, created_at);

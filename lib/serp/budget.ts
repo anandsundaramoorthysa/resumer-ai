@@ -14,7 +14,17 @@ export interface CacheStore {
   put(key: string, engine: string, payload: unknown): Promise<void>;
   /** Search attempts (rows with engine 'attempt') since `since`: successes, failures and timeouts alike. */
   countSince(since: Date): Promise<number>;
+  /**
+   * Single-flight: true = this caller now owns `key` and should do the upstream work; false =
+   * somebody else does. A row is stale (stealable) after INFLIGHT_BARE_MS without a stored
+   * search id (its owner died before submitting) or INFLIGHT_SHARED_MS with one.
+   */
+  claimInflight(key: string): Promise<boolean>;
+  releaseInflight(key: string): Promise<void>;
 }
+
+export const INFLIGHT_BARE_MS = 20_000;
+export const INFLIGHT_SHARED_MS = 5 * 60_000;
 
 type Row = { engine: string; payload: unknown; fetchedAt: Date };
 
@@ -31,6 +41,19 @@ export function memoryStore(): CacheStore & { rows: Map<string, Row> } {
     },
     async countSince(since) {
       return [...rows.values()].filter((r) => r.engine === 'attempt' && r.fetchedAt >= since).length;
+    },
+    async claimInflight(key) {
+      const r = rows.get(key);
+      if (r) {
+        const shared = (r.payload as { searchId?: unknown } | null)?.searchId != null;
+        const stale = Date.now() - r.fetchedAt.getTime() >= (shared ? INFLIGHT_SHARED_MS : INFLIGHT_BARE_MS);
+        if (r.engine === 'inflight' && !stale) return false;
+      }
+      rows.set(key, { engine: 'inflight', payload: {}, fetchedAt: new Date() });
+      return true;
+    },
+    async releaseInflight(key) {
+      if (rows.get(key)?.engine === 'inflight') rows.delete(key);
     },
   };
 }
@@ -71,6 +94,26 @@ export function drizzleStore(dbOverride?: typeof import('@/lib/db').db): CacheSt
         .where(and(gte(serpCache.fetchedAt, since), eq(serpCache.engine, 'attempt')));
       return row?.n ?? 0;
     },
+    async claimInflight(key) {
+      const { db, serpCache, sql } = await load();
+      const bare = new Date(Date.now() - INFLIGHT_BARE_MS).toISOString();
+      const shared = new Date(Date.now() - INFLIGHT_SHARED_MS).toISOString();
+      // INSERT ... ON CONFLICT: a row comes back only if we inserted it or stole a stale one.
+      const got = await db
+        .insert(serpCache)
+        .values({ key, engine: 'inflight', payload: {}, fetchedAt: new Date() })
+        .onConflictDoUpdate({
+          target: serpCache.key,
+          set: { engine: 'inflight', payload: {}, fetchedAt: new Date() },
+          setWhere: sql`${serpCache.engine} = 'inflight' and ${serpCache.fetchedAt} < case when ${serpCache.payload}->>'searchId' is not null then ${shared}::timestamp else ${bare}::timestamp end`,
+        })
+        .returning({ key: serpCache.key });
+      return got.length > 0;
+    },
+    async releaseInflight(key) {
+      const { db, serpCache, and, eq } = await load();
+      await db.delete(serpCache).where(and(eq(serpCache.key, key), eq(serpCache.engine, 'inflight')));
+    },
   };
 }
 
@@ -82,8 +125,46 @@ export interface SerpDeps {
   now: () => number;
   /** account.json timeout. */
   timeoutMs: number;
-  /** Per-search timeout by engine (live: a fresh google_jobs search can take 15s+ and is billed even if we hang up; keep under the 45s lease / 60s route limit).  No automatic retry: a retry is a second credit. */
+  /**
+   * Timeout of ONE http call to SerpApi (async submit, archive poll, or a synchronous intel
+   * call). Hard-capped at 8s so a whole step stays far inside the host's function limit
+   * (Netlify free ~26-30s). No automatic retry: a retry can be a second credit.
+   */
   searchTimeoutMs: (engine: string) => number;
+  /** Sleep, injectable so tests do not wait. */
+  sleep: (ms: number) => Promise<void>;
+}
+
+export const HTTP_TIMEOUT_MS = 8_000;
+
+/**
+ * ONE http GET whose WHOLE life (connect, headers AND body) is bounded by `ms`. The timer is
+ * kept until the body is parsed, and a hand-off race covers a fetch that ignores its abort
+ * signal. Throws an AbortError on timeout; a non-JSON body is `json: null`.
+ */
+export async function fetchJson(
+  url: string,
+  ms: number,
+): Promise<{ status: number; ok: boolean; json: ({ error?: unknown } & Record<string, unknown>) | null }> {
+  const ctrl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      ctrl.abort();
+      reject(Object.assign(new Error('timeout'), { name: 'AbortError' }));
+    }, ms);
+  });
+  const work = (async () => {
+    const res = await deps.fetch(url, { signal: ctrl.signal });
+    const json = (await res.json().catch(() => null)) as ({ error?: unknown } & Record<string, unknown>) | null;
+    return { status: res.status, ok: res.ok, json };
+  })();
+  work.catch(() => undefined); // a result that arrives after the timeout is dropped, not unhandled
+  try {
+    return await Promise.race([work, limit]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const defaults = (): SerpDeps => ({
@@ -91,8 +172,10 @@ const defaults = (): SerpDeps => ({
   fetch: (...a) => fetch(...a),
   env: () => process.env,
   now: () => Date.now(),
-  timeoutMs: 6_000,
-  searchTimeoutMs: (engine) => (engine === 'google_news' ? 10_000 : engine === 'google_jobs' ? 40_000 : 15_000),
+  // account.json is tiny and fails open: 2s keeps a cold lookup from eating an intel step.
+  timeoutMs: 2_000,
+  searchTimeoutMs: () => HTTP_TIMEOUT_MS,
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 });
 
 const mg = globalThis as unknown as {
@@ -161,22 +244,30 @@ async function searchesLeft(): Promise<number> {
       mg.__serpMemo = { at: now, left: stored };
       return stored;
     }
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), deps.timeoutMs);
-    let res: Response;
-    try {
-      res = await deps.fetch(`https://serpapi.com/account.json?api_key=${encodeURIComponent(key)}`, {
-        signal: ctrl.signal,
-      });
-    } finally {
-      clearTimeout(timer);
+    // Single-flight: parallel callers (or instances) on a cold memo make ONE account.json request.
+    if (!(await deps.store.claimInflight('inflight:account'))) {
+      for (let waited = 0; waited < 3_000; waited += 500) {
+        await deps.sleep(500);
+        const again = await deps.store.get('account');
+        const v = Number((again?.payload as { total_searches_left?: unknown } | undefined)?.total_searches_left);
+        if (again && deps.now() - again.fetchedAt.getTime() < ACCOUNT_TTL_MS && Number.isFinite(v)) {
+          mg.__serpMemo = { at: deps.now(), left: v };
+          return v;
+        }
+      }
+      return -1; // the owner is slow or died: fail open on the monthly figure, the hourly count still binds
     }
-    if (!res.ok) return -1;
-    const left = Number(((await res.json()) as { total_searches_left?: unknown }).total_searches_left);
-    if (!Number.isFinite(left)) return -1;
-    mg.__serpMemo = { at: now, left };
-    await deps.store.put('account', 'account', { total_searches_left: left });
-    return left;
+    try {
+      const res = await fetchJson(`https://serpapi.com/account.json?api_key=${encodeURIComponent(key)}`, deps.timeoutMs);
+      if (!res.ok) return -1;
+      const left = Number((res.json as { total_searches_left?: unknown } | null)?.total_searches_left);
+      if (!Number.isFinite(left)) return -1;
+      mg.__serpMemo = { at: now, left };
+      await deps.store.put('account', 'account', { total_searches_left: left });
+      return left;
+    } finally {
+      await deps.store.releaseInflight('inflight:account').catch(() => undefined);
+    }
   } catch {
     return -1; // unknown: fail open on the monthly figure, the hourly count still binds
   }
@@ -198,33 +289,47 @@ export async function noteAttempt(): Promise<void> {
 }
 
 /**
- * Searches attempted in the last hour: max(DB attempt rows, this instance's memory list).
- * FAILS CLOSED: if the DB count cannot be read the answer is "limit reached", so the guard
- * drops to replay mode (fixtures, zero credits) rather than spending blind. Replay itself
- * never touches the DB, so it keeps working.
+ * Searches attempted in the last hour: max(DB attempt rows, this instance's memory list), or
+ * null when the DB count cannot be read. null is FAIL CLOSED but is NOT "sample data": the
+ * caller reports "temporarily unavailable" and never serves fixtures as if they were live.
  */
-export async function hourUsed(): Promise<number> {
+export async function hourUsed(): Promise<number | null> {
   const since = deps.now() - 3_600_000;
   const mem = (mg.__serpAttempts = (mg.__serpAttempts ?? []).filter((t) => t >= since)).length;
   try {
     return Math.max(mem, await deps.store.countSince(new Date(since)));
   } catch {
-    return MAX_PER_HOUR;
+    return null;
   }
 }
 
 export const isBlocked = (left: number, used: number): boolean =>
   (left >= 0 && left < MIN_LEFT) || used >= MAX_PER_HOUR;
 
-export async function budgetBlocked(): Promise<boolean> {
+export type BudgetState = 'ok' | 'blocked' | 'unavailable';
+
+/** ok = may spend; blocked = credits low or hourly cap (fixtures are honest then); unavailable = guard storage down. */
+export async function budgetState(): Promise<BudgetState> {
   const [left, used] = await Promise.all([searchesLeft(), hourUsed()]);
-  return isBlocked(left, used);
+  if (used === null) return 'unavailable';
+  return isBlocked(left, used) ? 'blocked' : 'ok';
 }
 
-/** left = -1 when unknown (no key, or account.json unreachable). */
-export async function creditStatus(): Promise<{ left: number; hourUsed: number; mode: SerpMode }> {
+export async function budgetBlocked(): Promise<boolean> {
+  return (await budgetState()) !== 'ok';
+}
+
+/** left = -1 when unknown (no key, or account.json unreachable); unavailable = the hourly guard could not be read. */
+export async function creditStatus(): Promise<{
+  left: number;
+  hourUsed: number;
+  mode: SerpMode;
+  unavailable: boolean;
+}> {
   const env = deps.env();
   const [left, used] = await Promise.all([searchesLeft(), hourUsed()]);
-  const replay = !env.SERPAPI_API_KEY || env.SERP_MODE === 'replay' || isBlocked(left, used);
-  return { left, hourUsed: used, mode: replay ? 'replay' : 'live' };
+  const keyless = !env.SERPAPI_API_KEY || env.SERP_MODE === 'replay';
+  const unavailable = !keyless && used === null;
+  const replay = keyless || unavailable || isBlocked(left, used ?? 0);
+  return { left, hourUsed: used ?? 0, mode: replay ? 'replay' : 'live', unavailable };
 }

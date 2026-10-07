@@ -3,6 +3,11 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { AppHeader } from '@/components/app-header';
 import { approvalFor } from '@/lib/server/approval';
+import { hasCurrentConsent } from '@/lib/legal/consent';
+import { autoApproveIfOpen } from '@/lib/legal/invites';
+import { RETENTION, signupMode } from '@/lib/legal/config';
+import { LegalFooter } from '@/components/legal-footer';
+import { InviteForm } from './invite-form';
 
 export const metadata = { title: 'Waiting for approval' };
 export const dynamic = 'force-dynamic';
@@ -11,8 +16,12 @@ export const dynamic = 'force-dynamic';
 export default async function PendingPage() {
   const session = await auth();
   if (!session?.user?.id) redirect('/sign-in');
-  const approval = await approvalFor(session.user.id);
+  if (!(await hasCurrentConsent(session.user.id))) redirect('/consent');
+  let approval = await approvalFor(session.user.id);
+  // SIGNUP_MODE=open: a pending account is approved on its first visit, under the daily quota.
+  if (approval === 'pending' && (await autoApproveIfOpen(session.user.id)) === 'approved') approval = 'approved';
   if (approval === 'approved') redirect('/');
+  const inviteOpen = signupMode() === 'invite' && approval === 'pending';
 
   return (
     <div className="min-h-screen min-h-dvh">
@@ -29,15 +38,28 @@ export default async function PendingPage() {
             <Link href="/settings/account" className="btn mt-6">
               Delete this account
             </Link>
+            <p className="mt-4 max-w-prose text-sm text-muted">
+              Accounts that are not approved are deleted automatically after {RETENTION.deniedAccountDays}{' '}
+              days. Questions? <Link href="/contact" className="underline">Contact us</Link>.
+            </p>
           </>
         ) : (
           <>
             <p className="eyebrow">Account status</p>
             <h1 className="mt-2 font-display text-3xl tracking-tight">Waiting for owner approval</h1>
             <p className="mt-4 max-w-prose">
-              The site owner approves each new account by hand, because every account uses the same
-              paid AI services. Yours is in the queue.
+              Access is limited, because every account uses the same paid AI services. An account is
+              approved either by a valid invite code (up to a daily limit) or by the site owner by
+              hand. Yours is in the queue.
             </p>
+            {inviteOpen ? (
+              <section className="mt-6" aria-labelledby="invite-heading">
+                <h2 id="invite-heading" className="eyebrow">
+                  Have an invite code?
+                </h2>
+                <InviteForm />
+              </section>
+            ) : null}
             <section className="mt-8 border-t border-line pt-4" aria-labelledby="next-heading">
               <h2 id="next-heading" className="eyebrow">
                 What happens next
@@ -63,6 +85,7 @@ export default async function PendingPage() {
             </Link>
           </>
         )}
+        <LegalFooter className="mt-12" />
       </main>
     </div>
   );

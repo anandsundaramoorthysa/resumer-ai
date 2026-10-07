@@ -192,6 +192,13 @@ const DICTIONARY: Map<string, SkillCategory> = (() => {
   return map;
 })();
 
+/**
+ * Every named technology the dictionary lists (languages, frameworks, tools, platforms),
+ * as typed. The grounding guard builds its lowercase-entity lexicon from this, so a tool
+ * written in lower case ("kubernetes") is still recognised as a name.
+ */
+export const DICTIONARY_TERMS: readonly string[] = [...LANGUAGES, ...FRAMEWORKS, ...TOOLS, ...PLATFORMS];
+
 /** How many skills the dictionary knows — reported by the classifier's own tests. */
 export const DICTIONARY_SIZE = DICTIONARY.size;
 

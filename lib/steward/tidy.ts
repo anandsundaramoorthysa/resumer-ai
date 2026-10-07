@@ -26,8 +26,13 @@ import { canonicalSkillName, dedupeStackNames } from '../skills/identity';
 
 /** Built from code points: these characters are invisible, so they are not typed inline. */
 const chars = (...codes: number[]) => new RegExp(`[${String.fromCharCode(...codes)}]`, 'g');
-/** Zero-width space, joiners, byte-order mark. */
-const ZERO_WIDTH = chars(0x200b, 0x200c, 0x200d, 0xfeff);
+/**
+ * Zero-width space, byte-order mark, word joiner. NOT U+200C / U+200D: ZWNJ and ZWJ are
+ * meaningful characters, not noise. They select conjunct vs. explicit-virama forms in
+ * Devanagari and Malayalam ("क्‍ष"), shape Persian and Arabic words, and glue ZWJ emoji
+ * sequences (family, profession). Stripping them silently changed the spelling.
+ */
+const ZERO_WIDTH = chars(0x200b, 0xfeff, 0x2060);
 /** No-break space, figure space, narrow no-break space. */
 const ODD_SPACES = chars(0x00a0, 0x2007, 0x202f);
 

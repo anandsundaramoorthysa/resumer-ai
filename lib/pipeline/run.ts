@@ -28,6 +28,7 @@ import type {
 } from '../types';
 import { DRAFT_BUDGET, DraftBudget, GRADING_RESERVE_MS } from '../ai/budget';
 import { assertDailyBudget, recordDailyUsage } from '../ai/daily-budget';
+import { MeteredBudget } from './metered-budget';
 import { userMessage } from '../server/user-message';
 import { extractJobRequirement } from '../intake/extract';
 import { combineJobText } from '../intake/job-input';
@@ -106,6 +107,22 @@ export interface PipelineInput {
   job?: JobRequirement;
   /** The verdict that came with it, carried through so the snapshot can keep it. */
   fit?: FitReport;
+  /**
+   * Called once the resume is final (quality gate done) and BEFORE the PDF/DOCX render and
+   * self-test. A caller that persists here keeps the result if the process dies, or the
+   * render throws, in the seconds that follow. If it throws, the run fails as before.
+   */
+  onGenerated?: (generated: GeneratedDraft) => Promise<void>;
+}
+
+/** What exists when the gate finishes: everything a snapshot needs, nothing rendered yet. */
+export interface GeneratedDraft {
+  document: ResumeDocument;
+  score: QualityGateResult;
+  job: JobRequirement | null;
+  fit: FitReport | null;
+  pdfName: string;
+  docxName: string;
 }
 
 export interface PipelineOutput {
@@ -152,7 +169,10 @@ export async function runDraftPipeline(
 ): Promise<PipelineOutput> {
   await assertDailyBudget(input.userId);
 
-  const budget = new DraftBudget();
+  // Metered: usage is billed after each counted call, so a process killed mid-run (where
+  // this `finally` never executes) has still paid for what it spent. The `finally` flushes
+  // only the remainder — deltas, never the whole snapshot again.
+  const budget = new MeteredBudget((u) => recordDailyUsage(input.userId, u));
   try {
     return await runDraft(input, emit, budget);
   } finally {
@@ -161,7 +181,7 @@ export async function runDraftPipeline(
     // still spent what it spent, and "how much did the failures cost" was previously a
     // question only the daily aggregate could answer, and only for the whole day at once.
     if (input.trace) input.trace.budget = spend;
-    await recordDailyUsage(input.userId, spend);
+    await budget.flush();
   }
 }
 
@@ -218,7 +238,12 @@ export async function runAssessment(
 ): Promise<AssessmentOutput> {
   await assertDailyBudget(input.userId);
 
-  const budget = new DraftBudget(DRAFT_BUDGET, ASSESS_TIME_BUDGET_MS, ASSESS_RESERVE_MS);
+  const budget = new MeteredBudget(
+    (u) => recordDailyUsage(input.userId, u),
+    DRAFT_BUDGET,
+    ASSESS_TIME_BUDGET_MS,
+    ASSESS_RESERVE_MS,
+  );
   try {
     const records = await syncProfile(input, emit);
     const { job, jobText } = await readJob(input, emit, budget);
@@ -242,7 +267,7 @@ export async function runAssessment(
   } finally {
     const spend = budget.snapshot();
     if (input.trace) input.trace.budget = spend;
-    await recordDailyUsage(input.userId, spend);
+    await budget.flush();
   }
 }
 
@@ -428,10 +453,24 @@ async function runDraft(
     },
   });
 
+  const document = outcome.document;
+
+  // The resume is final. Hand it to the caller to persist before the render, which is
+  // where a kill or a throw would otherwise lose everything the model produced.
+  if (input.onGenerated) {
+    await input.onGenerated({
+      document,
+      score: outcome.result,
+      job,
+      fit: input.fit ?? null,
+      pdfName: resumeFileName(document, 'pdf'),
+      docxName: resumeFileName(document, 'docx'),
+    });
+  }
+
   // ------------------------------------------------------------- 6. finalize --
   emit({ stage: 'finalize', status: 'running', message: 'Building your PDF and DOCX…' });
 
-  const document = outcome.document;
   const pdf = await renderResumePdf(document);
   const docx = await renderResumeDocx(document);
 

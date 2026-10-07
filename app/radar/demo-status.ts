@@ -7,7 +7,9 @@
 import type { RadarStatus, RadarEvent } from '@/lib/radar/events';
 import type { Posting, RankedPosting, EmployerIntel, MarketSignal } from '@/lib/serp/types';
 
-// Same phase names as lib/radar/runs.ts: plan -> awaiting-queries -> search -> rank -> intel -> select -> done.
+// Same phase names as lib/radar/runs.ts, minus the live-only `poll` phase (the real run waits
+// on SerpApi's async search there; the canned demo needs no polling):
+// plan -> awaiting-queries -> search -> rank -> intel -> select -> done.
 const STAGES = ['plan', 'awaiting-queries', 'search', 'rank', 'intel', 'select', 'done'];
 const STEP_MS = 1500;
 
@@ -89,7 +91,7 @@ export function demoStatus(phase: string, intelOn: boolean, edited?: { q: string
       queries: i >= 1 ? edited ?? QUERIES : [],
       postings: i >= 3 ? POSTINGS : [], okQueries: i >= 3 ? 2 : 0,
       ranked: i >= 4 ? RANKED : [], intelTargets: [], intel: i >= 5 && intelOn ? INTEL : [],
-      market: i >= 4 ? MARKET : null, selectedKey: '', retries: 0,
+      market: i >= 4 ? MARKET : null, selectedKey: '', retries: 0, searches: [],
     },
   };
 }

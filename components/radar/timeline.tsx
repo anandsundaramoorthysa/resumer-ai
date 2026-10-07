@@ -11,7 +11,8 @@ const AGENTS = [
   { id: 'intel', name: 'Employer Intel' },
 ] as const;
 
-const kind = (phase: string) => phase;
+// The poll step is part of the Searcher: its events belong to that row.
+const kind = (phase: string) => (phase === 'poll' ? 'search' : phase);
 
 /**
  * Index of the agent doing (or next to do) the work; AGENTS.length when all are done.
@@ -21,6 +22,7 @@ const PHASE_AGENT: Record<string, number> = {
   plan: 0,
   'awaiting-queries': 1,
   search: 1,
+  poll: 1,
   rank: 2,
   intel: 3,
   select: AGENTS.length,
@@ -75,11 +77,13 @@ export function Timeline({ run }: { run: RadarStatus }) {
               className={`relative z-10 mt-1 grid size-[19px] shrink-0 place-items-center border-2 ${
                 state === 'running'
                   ? 'border-brand bg-brand motion-safe:animate-pulse'
-                  : state === 'done' || state === 'skipped'
+                  : state === 'done'
                     ? 'border-ink bg-ink text-paper'
-                    : state === 'failed'
-                      ? 'border-danger bg-paper text-danger'
-                      : 'border-rule bg-paper'
+                    : state === 'skipped'
+                      ? 'border-dashed border-muted bg-paper text-muted'
+                      : state === 'failed'
+                        ? 'border-danger bg-paper text-danger'
+                        : 'border-rule bg-paper'
               }`}
             >
               {state === 'done' && (
@@ -87,12 +91,12 @@ export function Timeline({ run }: { run: RadarStatus }) {
                   <path d="M2 6.5 5 9.5 10 3" />
                 </svg>
               )}
+              {state === 'skipped' && <span className="font-mono text-xs font-bold leading-none">–</span>}
               {state === 'failed' && <span className="font-mono text-xs font-bold leading-none">!</span>}
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className="font-display text-base">{a.name}</span>
-                <span className="font-mono text-xs uppercase tracking-wider text-muted">{STATE_WORD[state]}</span>
+                <span className="font-display text-base">{a.name}</span>                <span className="font-mono text-xs uppercase tracking-wider text-muted">{STATE_WORD[state]}</span>
                 {secs !== null && <span className="font-mono text-xs tabular-nums text-muted">{secs}s</span>}
               </div>
               <p className="mt-0.5 text-sm text-muted">{message}</p>

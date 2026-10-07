@@ -84,15 +84,19 @@ export function scoreSkillsCompleteness(
     const inSkills = spellings(kw).some((s) => textHoldsKeyword(skillsText, s));
     const held = spellings(kw).some((s) => holdsKeyword(vocab, s));
 
-    if (inSkills) present.push(kw);
+    // Present only if the profile holds it too. A Skills section that lists a posting's
+    // terms the candidate does not have is stuffing, not coverage: it must not earn credit
+    // (and it is a gap, not a fixable omission).
+    if (inSkills && held) present.push(kw);
     else if (held) missingButHeld.push(kw);
     else genuineGaps.push(kw);
   }
 
   // Denominator is only what the user actually has — you cannot lose points for not
-  // possessing a skill, only for failing to surface one you do possess.
+  // possessing a skill, only for failing to surface one you do possess. But a candidate who
+  // holds none of the posting's skills scores 0, not a free 1.0 (anti-stuffing).
   const claimable = present.length + missingButHeld.length;
-  const score = claimable === 0 ? 1 : present.length / claimable;
+  const score = claimable === 0 ? 0 : present.length / claimable;
 
   return { score, missingButHeld, genuineGaps, present };
 }

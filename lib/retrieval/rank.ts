@@ -49,10 +49,14 @@ function norm(s: string): string {
  * resume was optimising for a looser definition of a match than the gate rewards, so it
  * promoted records on overlap the scorer would never count and left the loop trying to
  * revise its way to a keyword that was never really there.
+ *
+ * `t` is already normalised (callers run `norm` once, not per call). The indexOf guard is
+ * exact — a phrase cannot be contained on word boundaries without being contained — and it
+ * skips containsPhrase's per-call setup (several regex tests) for the great majority of
+ * (record, term) pairs, which are misses.
  */
-function hasTerm(text: string, term: string): boolean {
-  const t = norm(term);
-  return t.length > 0 && containsPhrase(text, t);
+function hasNormTerm(text: string, t: string): boolean {
+  return t.length > 0 && text.indexOf(t) !== -1 && containsPhrase(text, t);
 }
 
 /** Every searchable string a record contributes. */
@@ -126,17 +130,33 @@ export const FLOOR_EXEMPT_TYPES = new Set<ProfileRecord['type']>([
  * and gets excluded, regardless of how well it might have ranked.
  */
 export function domainFit(record: ProfileRecord, job: JobRequirement): number {
-  const cat = profileFor(job.category);
-  if (cat.domainVocabulary.length === 0) return 1; // 'general' has no floor
+  return fitFromText(recordText(record), fitTerms(job));
+}
 
-  const text = recordText(record);
-  const hits = cat.domainVocabulary.filter((term) => hasTerm(text, term)).length;
+interface FitTerms {
+  /** Normalised category vocabulary; empty means 'general', which has no floor. */
+  vocab: string[];
+  /** Normalised ATS keywords. */
+  keywords: string[];
+}
+
+function fitTerms(job: JobRequirement): FitTerms {
+  return {
+    vocab: profileFor(job.category).domainVocabulary.map(norm),
+    keywords: job.atsKeywords.map(norm),
+  };
+}
+
+function fitFromText(text: string, { vocab, keywords }: FitTerms): number {
+  if (vocab.length === 0) return 1; // 'general' has no floor
+
+  const hits = vocab.filter((term) => hasNormTerm(text, term)).length;
 
   // The job's own keywords count as on-domain too, so a posting asking for something
   // outside the category's stock vocabulary still surfaces the right records.
-  const jobHits = job.atsKeywords.filter((k) => hasTerm(text, k)).length;
+  const jobHits = keywords.filter((k) => hasNormTerm(text, k)).length;
 
-  const denom = Math.max(4, Math.min(cat.domainVocabulary.length, 12));
+  const denom = Math.max(4, Math.min(vocab.length, 12));
   return Math.min(1, (hits + jobHits * 1.5) / denom);
 }
 
@@ -181,13 +201,15 @@ export function postingTerms(job: JobRequirement): PostingTerm[] {
  * mention Python — and the calculator won on insertion order.
  */
 function rarityWeights(terms: PostingTerm[], texts: string[]): Map<string, number> {
+  // ponytail: one pass per term over every text; a presence matrix shared with
+  // keywordOverlap would save a further ~25% but costs memory proportional to N x T.
   const out = new Map<string, number>();
   const n = Math.max(1, texts.length);
   // The ceiling: a term no record holds. Everything is scaled against it so the numbers
   // stay 0..1 whatever the profile size.
   const maxIdf = Math.log(1 + n);
   for (const { term } of terms) {
-    const df = texts.reduce((count, text) => (hasTerm(text, term) ? count + 1 : count), 0);
+    const df = texts.reduce((count, text) => (hasNormTerm(text, term) ? count + 1 : count), 0);
     out.set(term, Math.log(1 + n / (1 + df)) / maxIdf);
   }
   return out;
@@ -203,7 +225,7 @@ function keywordOverlap(
   const matched: string[] = [];
   let weighted = 0;
   for (const { term, label, weight } of terms) {
-    if (!hasTerm(text, term)) continue;
+    if (!hasNormTerm(text, term)) continue;
     matched.push(label);
     weighted += weight * (rarity.get(term) ?? 1);
   }
@@ -257,12 +279,14 @@ export function rankRecords(
   const target = viabilityTarget(records.filter(filterable).length);
   const held = countByType(records);
 
+  // Everything that does not depend on the floor is computed once, not once per attempt.
+  const ctx = prepareRanking(records, job);
   for (const floor of [requested, requested / 2, requested / 4, 0]) {
-    const attempt = rankAtFloor(records, job, floor);
+    const attempt = rankAtFloor(records, floor, ctx);
     const viable = attempt.ranked.filter((r) => filterable(r.record)).length;
     if ((viable >= target && keepsEveryCoreType(attempt.ranked, held)) || floor === 0) return attempt;
   }
-  return rankAtFloor(records, job, 0);
+  return rankAtFloor(records, 0, ctx);
 }
 
 /**
@@ -302,20 +326,37 @@ export function keepsEveryCoreType(ranked: RankedRecord[], held: Map<string, num
   return true;
 }
 
+/**
+ * The floor-independent half of ranking: each record's text, domain fit and keyword
+ * overlap, memoised per record. Overlap is computed lazily — a record every floor
+ * excludes never pays for it.
+ */
+interface RankingContext {
+  terms: PostingTerm[];
+  rarity: Map<string, number>;
+  textOf: Map<ProfileRecord, string>;
+  fitOf: Map<ProfileRecord, number>;
+  overlapOf: Map<ProfileRecord, { score: number; matched: string[] }>;
+  fitTermsFor: FitTerms;
+}
+
+function prepareRanking(records: ProfileRecord[], job: JobRequirement): RankingContext {
+  const terms = postingTerms(job);
+  const textOf = new Map<ProfileRecord, string>();
+  for (const r of records) if (!r.flaggedForRemoval) textOf.set(r, recordText(r));
+  const rarity = rarityWeights(terms, [...textOf.values()]);
+  return { terms, rarity, textOf, fitOf: new Map(), overlapOf: new Map(), fitTermsFor: fitTerms(job) };
+}
+
 function rankAtFloor(
   records: ProfileRecord[],
-  job: JobRequirement,
   floorOverride: number,
+  ctx: RankingContext,
 ): { ranked: RankedRecord[]; excluded: ProfileRecord[] } {
   const floor = floorOverride;
   const ranked: RankedRecord[] = [];
   const excluded: ProfileRecord[] = [];
-
-  // Once for the whole corpus rather than per record: the text of each record, and how
-  // ordinary each posting term is across this profile.
-  const terms = postingTerms(job);
-  const texts = records.filter((r) => !r.flaggedForRemoval).map(recordText);
-  const rarity = rarityWeights(terms, texts);
+  const { terms, rarity, textOf, fitOf, overlapOf } = ctx;
 
   for (const record of records) {
     if (record.flaggedForRemoval) {
@@ -324,14 +365,23 @@ function rankAtFloor(
     }
 
     // Stage 1 — the floor (REQ-4.2), except on the identity types it cannot judge.
-    const fit = domainFit(record, job);
+    let fit = fitOf.get(record);
+    if (fit === undefined) {
+      fit = fitFromText(textOf.get(record)!, ctx.fitTermsFor);
+      fitOf.set(record, fit);
+    }
     if (fit < floor && !FLOOR_EXEMPT_TYPES.has(record.type)) {
       excluded.push(record);
       continue;
     }
 
     // Stage 2 — rank what survived (REQ-4.3).
-    const { score: keywordScore, matched } = keywordOverlap(recordText(record), terms, rarity);
+    let overlap = overlapOf.get(record);
+    if (!overlap) {
+      overlap = keywordOverlap(textOf.get(record)!, terms, rarity);
+      overlapOf.set(record, overlap);
+    }
+    const { score: keywordScore, matched } = overlap;
 
     ranked.push({
       record,

@@ -12,6 +12,7 @@
  */
 
 import 'server-only';
+import { isIP } from 'node:net';
 import { headers } from 'next/headers';
 import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
@@ -109,38 +110,49 @@ export const LIMITS: Record<AuthAction, { subject: Limit; ip: Limit }> = {
  * every request and never land in the same bucket twice. `x-real-ip` is worse: it is a
  * plain client header with no platform guarantee at all.
  *
- * So the platform-set header wins, and `x-forwarded-for` is read from the RIGHT, where
+ * So the one platform-set header (TRUST_PROXY, default netlify) wins, and `x-forwarded-for` is read from the RIGHT, where
  * the edge appends the address it actually saw. The result must parse as an IP before it
  * is used as a bucket key, or a caller could send two kilobytes of junk per request and
  * fill the attempts table with it.
  */
 export async function callerIp(): Promise<string | null> {
   const h = await headers();
+  return clientIpFrom((name) => h.get(name));
+}
 
-  // Netlify's edge sets this from the connection, and it cannot be forged upstream.
-  const platform =
-    h.get('x-nf-client-connection-ip') ?? h.get('cf-connecting-ip') ?? h.get('x-vercel-forwarded-for');
-  if (platform && isIpAddress(platform.trim())) return platform.trim();
+/** The header each platform's edge sets from the connection itself. TRUST_PROXY picks one. */
+const PLATFORM_HEADER = {
+  netlify: 'x-nf-client-connection-ip',
+  vercel: 'x-vercel-forwarded-for',
+  cloudflare: 'cf-connecting-ip',
+} as const;
 
-  const forwarded = h.get('x-forwarded-for');
+/**
+ * Pure core of callerIp. TRUST_PROXY = netlify (default, netlify.toml targets it) | vercel |
+ * cloudflare | none. Exactly ONE platform header is trusted (the others are ordinary
+ * client headers on the wrong platform and could be forged); when it is absent or not an
+ * IP, the LAST x-forwarded-for hop is used, never the leftmost. 'none' trusts no header at
+ * all: no bucket key beats a forgeable one.
+ */
+export function clientIpFrom(get: (name: string) => string | null, env: Record<string, string | undefined> = process.env): string | null {
+  const mode = (env.TRUST_PROXY ?? 'netlify').trim().toLowerCase();
+  if (mode === 'none') return null;
+  const name = PLATFORM_HEADER[mode as keyof typeof PLATFORM_HEADER] ?? PLATFORM_HEADER.netlify;
+  const platform = get(name)?.trim();
+  if (platform && isIpAddress(platform)) return platform;
+
+  const forwarded = get('x-forwarded-for');
   if (forwarded) {
-    const hops = forwarded.split(',').map((v) => v.trim());
-    const nearest = hops[hops.length - 1];
+    const nearest = forwarded.split(',').pop()?.trim() ?? '';
     if (isIpAddress(nearest)) return nearest;
   }
-
-  // No trustworthy address. The per-address limits still apply; inventing a bucket key
-  // from a spoofable header would be worse than admitting there is no IP limit here.
+  // No trustworthy address. The per-address limits still apply.
   return null;
 }
 
-/** Loose but sufficient: this only decides whether a string may be a bucket key. */
+/** A real IPv4/IPv6 literal (node:net), no zone id, so it may be a bucket key. */
 export function isIpAddress(value: string): boolean {
-  if (value.length === 0 || value.length > 45) return false;
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
-    return value.split('.').every((o) => Number(o) <= 255);
-  }
-  return /^[0-9a-f:]+$/i.test(value) && value.includes(':');
+  return value.length > 0 && value.length <= 45 && !value.includes('%') && isIP(value) !== 0;
 }
 
 export interface RateVerdict {

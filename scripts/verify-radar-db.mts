@@ -34,7 +34,8 @@ const code = (e: unknown) => {
   return x?.code ?? x?.cause?.code;
 };
 
-export async function scenarios(db: Db): Promise<{ passed: number; failed: string[] }> {
+/** `prune: true` also runs the retention scenario, which deletes EVERY old cache/run row: scratch databases only. */
+export async function scenarios(db: Db, opts: { prune?: boolean } = {}): Promise<{ passed: number; failed: string[] }> {
   let passed = 0;
   const failed: string[] = [];
   const ok = (cond: unknown, name: string) => {
@@ -182,10 +183,10 @@ export async function scenarios(db: Db): Promise<{ passed: number; failed: strin
     ok(Number((await q(sql`select count(*)::int as n from serp_cache where key = 'zzverify:att2'`))[0].n) === 1, 'countSince: in-window attempt row kept');
 
     setSerpDeps({ store: cache, now: () => NOW, env: () => ({ SERPAPI_API_KEY: 'k' }) });
-    const before = await hourUsed();
+    const before = (await hourUsed()) ?? 0;
     await noteAttempt();
     await noteAttempt();
-    ok((await cache.countSince(new Date(NOW - 3_600_000))) >= 2 && (await hourUsed()) >= before + 2, 'noteAttempt: writes attempt rows, hourUsed sees them');
+    ok((await cache.countSince(new Date(NOW - 3_600_000))) >= 2 && ((await hourUsed()) ?? 0) >= before + 2, 'noteAttempt: writes attempt rows, hourUsed sees them');
     let fetches = 0;
     const fakeFetch = (async () => {
       fetches++;
@@ -205,6 +206,111 @@ export async function scenarios(db: Db): Promise<{ passed: number; failed: strin
     await new Promise((r) => setTimeout(r, 400));
     ok(Number((await q(sql`select count(*)::int as n from serp_cache where key = 'zzverify:old'`))[0].n) === 0, 'evict: >24h cache row deleted');
     ok(Number((await q(sql`select count(*)::int as n from serp_cache where key = 'account'`))[0].n) === 1, "evict: 'account' memo row survives");
+
+    /* (8) claim counts attempts in SQL */
+    const u8 = await mkUser('attempts');
+    const r8 = (await runs.insert(u8, init(), cap))!;
+    ok(r8.attempts === 0, 'attempts: a new run starts at 0');
+    const c8 = await runs.claim(u8, r8.id, 0);
+    ok(c8?.attempts === 1, 'attempts: claim increments in SQL');
+    await q(sql`update agent_run set leased_until = now() - interval '1 second' where id = ${r8.id}`);
+    ok((await runs.claim(u8, r8.id, 0))?.attempts === 2, 'attempts: every reclaim increments');
+    ok((await runs.claim(u8, r8.id, 0)) === null && Number((await q(sql`select attempts from agent_run where id = ${r8.id}`))[0].attempts) === 2, 'attempts: a refused claim does not increment');
+    ok((await runs.update(r8.id, { userId: u8, step: 0, status: ['running'] }, { step: 1, leasedUntil: null, attempts: 0 }))?.attempts === 0, 'attempts: the commit resets it');
+    const lease = (await q(sql`select extract(epoch from (leased_until - now()))::float as s from agent_run where id = ${r8.id}`))[0];
+    ok(lease.s === null, 'attempts: commit cleared the lease');
+
+    /* (9) credit reservation + ledger: idempotent by (run, key), capped, atomic */
+    const u9 = await mkUser('reserve');
+    const r9 = (await runs.insert(u9, init(), cap))!;
+    const six9 = await Promise.all(Array.from({ length: 6 }, () => runs.reserve(u9, r9.id, 'q0', { engine: 'google_jobs', q: 'a', credits: 1 }, 12)));
+    ok(six9.filter((x) => x === 'new').length === 1 && six9.filter((x) => x === 'exists').length === 5, 'reserve x6 same key: one new, five exists');
+    ok((await runs.get(u9, r9.id))?.creditsUsed === 1, 'reserve x6: credits_used incremented once, in SQL');
+    ok((await runs.reserve(u9, r9.id, 'q1', { engine: 'google_jobs', q: 'b', credits: 1 }, 12)) === 'new', 'reserve: a second key reserves');
+    await runs.setSearchId(r9.id, 'q0', 'sid-1');
+    await runs.setSearchId(r9.id, 'q0', 'sid-OVERWRITE');
+    const led = await runs.getLedger(u9, r9.id);
+    ok(led.length === 2 && led.find((x) => x.key === 'q0')?.searchId === 'sid-1' && led.find((x) => x.key === 'q1')?.searchId === '', 'ledger: id stored once, never overwritten; unstored id reads as empty');
+    ok(led.every((x) => typeof x.submittedAt === 'number' && x.submittedAt > Date.now() - 60_000), 'ledger: submittedAt is epoch ms');
+    ok((await runs.getLedger(`${PREFIX}other`, r9.id)).length === 0, 'ledger: scoped to the owner');
+    await q(sql`update agent_run set credits_used = 11 where id = ${r9.id}`);
+    const race = await Promise.all(['q2', 'i0'].map((k) => runs.reserve(u9, r9.id, k, { engine: 'x', q: 'c', credits: 1 }, 12)));
+    ok(race.filter((x) => x === 'new').length === 1 && race.filter((x) => x === 'capped').length === 1, 'reserve: at 11/12 two concurrent reserves => exactly one wins');
+    ok((await runs.get(u9, r9.id))?.creditsUsed === 12, 'reserve: never above the cap');
+    ok(Number((await q(sql`select count(*)::int as n from radar_search where run_id = ${r9.id}`))[0].n) === 3, 'reserve: a capped reserve leaves no ledger row (rolled back)');
+    ok((await runs.reserve(u9, r9.id, 'i1', { engine: 'intel', q: 'c', credits: 3 }, 12)) === 'capped', 'reserve: 3 more credits refused at 12/12');
+    await runs.addCredits(u9, r9.id, -2);
+    ok((await runs.get(u9, r9.id))?.creditsUsed === 10, 'addCredits: refund applies in SQL');
+    await runs.addCredits(u9, r9.id, -99);
+    ok((await runs.get(u9, r9.id))?.creditsUsed === 0, 'addCredits: never below zero');
+    ok((await runs.reserve(`${PREFIX}other`, r9.id, 'zz', { engine: 'x', q: '', credits: 1 }, 12).catch(() => 'threw')) !== 'new', 'reserve: another user cannot reserve on this run');
+    await q(sql`delete from agent_run where id = ${r9.id}`);
+    ok(Number((await q(sql`select count(*)::int as n from radar_search where run_id = ${r9.id}`))[0].n) === 0, 'ledger: rows go with their run (cascade)');
+
+    /* (10) single-flight inflight rows */
+    const fk = 'zzverify:inflight:1';
+    const claimsF = await Promise.all(Array.from({ length: 6 }, () => cache.claimInflight(fk)));
+    ok(claimsF.filter(Boolean).length === 1, 'inflight x6: exactly one caller owns the key');
+    ok((await cache.claimInflight(fk)) === false, 'inflight: a held key is refused');
+    await q(sql`update serp_cache set fetched_at = (now() at time zone 'utc') - interval '25 seconds' where key = ${fk}`);
+    ok((await cache.claimInflight(fk)) === true, 'inflight: a row older than 20s with no search id is taken over');
+    await cache.put(fk, 'inflight', { searchId: 'sid-9' });
+    await q(sql`update serp_cache set fetched_at = (now() at time zone 'utc') - interval '25 seconds' where key = ${fk}`);
+    ok((await cache.claimInflight(fk)) === false, 'inflight: with a stored search id it stays owned (minutes)');
+    await q(sql`update serp_cache set fetched_at = (now() at time zone 'utc') - interval '6 minutes' where key = ${fk}`);
+    ok((await cache.claimInflight(fk)) === true, 'inflight: ... until it is 5 minutes old');
+    await cache.put('zzverify:real-cache', 'google_jobs', { a: 1 });
+    ok((await cache.claimInflight('zzverify:real-cache')) === false, 'inflight: never steals a real cache row');
+    ok((await cache.get('zzverify:real-cache'))?.payload !== undefined && Number((await q(sql`select count(*)::int as n from serp_cache where key = 'zzverify:real-cache' and engine = 'google_jobs'`))[0].n) === 1, 'inflight: the cache row is untouched');
+    await cache.releaseInflight('zzverify:real-cache');
+    ok((await cache.get('zzverify:real-cache')) !== null, 'release: only deletes inflight rows');
+    await cache.releaseInflight(fk);
+    ok((await cache.get(fk)) === null, 'release: deletes the inflight row');
+    ok((await cache.claimInflight(fk)) === true, 'inflight: free again after release');
+    await cache.releaseInflight(fk);
+
+    /* (11) retention: destructive (deletes every old row in the DB), so only on a scratch database */
+    if (opts.prune) {
+      const u11 = await mkUser('prune');
+      const old = sql`(now() at time zone 'utc') - interval '40 days'`;
+      const oldCache = sql`(now() at time zone 'utc') - interval '30 hours'`;
+      await q(sql`delete from serp_cache where engine <> 'account'`);
+      await q(sql`insert into serp_cache (key, engine, payload, fetched_at)
+        select 'zzverify:pc-' || g, case when g % 3 = 0 then 'attempt' when g % 3 = 1 then 'inflight' else 'google_jobs' end, '{}'::jsonb, ${oldCache}
+        from generate_series(1, 7) g`);
+      await q(sql`insert into serp_cache (key, engine, payload, fetched_at) values
+        ('zzverify:pc-fresh', 'google_jobs', '{}'::jsonb, now() at time zone 'utc'),
+        ('account', 'account', '{"total_searches_left": 5}'::jsonb, ${oldCache})
+        on conflict (key) do update set fetched_at = excluded.fetched_at, engine = excluded.engine`);
+      const mk = async (name: string, status: string, updated: ReturnType<typeof sql>) => {
+        const id = `${PREFIX}pr-${name}`;
+        await q(sql`insert into agent_run (id, user_id, status, created_at, updated_at) values (${id}, ${u11}, ${status}, ${updated}, ${updated})`);
+        await q(sql`insert into radar_search (run_id, key, engine) values (${id}, 'q0', 'google_jobs')`);
+        return id;
+      };
+      const fresh = sql`(now() at time zone 'utc')`;
+      await mk('old-done', 'done', old);
+      await mk('old-error', 'error', old);
+      await mk('old-cancelled', 'cancelled', old);
+      await mk('old-awaiting', 'awaiting', old); // active: never pruned, however old
+      await mk('new-done', 'done', fresh);
+      const { pruneRadarData } = req('../lib/radar/housekeeping.ts') as typeof import('../lib/radar/housekeeping');
+      const p1 = await pruneRadarData(db, { batch: 3, maxBatches: 1 });
+      ok(p1.cacheRows === 3 && p1.more === true, 'prune: batch limit respected and reported (more: true)');
+      const p2 = await pruneRadarData(db, { batch: 3, maxBatches: 10 });
+      ok(p2.cacheRows === 4 && p2.more === false, 'prune: the next call finishes the rest in batches');
+      ok(p1.runs + p2.runs === 3, 'prune: old terminal runs deleted (done, error, cancelled)');
+      ok(Number((await q(sql`select count(*)::int as n from serp_cache where key like 'zzverify:pc-%'`))[0].n) === 1, 'prune: fresh cache row kept, 24h+ rows (incl. attempt/inflight) gone');
+      ok(Number((await q(sql`select count(*)::int as n from serp_cache where key = 'account'`))[0].n) === 1, "prune: 'account' memo kept even when old");
+      ok(Number((await q(sql`select count(*)::int as n from agent_run where id like ${PREFIX + 'pr-%'}`))[0].n) === 2, 'prune: new terminal run and old ACTIVE run kept');
+      ok(Number((await q(sql`select count(*)::int as n from radar_search where run_id like ${PREFIX + 'pr-%'}`))[0].n) === 2, 'prune: ledger rows of pruned runs cascade away');
+      await q(sql`insert into serp_cache (key, engine, payload, fetched_at) values ('zzverify:pc-late', 'google_jobs', '{}'::jsonb, ${oldCache})`);
+      const pd = await pruneRadarData(db, { deadline: Date.now() - 1 });
+      ok(pd.more === true && pd.cacheRows === 0 && pd.runs === 0, 'prune: an expired deadline is honoured BEFORE the first batch (nothing deleted, more: true)');
+      await pruneRadarData(db);
+      const p3 = await pruneRadarData(db);
+      ok(p3.cacheRows === 0 && p3.runs === 0 && !p3.more, 'prune: idempotent, a second call deletes nothing');
+    }
   } finally {
     resetSerpDeps();
     await q(sql`delete from serp_cache where key like ${'attempt:' + NOW + ':%'}`);

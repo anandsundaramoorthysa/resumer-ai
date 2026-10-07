@@ -15,7 +15,16 @@
  *      and whether the domain can receive mail at all.
  */
 
+import { randomBytes } from 'node:crypto';
+import { cookies } from 'next/headers';
 import { eq } from 'drizzle-orm';
+import {
+  SIGNUP_BINDING_COOKIE,
+  SIGNUP_BINDING_MAX_AGE_SECONDS,
+  bindingSecret,
+  signupBindingMatches,
+  signupBindingValue,
+} from '@/lib/auth/signup-binding';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { checkEmail, normalizeEmail } from '@/lib/auth/email-policy';
@@ -29,6 +38,14 @@ import {
 } from '@/lib/auth/mail';
 import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
 import { notifyOwnerOfSignup } from '@/lib/server/signup-notice';
+import { recordConsent } from '@/lib/legal/consent';
+import { signupMode } from '@/lib/legal/config';
+import { inviteCodeUsable, redeemForUser } from '@/lib/legal/invites';
+import { REDEEM_MESSAGES } from '@/lib/legal/invite-logic';
+
+/** Holds a password signup's invite code until its email is verified (see signUpAction). */
+const SIGNUP_INVITE_COOKIE = 'signup_invite';
+import { flagOn } from '@/lib/server/flags';
 
 export interface AuthResult {
   ok: boolean;
@@ -68,6 +85,7 @@ export async function signUpAction(
   email: string,
   password: string,
   name: string,
+  consent: { accepted: boolean; inviteCode?: string } = { accepted: false },
 ): Promise<AuthResult> {
   const verdict = await checkEmail(email);
   const ip = await callerIp();
@@ -76,6 +94,20 @@ export async function signUpAction(
   if (!limit.allowed) return { ok: false, message: limit.message! };
 
   if (!verdict.ok) return { ok: false, message: verdict.reason! };
+
+  // Kill switch: nothing is written while sign-ups are paused.
+  if (!(await flagOn('signups_enabled'))) return { ok: false, message: REDEEM_MESSAGES.paused };
+
+  // Enforced here, not just by the form's required checkbox: a server action is an endpoint.
+  if (consent.accepted !== true) {
+    return { ok: false, message: 'Confirm that you are 18 or older and agree to the Terms and Privacy Policy.' };
+  }
+  // Codes only count in 'invite' mode. A mistyped code is refused before anything is written
+  // (the answer does not depend on whether the address has an account).
+  const inviteCode = signupMode() === 'invite' ? (consent.inviteCode ?? '').trim().slice(0, 40) : '';
+  if (inviteCode && !(await inviteCodeUsable(inviteCode))) {
+    return { ok: false, message: REDEEM_MESSAGES.invalid };
+  }
 
   // The password is checked before anything is written, and its problems are named:
   // this is the one place where a vague answer helps nobody, since the user is telling
@@ -104,11 +136,17 @@ export async function signUpAction(
   // account measurably the FASTER answer — the same enumeration channel in reverse.
   const passwordHash = await hashPassword(password);
 
+  let accountId: string | null = null;
   if (!existing) {
-    await db.insert(users).values({
-      email: verdict.normalized,
-      name: name.trim().slice(0, 120) || null,
-      passwordHash,
+    // The account and the consent record are written together: there is never an
+    // account created through this form without a record of what it agreed to.
+    accountId = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(users)
+        .values({ email: verdict.normalized, name: name.trim().slice(0, 120) || null, passwordHash })
+        .returning({ id: users.id });
+      await recordConsent(created.id, { ageAttested: true, source: 'signup' }, tx);
+      return created.id;
     });
   } else if (!existing.passwordHash) {
     // The address already signs in with GitHub or Google. Adding a password here would
@@ -120,11 +158,48 @@ export async function signUpAction(
     // An unverified signup being repeated is someone who lost the email, so the password
     // is updated and a fresh link sent. Safe precisely because it is unverified: nobody
     // has ever proved they own this address, so there is no account to take over.
-    await db.update(users).set({ passwordHash }).where(eq(users.id, existing.id));
+    accountId = existing.id;
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ passwordHash }).where(eq(users.id, existing.id));
+      await recordConsent(existing.id, { ageAttested: true, source: 'signup' }, tx);
+    });
   } else {
     // A verified account already exists. Say nothing that confirms it.
     await evenOut(null);
     return { ok: true, message: NEUTRAL };
+  }
+
+  // An invite code is NOT redeemed here. A password signup has proved nothing about its
+  // address yet, so redeeming now would let anyone burn codes and the daily auto-approve
+  // quota with throwaway addresses. The code rides in an httpOnly cookie of this browser and
+  // is redeemed by verifyEmailAction once the address is confirmed (OAuth accounts, whose
+  // address is already verified, redeem on /pending). If the link is opened in another
+  // browser the cookie is absent and the person enters the code on /pending instead.
+  if (inviteCode && accountId) {
+    (await cookies()).set(SIGNUP_INVITE_COOKIE, inviteCode, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: SIGNUP_BINDING_MAX_AGE_SECONDS,
+    });
+  }
+
+  // Bind the emailed link to THIS browser (see lib/auth/signup-binding.ts): the victim of a
+  // signup made with their address will not hold this cookie.
+  const secret = bindingSecret();
+  if (secret) {
+    (await cookies()).set(
+      SIGNUP_BINDING_COOKIE,
+      signupBindingValue(secret, verdict.normalized, passwordHash),
+      {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/',
+        maxAge: SIGNUP_BINDING_MAX_AGE_SECONDS,
+      },
+    );
   }
 
   const { token } = await issueToken(verdict.normalized, 'verify-email');
@@ -178,9 +253,40 @@ export async function verifyEmailAction(token: string): Promise<AuthResult> {
   const spent = await consumeToken(token, 'verify-email');
   if (!spent.ok) return { ok: false, message: spent.reason! };
 
+  // Pre-account-hijack defence: unless this browser is the one that signed up, the address
+  // is confirmed but the signup password is replaced with an unusable one and old sessions
+  // are cut. The owner of the inbox sets their own password via "forgot password".
+  const jar = await cookies();
+  const [pending] = await db
+    .select({ passwordHash: users.passwordHash, emailVerified: users.emailVerified })
+    .from(users)
+    .where(eq(users.email, spent.identifier!))
+    .limit(1);
+  const bound =
+    !pending?.passwordHash ||
+    Boolean(pending.emailVerified) ||
+    signupBindingMatches(
+      jar.get(SIGNUP_BINDING_COOKIE)?.value,
+      bindingSecret(),
+      spent.identifier!,
+      pending.passwordHash,
+    );
+  const pendingInvite = jar.get(SIGNUP_INVITE_COOKIE)?.value ?? '';
+  const patch: Partial<typeof users.$inferInsert> = { emailVerified: new Date() };
+  if (!bound) {
+    patch.passwordHash = await hashPassword(randomBytes(32).toString('hex'));
+    patch.sessionsValidFrom = new Date();
+  }
+  try {
+    jar.delete(SIGNUP_BINDING_COOKIE); // throws when called during a page render; harmless
+    jar.delete(SIGNUP_INVITE_COOKIE);
+  } catch {
+    /* the cookie expires on its own */
+  }
+
   const updated = await db
     .update(users)
-    .set({ emailVerified: new Date() })
+    .set(patch)
     .where(eq(users.email, spent.identifier!))
     .returning({ id: users.id, email: users.email, name: users.name, approval: users.approval });
 
@@ -190,9 +296,26 @@ export async function verifyEmailAction(token: string): Promise<AuthResult> {
 
   await clearAttempts('sign-in', spent.identifier!);
 
+  if (!bound) {
+    return {
+      ok: true,
+      message:
+        'Your email is confirmed. For your security, set your password with "Forgot password" before signing in.',
+    };
+  }
+
   // A password sign-up reaches the owner only once its address is proved: before that it
   // could be anyone typing anything, and a bot that never confirms never becomes mail.
   if (updated[0].approval === 'pending') {
+    // The address is proved (emailVerified was written above), so the invite from sign-up
+    // may now be redeemed. Never throws; anything but 'approved' leaves the owner to decide.
+    if (pendingInvite && signupMode() === 'invite') {
+      const status = await redeemForUser(updated[0].id, pendingInvite).catch((err) => {
+        console.error('[auth] invite redemption failed:', err instanceof Error ? err.name : 'error');
+        return null;
+      });
+      if (status === 'approved') return { ok: true, message: 'Your email is confirmed and your invite was accepted. You can sign in now.' };
+    }
     await notifyOwnerOfSignup(updated[0], 'Email and password');
     return {
       ok: true,

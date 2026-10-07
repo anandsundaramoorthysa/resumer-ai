@@ -22,7 +22,9 @@ import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { ownerEmails, ownerUserIds } from '@/lib/ai/daily-budget';
-import { appUrl, sendOperatorEmail } from '@/lib/auth/mail';
+import { appUrl, sendTemplatedEmail } from '@/lib/auth/mail';
+import { approvalDeniedEmail, approvalGrantedEmail } from '@/lib/auth/templates';
+import { hasCurrentConsent } from '@/lib/legal/consent';
 
 export type Approval = 'pending' | 'approved' | 'denied';
 
@@ -41,8 +43,21 @@ export async function approvalFor(userId: string): Promise<Approval> {
 export async function requireApprovedUser(): Promise<Session & { user: { id: string } }> {
   const session = await auth();
   if (!session?.user?.id) redirect('/sign-in');
-  if ((await approvalFor(session.user.id)) !== 'approved') redirect('/pending');
+  await requireConsentAndApproval(session.user.id);
   return session as Session & { user: { id: string } };
+}
+
+/**
+ * The redirect pair every signed-in page shares (also used by app/page.tsx, which reads
+ * its own session). Consent first: an account that has not accepted the CURRENT policy
+ * version (every OAuth sign-in starts that way) goes to /consent, then an unapproved one
+ * to /pending. Neither /consent nor /pending calls this, so they cannot loop, and account
+ * deletion and export are server routes that never call it, so they work without consent.
+ * Owners are NOT exempt from consent (only from quotas).
+ */
+export async function requireConsentAndApproval(userId: string): Promise<void> {
+  if (!(await hasCurrentConsent(userId))) redirect('/consent');
+  if ((await approvalFor(userId)) !== 'approved') redirect('/pending');
 }
 
 /**
@@ -113,18 +128,12 @@ export async function decide(userId: string, decision: 'approved' | 'denied'): P
   if (!row) return null;
 
   if (row.email) {
-    const sent = await sendOperatorEmail(
+    // Best effort: the decision is already stored, and a mail failure must never undo it.
+    // Only the error is logged, never the body.
+    const sent = await sendTemplatedEmail(
       row.email,
-      decision === 'approved' ? 'Your Resumer AI account is ready' : 'About your Resumer AI sign-up',
-      decision === 'approved'
-        ? ['Your account has been approved. Sign in to start building your profile:', '', appUrl('/sign-in')].join('\n')
-        : [
-            'Thanks for signing up. Access to Resumer AI is limited right now, and your account was not approved.',
-            '',
-            'Nothing you entered is used for anything. You can delete the account and everything in it here:',
-            appUrl('/settings/account'),
-          ].join('\n'),
-    );
+      decision === 'approved' ? approvalGrantedEmail(appUrl('/sign-in')) : approvalDeniedEmail(appUrl('/settings/account')),
+    ).catch((err: unknown) => ({ ok: false, error: err instanceof Error ? err.name : 'error' }));
     if (!sent.ok) console.error('[approval] could not email the decision:', sent.error);
   }
   return row;

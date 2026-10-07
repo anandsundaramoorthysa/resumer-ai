@@ -29,6 +29,20 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Sign in first.' }, { status: 401 });
   }
 
+  // Before `formData()` buffers the whole body: the multipart envelope adds a little to
+  // the file, so allow 64 KB of slack. A body with no declared length (chunked) is refused
+  // because it cannot be bounded up front; browsers always send one for FormData.
+  const declared = Number(req.headers.get('content-length'));
+  if (!req.headers.get('content-length') || !Number.isFinite(declared)) {
+    return Response.json({ error: 'Upload size must be declared.' }, { status: 411 });
+  }
+  if (declared > MAX_UPLOAD_BYTES + 64 * 1024) {
+    return Response.json(
+      { error: `That file is too large. The limit is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.` },
+      { status: 413 },
+    );
+  }
+
   let form: FormData;
   try {
     form = await req.formData();

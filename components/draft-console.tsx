@@ -141,6 +141,53 @@ async function readEvents(
   return ended;
 }
 
+const FAILED_MESSAGE = 'The draft did not finish on the server. Press Retry to start it again.';
+
+/** A fresh Idempotency-Key. randomUUID needs a secure context; the fallback is still unique enough. */
+function newDraftKey(): string {
+  try {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  } catch {
+    /* fall through */
+  }
+  return `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+}
+
+const STATUS_POLL_MS = 2_000;
+const STATUS_POLL_MAX_MS = 90_000; // until the server names its own window (pollForMs)
+
+/**
+ * Waits on the server's own record of this attempt: every 2s, for at most 90s.
+ * 'done' means a result exists (POST again with the same key to receive it).
+ */
+async function pollDraftStatus(
+  key: string,
+  stop: { current: boolean },
+): Promise<'done' | 'failed' | 'timeout' | 'stopped'> {
+  let until = Date.now() + STATUS_POLL_MAX_MS;
+  let horizonSet = false;
+  while (Date.now() < until) {
+    if (stop.current) return 'stopped';
+    try {
+      const res = await fetch(`/api/draft/status?key=${encodeURIComponent(key)}`, { cache: 'no-store' });
+      if (res.ok) {
+        const s = (await res.json()) as { state?: string; pollForMs?: number };
+        // The server knows how long a live draft can run; poll for exactly that.
+        if (!horizonSet && s.pollForMs) {
+          until = Date.now() + s.pollForMs;
+          horizonSet = true;
+        }
+        if (s.state === 'done') return 'done';
+        if (s.state === 'failed' || s.state === 'unknown') return 'failed';
+      }
+    } catch {
+      /* the network may still be coming back; keep polling until the deadline */
+    }
+    await new Promise((r) => setTimeout(r, STATUS_POLL_MS));
+  }
+  return 'timeout';
+}
+
 const RADAR_TEXT_KEY = 'radar:jobText';
 const RADAR_LABEL_KEY = 'radar:jobLabel';
 
@@ -176,6 +223,8 @@ export function DraftConsole({
   const tokenRef = useRef<string | null>(null);
   const stopRef = useRef(false);
   const startedAtRef = useRef(0);
+  /** One per user-initiated draft attempt; reused when that attempt is retried. */
+  const draftKeyRef = useRef<string | null>(null);
 
   const busy = phase === 'assessing' || phase === 'drafting' || phase === 'improving';
 
@@ -237,12 +286,14 @@ export function DraftConsole({
       url: string,
       init: RequestInit,
       on: (name: string, payload: unknown) => void,
-    ): Promise<'ended' | 'cut' | 'failed'> => {
+    ): Promise<'ended' | 'cut' | 'failed' | 'busy'> => {
       const controller = new AbortController();
       abortRef.current = controller;
       const res = await fetch(url, { ...init, signal: controller.signal });
       if (!res.ok || !res.body) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        const j = (await res.json().catch(() => ({}))) as { error?: string; running?: boolean };
+        // 409 + running: the server is already drafting under this attempt's key.
+        if (res.status === 409 && j.running) return 'busy';
         setError(j.error ?? 'That request failed.');
         return 'failed';
       }
@@ -307,25 +358,41 @@ export function DraftConsole({
     async (token: string) => {
       setPhase('drafting');
       const box: { result?: CompletePayload } = {};
-      try {
-        const outcome = await postStream(
-          '/api/draft',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assessment: token }),
-          },
-          (name, payload) => {
-            if (name === 'stage') onStage(payload);
-            else if (name === 'complete') box.result = payload as CompletePayload;
-            else if (name === 'error') {
-              setError((payload as { message?: string }).message ?? 'Draft failed.');
-            }
-          },
-        );
-        if (outcome === 'cut') setError(CUT_MESSAGE);
-      } catch (err) {
-        if ((err as Error).name !== 'AbortError') setError((err as Error).message);
+      const key = (draftKeyRef.current ??= newDraftKey());
+      // Up to three POSTs under the SAME key: the first, then one per "it was already
+      // running / the connection dropped" that the status poll resolves to done. The server
+      // answers a finished key with the saved result, so a repeat never drafts twice.
+      for (let attempt = 1; attempt <= 3 && !box.result; attempt++) {
+        let waitForServer = false;
+        try {
+          const outcome = await postStream(
+            '/api/draft',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+              body: JSON.stringify({ assessment: token }),
+            },
+            (name, payload) => {
+              if (name === 'stage') onStage(payload);
+              else if (name === 'complete') box.result = payload as CompletePayload;
+              else if (name === 'error') {
+                setError((payload as { message?: string }).message ?? 'Draft failed.');
+              }
+            },
+          );
+          if (outcome === 'busy' || outcome === 'cut') waitForServer = true;
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') break;
+          waitForServer = true; // dropped connection: ask the server what became of it
+          setError((err as Error).message);
+        }
+        if (!waitForServer || box.result) break;
+
+        setError(null);
+        const state = await pollDraftStatus(key, stopRef);
+        if (state === 'done') continue; // re-POST: the server replays the saved result
+        if (state !== 'stopped') setError(state === 'failed' ? FAILED_MESSAGE : CUT_MESSAGE);
+        break;
       }
 
       const drafted = box.result;
@@ -417,6 +484,7 @@ export function DraftConsole({
     }
 
     tokenRef.current = box.token;
+    draftKeyRef.current = newDraftKey(); // a new attempt, a new key
     setFit(box.fit);
     if (box.fit.decision === 'proceed') await draft(box.token);
     else setPhase('deciding');
@@ -467,6 +535,7 @@ export function DraftConsole({
 
         if (payload.fit && payload.token) {
           tokenRef.current = payload.token;
+          draftKeyRef.current = newDraftKey(); // a re-assessed profile is a new attempt
           setFit(payload.fit);
           if (payload.fit.decision === 'proceed') {
             startedAtRef.current = Date.now();

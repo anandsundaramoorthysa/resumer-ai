@@ -11,9 +11,36 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch/PR supersedes the run in flight.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Secret scanning over the full history. The official action, pinned to a release (bump with
+  # Dependabot's github-actions updates; pin to a commit SHA if you want it immutable).
+  # Free for personal accounts; an organisation needs a GITLEAKS_LICENSE secret.
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       # No real credentials are available here, and none are needed: the suite is offline
       # and the build reads these only to decide what to configure. They are deliberately
@@ -35,6 +62,15 @@ jobs:
       # and the project pins an esbuild override that a loose install would resolve away.
       - run: npm ci
 
+      # Production dependencies only. A CRITICAL advisory blocks the build; HIGH is reported
+      # without failing, because a high advisory with no fix available would otherwise stop
+      # every merge. Triage the report weekly (Dependabot also opens the fix PRs).
+      - name: Dependency audit (blocking: critical)
+        run: npm audit --omit=dev --audit-level=critical
+      - name: Dependency audit (report: high)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
       # Tests and scripts too (npm run typecheck runs both projects). CI checked only the
       # app, and the second project had drifted to 22 errors — in the fixtures the suites
       # assert against, which is where a wrong type quietly means a test of nothing.
@@ -44,6 +80,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Includes the db-* suites: the real-SQL scenarios, rateLimit, approval, dismissals,
+      # sync review, enrichment and the HTTP routes run against an in-memory Postgres
+      # (PGlite, a devDependency). Nothing here needs DATABASE_URL, a secret or the network;
+      # the db-* helper deletes DATABASE_URL / SMTP_* / SERPAPI_API_KEY and refuses fetch().
       - name: Tests
         run: npm test
 
@@ -61,3 +101,24 @@ jobs:
       # and the other verify-* harnesses all need a real database. They are the checks to
       # reach for when changing those areas, and wiring them into CI needs a throwaway
       # Postgres, which is a bigger decision than this file should make on its own.
+
+  # The suite again under V8 coverage, failing if lib/ falls below the floors in
+  # scripts/ci-coverage.mjs (measured, then set 3 points lower). A separate job, so it runs
+  # beside `check` rather than after it and adds no wall-clock time. It is not c8: tsx loads
+  # the app through data: URLs, which c8 cannot map (the script explains).
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
+      AUTH_SECRET: ci-only-placeholder-value-not-a-secret
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tests under coverage, with floors
+        run: npm run test:coverage

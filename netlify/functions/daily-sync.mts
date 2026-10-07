@@ -26,16 +26,20 @@ interface ScheduledFunctionConfig {
   schedule: string;
 }
 
+import { log, pingHeartbeat } from '../../lib/log';
+
+const lg = log.child({ job: 'daily-sync' });
+
 export default async function handler(): Promise<Response> {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
-    console.warn('[daily-sync] CRON_SECRET is not set — skipping.');
+    lg.warn('CRON_SECRET is not set, skipping');
     return new Response('CRON_SECRET not configured', { status: 200 });
   }
 
   const base = (process.env.URL ?? process.env.DEPLOY_PRIME_URL ?? '').replace(/\/$/, '');
   if (!base) {
-    console.warn('[daily-sync] No site URL in the environment — skipping.');
+    lg.warn('no site URL in the environment, skipping');
     return new Response('No site URL', { status: 200 });
   }
 
@@ -45,12 +49,14 @@ export default async function handler(): Promise<Response> {
       headers: { 'x-cron-secret': secret },
     });
     const body = await res.text();
-    console.log(`[daily-sync] ${res.status} ${body.slice(0, 300)}`);
+    lg.info('triggered', { status: res.status, body: body.slice(0, 300) });
+    await pingHeartbeat('daily-sync', res.ok);
     // Always 200: a failing downstream check is worth logging, not worth Netlify
     // retrying — the next run is tomorrow and the SHA gate is idempotent either way.
     return new Response(body, { status: 200 });
   } catch (err) {
-    console.error('[daily-sync] request failed:', err);
+    lg.error('request failed', { err });
+    await pingHeartbeat('daily-sync', false);
     return new Response('trigger failed', { status: 200 });
   }
 }

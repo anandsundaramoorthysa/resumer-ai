@@ -110,7 +110,9 @@ export interface BudgetLimits {
 }
 
 export const DRAFT_BUDGET: BudgetLimits = {
-  maxCalls: Number(process.env.MAX_AI_CALLS_PER_DRAFT ?? 24),
+  // 40, up from 24: the evidence judge is two votes per grade and winners are re-graded
+  // (lib/quality/evidence.ts, loop.ts), so one scoring pass is 2-4 calls instead of 1.
+  maxCalls: Number(process.env.MAX_AI_CALLS_PER_DRAFT ?? 40),
   maxTokens: Number(process.env.MAX_AI_TOKENS_PER_DRAFT ?? 400_000),
 };
 
@@ -118,6 +120,31 @@ export const DAILY_BUDGET: BudgetLimits = {
   maxCalls: Number(process.env.MAX_AI_CALLS_PER_DAY ?? 400),
   maxTokens: Number(process.env.MAX_AI_TOKENS_PER_DAY ?? 6_000_000),
 };
+
+/** ~3.5 characters per token: a deliberately pessimistic mix of English and code. */
+export function estimateTokens(chars: number): number {
+  return Math.ceil(Math.max(0, chars) / 3.5);
+}
+
+/**
+ * Tokens for one finished call. Providers sometimes report no usage or a zero, and a call
+ * the budget sees as free is how the cap stops capping; so a missing or zero total is
+ * estimated from the text sizes instead.
+ */
+export function tokensFor(
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined,
+  promptChars: number,
+  outputChars: number,
+): { total: number; input: number; output: number; estimated: boolean } {
+  const total = usage?.totalTokens ?? (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+  if (Number.isFinite(total) && total > 0) {
+    const input = usage?.inputTokens ?? estimateTokens(promptChars);
+    return { total, input, output: usage?.outputTokens ?? Math.max(0, total - input), estimated: false };
+  }
+  const input = estimateTokens(promptChars);
+  const output = estimateTokens(outputChars);
+  return { total: estimateTokens(promptChars + outputChars), input, output, estimated: true };
+}
 
 export interface BudgetUsage {
   calls: number;
@@ -178,8 +205,9 @@ export class DraftBudget {
    * provider requests and recorded one. The counter was least accurate exactly when spend
    * was running away, which is the one moment it exists for.
    *
-   * Tokens default to 0 because a failed attempt usually reports no usage at all;
-   * undercounting tokens is the honest option, inventing an estimate is not.
+   * A failed attempt usually reports no usage, but the prompt was still billed, so the
+   * chain passes `estimateTokens(promptChars)`; the default of 0 is for callers that
+   * genuinely know nothing.
    */
   recordFailedAttempt(tokens = 0): void {
     this.record(tokens);

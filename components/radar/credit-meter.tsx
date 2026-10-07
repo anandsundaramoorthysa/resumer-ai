@@ -4,6 +4,7 @@ import type { Credits } from './use-radar';
 export function CreditMeter({ credits, used, sample = false }: { credits: Credits | null; used: number; sample?: boolean }) {
   if (sample) return <p className="font-mono text-xs text-muted">Sample data — no credits used</p>;
   if (!credits) return <p className="font-mono text-xs text-muted">Credits: checking…</p>;
+  if (credits.unavailable) return <p className="font-mono text-xs text-muted">Search is temporarily unavailable. Try again in a few minutes.</p>;
   return (
     <dl className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-xs">
       <div className="flex gap-1.5">

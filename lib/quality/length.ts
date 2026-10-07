@@ -77,11 +77,38 @@ export interface LengthResult {
   violation?: FormattingViolation;
 }
 
+/**
+ * Characters that fit on one printed line at the PDF's 10.5pt body size: the text column
+ * is ~500pt wide (lib/render/pdf.tsx: 612pt page - 2x48 padding - bullet mark) and the
+ * average glyph is ~5.3pt, so ~95; 92 leaves a little for wide letters. Skills rows put
+ * their label in a fixed 135pt column, leaving ~72 for the values.
+ */
+export const CHARS_PER_LINE = 92;
+export const SKILL_VALUE_CHARS_PER_LINE = 72;
+
+/**
+ * Printed lines for one item. Every item used to count as exactly one line, so a 3-line
+ * bullet was priced like a 1-line one and a page that overflowed in the PDF measured as
+ * fitting. A heuristic by design (no font metrics, so it stays cheap and deterministic).
+ */
+export function estimatedLines(text: string, sectionKey?: string): number {
+  if (sectionKey === 'skills') {
+    const colon = text.indexOf(':');
+    const values = colon >= 0 ? text.slice(colon + 1) : text;
+    return Math.max(1, Math.ceil(values.trim().length / SKILL_VALUE_CHARS_PER_LINE));
+  }
+  return Math.max(1, Math.ceil(text.trim().length / CHARS_PER_LINE));
+}
+
+type Items = ResumeDocument['sections'][number]['items'];
+const wrapped = (items: Items, key: string): number =>
+  items.reduce((n, i) => n + estimatedLines(i.text, key), 0);
+
 function contentLines(doc: ResumeDocument): number {
   return doc.sections.reduce((n, s) => {
     const groups = s.groups ?? [];
     return (
-      n + s.items.length + groups.length + groups.reduce((m, g) => m + g.items.length, 0)
+      n + wrapped(s.items, s.key) + groups.length + groups.reduce((m, g) => m + wrapped(g.items, s.key), 0)
     );
   }, 0);
 }
@@ -102,9 +129,9 @@ function requiredLines(doc: ResumeDocument): number {
     .filter((s) => !OPTIONAL_SECTIONS.has(s.key))
     .reduce((n, s) => {
       const groups = s.groups ?? [];
-      const perGroup = (items: number) =>
-        s.key === 'experience' ? Math.min(items, MIN_BULLETS_KEPT_PER_ROLE) : items;
-      return n + s.items.length + groups.reduce((m, g) => m + 1 + perGroup(g.items.length), 0);
+      const perGroup = (items: Items) =>
+        wrapped(s.key === 'experience' ? items.slice(0, MIN_BULLETS_KEPT_PER_ROLE) : items, s.key);
+      return n + wrapped(s.items, s.key) + groups.reduce((m, g) => m + 1 + perGroup(g.items), 0);
     }, 0);
 }
 

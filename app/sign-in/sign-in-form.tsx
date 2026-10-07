@@ -21,8 +21,10 @@ import { PasswordInput } from '@/components/password-input';
 
 type Mode = 'sign-in' | 'sign-up';
 
-export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
+export function SignInForm({ passwordEnabled, inviteEnabled = false }: { passwordEnabled: boolean; inviteEnabled?: boolean }) {
   const [mode, setMode] = useState<Mode>('sign-in');
+  const [accepted, setAccepted] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -36,7 +38,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
     email.trim().length > 3 &&
     password.length > 0 &&
     !pending &&
-    (mode === 'sign-in' || strength.ok);
+    (mode === 'sign-in' || (strength.ok && accepted));
 
   const submit = () => {
     setResult(null);
@@ -44,7 +46,7 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
       setResult(
         mode === 'sign-in'
           ? await passwordSignInAction(email, password)
-          : await signUpAction(email, password, name),
+          : await signUpAction(email, password, name, { accepted, inviteCode }),
       );
     });
   };
@@ -138,6 +140,36 @@ export function SignInForm({ passwordEnabled }: { passwordEnabled: boolean }) {
               ))
             )}
           </ul>
+        ) : null}
+
+        {mode === 'sign-up' && inviteEnabled ? (
+          <Labelled label="Invite code (optional)">
+            <input
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              className={`${INPUT} font-mono`}
+            />
+          </Labelled>
+        ) : null}
+
+        {mode === 'sign-up' ? (
+          <label className="mt-4 flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={accepted}
+              onChange={(e) => setAccepted(e.target.checked)}
+              required
+              className="mt-1 h-5 w-5 shrink-0"
+            />
+            <span className="consent-text">
+              I am 18 or older and I agree to the{' '}
+              <Link href="/terms" target="_blank" className="underline">Terms</Link> and{' '}
+              <Link href="/privacy" target="_blank" className="underline">Privacy Policy</Link>.
+            </span>
+          </label>
         ) : null}
 
         <button

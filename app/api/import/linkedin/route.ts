@@ -26,6 +26,18 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Sign in first.' }, { status: 401 });
   }
 
+  // Checked before `formData()` buffers the body; chunked bodies cannot be bounded.
+  const declared = Number(req.headers.get('content-length'));
+  if (!req.headers.get('content-length') || !Number.isFinite(declared)) {
+    return Response.json({ error: 'Upload size must be declared.' }, { status: 411 });
+  }
+  if (declared > MAX_UPLOAD_BYTES + 64 * 1024) {
+    return Response.json(
+      { error: 'That archive is larger than 25MB, which is far larger than a data export.' },
+      { status: 413 },
+    );
+  }
+
   const form = await req.formData().catch(() => null);
   const file = form?.get('file');
   if (!(file instanceof File)) {

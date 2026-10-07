@@ -7,7 +7,7 @@
 
 import 'server-only';
 import { tidyRecordData } from '@/lib/steward/tidy';
-import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, desc, eq, ne } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
   applications,
@@ -32,11 +32,12 @@ import type {
   ResumeDocument as SnapshotDocument,
 } from '@/lib/types';
 import { latestCommitSha, parseRepoRef } from '@/lib/sync/github';
-import { roleIdentity, splitMergedTitles } from '@/lib/sync/roles';
+import { sameJob, splitMergedTitles, type RoleLike } from '@/lib/sync/roles';
 import { educationIdentity } from '@/lib/sync/education';
 import type { ParseResult } from '@/lib/sync/parse';
 import type { ParsedRecord } from '@/lib/sync/reconcile';
 import { hashContent, reconcile, summarizePlan } from '@/lib/sync/reconcile';
+import { flagMissingRows, unflagSeen } from '@/lib/sync/guards';
 import { loadDismissals } from '@/lib/server/dismissals';
 import { getRepoAccess } from '@/lib/server/repo-access';
 
@@ -73,24 +74,19 @@ function rowToRecord(row: typeof profileRecords.$inferSelect): ProfileRecord {
  * facts a human vouched for rather than against whatever the last commit said.
  */
 export async function loadProfileForUser(userId: string): Promise<LoadedProfile> {
-  const [contactRow] = await db
-    .select()
-    .from(contactInfo)
-    .where(eq(contactInfo.userId, userId))
-    .limit(1);
-
-  const recordRows = await db
-    .select()
-    .from(profileRecords)
-    .where(
-      and(eq(profileRecords.userId, userId), eq(profileRecords.reviewState, 'approved')),
-    );
-
-  const roleRows = await db
-    .select()
-    .from(rolesTable)
-    .where(and(eq(rolesTable.userId, userId), eq(rolesTable.reviewState, 'approved')))
-    .orderBy(desc(rolesTable.startDate));
+  // Independent reads, issued together: one round trip instead of three.
+  const [[contactRow], recordRows, roleRows] = await Promise.all([
+    db.select().from(contactInfo).where(eq(contactInfo.userId, userId)).limit(1),
+    db
+      .select()
+      .from(profileRecords)
+      .where(and(eq(profileRecords.userId, userId), eq(profileRecords.reviewState, 'approved'))),
+    db
+      .select()
+      .from(rolesTable)
+      .where(and(eq(rolesTable.userId, userId), eq(rolesTable.reviewState, 'approved')))
+      .orderBy(desc(rolesTable.startDate)),
+  ]);
 
   return {
     contact: {
@@ -171,6 +167,13 @@ export async function applyParsedProfile(
   userId: string,
   parsed: ParseResult,
   sha: string | null,
+  /**
+   * What the pass is allowed to conclude. The defaults are the old behaviour for a
+   * complete pass; the stepped sync turns them off when any part of the repository went
+   * unread (lib/sync/partial.ts), because absence from a partial parse is not removal and
+   * a partial pass must not be remembered as the commit being done.
+   */
+  opts: { flagMissing?: boolean; storeSha?: boolean } = {},
 ): Promise<string> {
   // Roles first. The parser can only refer to a role by its content hash, but
   // lib/generate/assemble.ts groups bullets by real role id — so the hashes have to be
@@ -198,7 +201,9 @@ export async function applyParsedProfile(
   ).map(rowToRecord);
 
   // What the user has thrown away is not proposed again, whoever proposed it first.
-  const plan = reconcile(existing, records, await loadDismissals(userId));
+  const plan = reconcile(existing, records, await loadDismissals(userId), {
+    flagMissing: opts.flagMissing !== false,
+  });
 
   // Everything below is batched deliberately. One statement per record measured at
   // 34s for a 150-record portfolio — three times the whole step budget — and almost
@@ -298,22 +303,23 @@ export async function applyParsedProfile(
   }
 
   // Flagging sets the same value on every row, so it really is one statement.
+  // Found again: a flag says "not found", so finding the record lifts it. Without this a
+  // record flagged once stayed out of every resume until the user clicked Keep.
+  for (const chunk of chunked(plan.toUnflag, 200)) {
+    const cleared = await unflagSeen(db, userId, chunk.map((u) => u.id));
+    for (const id of cleared) {
+      audits.push({
+        userId,
+        recordId: id,
+        action: 'update',
+        source: 'github-sync',
+        diff: { unflagged: true, reason: 'Found again in your portfolio source.' },
+      });
+    }
+  }
+
   for (const chunk of chunked(plan.toFlag, 200)) {
-    await db
-      .update(profileRecords)
-      .set({ flaggedForRemoval: true, updatedAt: new Date() })
-      .where(
-        and(
-          inArray(
-            profileRecords.id,
-            chunk.map((f) => f.id),
-          ),
-          eq(profileRecords.userId, userId),
-          eq(profileRecords.source, 'github-sync'),
-          // Only an approved record can be flagged as missing — see reconcile().
-          eq(profileRecords.reviewState, 'approved'),
-        ),
-      );
+    await flagMissingRows(db, userId, chunk.map((f) => f.id));
     for (const { id, reason } of chunk) {
       audits.push({
         userId,
@@ -329,7 +335,7 @@ export async function applyParsedProfile(
     await db.insert(auditLog).values(chunk);
   }
 
-  if (sha) {
+  if (sha && opts.storeSha !== false) {
     await db
       .update(users)
       .set({ lastSyncedSha: sha, lastSyncedAt: new Date() })
@@ -383,9 +389,8 @@ async function syncRoles(
   // Matching on content hash alone is what let 16 rows accumulate for 10 jobs: the same
   // company spelled two ways hashes two ways. An identity index alongside it means a
   // re-spelling updates the existing row instead of adding another.
-  const idByIdentity = new Map(
-    stored.map((r) => [roleIdentity(r.company, r.title), r.id]),
-  );
+  const storedLike = stored.map((r) => ({ id: r.id, role: r as RoleLike }));
+  const matchStored = (candidate: RoleLike) => storedLike.find((s) => sameJob(s.role, candidate))?.id;
 
   const pending: ParseResult['roles'] = [];
   for (const role of roles) {
@@ -396,7 +401,7 @@ async function syncRoles(
     const titles = splitMergedTitles(role.title);
     let matchedAll = true;
     for (const title of titles) {
-      const existingId = idByIdentity.get(roleIdentity(role.company, title));
+      const existingId = matchStored({ ...role, title });
       if (existingId) {
         // Same job, better-spelled: point this parse at the row already there.
         idByHash.set(role.contentHash, existingId);
@@ -406,7 +411,7 @@ async function syncRoles(
     }
     if (matchedAll && titles.length > 0) continue;
 
-    if (pending.some((r) => roleIdentity(r.company, r.title) === roleIdentity(role.company, role.title))) {
+    if (pending.some((r) => sameJob(r, role))) {
       continue;
     }
     pending.push(role);
@@ -509,7 +514,9 @@ export async function persistDraft(
     fit?: FitReport | null;
   },
 ): Promise<string> {
-  const [snapshot] = await db
+  // One transaction: a failed application insert must not leave an orphan snapshot.
+  return db.transaction(async (tx) => {
+  const [snapshot] = await tx
     .insert(resumeSnapshots)
     .values({
       userId,
@@ -526,7 +533,7 @@ export async function persistDraft(
     })
     .returning();
 
-  await db.insert(applications).values({
+  await tx.insert(applications).values({
     userId,
     resumeSnapshotId: snapshot.id,
     roleTitle: result.job?.roleTitle ?? 'Baseline resume',
@@ -537,6 +544,7 @@ export async function persistDraft(
   });
 
   return snapshot.id;
+  });
 }
 
 /** The status of this snapshot's application once it has left draft, else null (REQ-9.2). */

@@ -28,55 +28,56 @@ export interface DashboardData {
 const RECENT_DRAFTS_SHOWN = 5;
 
 export async function getDashboardData(userId: string): Promise<DashboardData> {
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-
-  const [recordStats] = await db
-    .select({
-      total: sql<number>`count(*)::int`,
-      flagged: sql<number>`count(*) filter (where ${profileRecords.flaggedForRemoval})::int`,
-    })
-    .from(profileRecords)
-    .where(eq(profileRecords.userId, userId));
-
   /*
+   * Five independent reads, issued together (they were five sequential round trips, each
+   * paying the full network latency to the database).
+   *
    * The counts are lifetime totals, counted in the database — they used to be derived
-   * from the capped list below, so "Resumes drafted" could never read past the cap.
-   */
-  const [totals] = await db
-    .select({
-      drafts: sql<number>`count(*)::int`,
-      sent: sql<number>`count(*) filter (where ${applications.status} <> 'draft')::int`,
-    })
-    .from(applications)
-    .where(eq(applications.userId, userId));
-
-  // Rows, for the table that lists them. It shows five.
-  const apps = await db
-    .select()
-    .from(applications)
-    .where(eq(applications.userId, userId))
-    .orderBy(desc(applications.createdAt))
-    .limit(RECENT_DRAFTS_SHOWN);
-
-  /*
+   * from the capped list, so "Resumes drafted" could never read past the cap.
+   *
    * The average is for ONE role: the newest. A lifetime average mixes a data-analyst
    * resume with an SEO one, and the number describes neither. Matched on title and
-   * company, case-insensitively. Cast to float8 because postgres.js returns a numeric as
-   * a string, which would render as NaN on the tile.
+   * company, case-insensitively; the newest row is found in a subquery so this does not
+   * have to wait for the list. Cast to float8 because postgres.js returns a numeric as a
+   * string, which would render as NaN on the tile.
    */
+  const newest = (col: typeof applications.roleTitle | typeof applications.company) =>
+    sql`(select lower(${col}) from ${applications} where ${applications.userId} = ${userId} order by ${applications.createdAt} desc limit 1)`;
+
+  const [[user], [recordStats], [totals], apps, [roleAverage]] = await Promise.all([
+    db.select().from(users).where(eq(users.id, userId)).limit(1),
+    db
+      .select({
+        total: sql<number>`count(*)::int`,
+        flagged: sql<number>`count(*) filter (where ${profileRecords.flaggedForRemoval})::int`,
+      })
+      .from(profileRecords)
+      .where(eq(profileRecords.userId, userId)),
+    db
+      .select({
+        drafts: sql<number>`count(*)::int`,
+        sent: sql<number>`count(*) filter (where ${applications.status} <> 'draft')::int`,
+      })
+      .from(applications)
+      .where(eq(applications.userId, userId)),
+    db
+      .select()
+      .from(applications)
+      .where(eq(applications.userId, userId))
+      .orderBy(desc(applications.createdAt))
+      .limit(RECENT_DRAFTS_SHOWN),
+    db
+      .select({ avg: sql<number | null>`avg(${applications.score})::float8` })
+      .from(applications)
+      .where(
+        and(
+          eq(applications.userId, userId),
+          sql`lower(${applications.roleTitle}) = ${newest(applications.roleTitle)}`,
+          sql`lower(${applications.company}) = ${newest(applications.company)}`,
+        ),
+      ),
+  ]);
   const latest = apps[0];
-  const [roleAverage] = latest
-    ? await db
-        .select({ avg: sql<number | null>`avg(${applications.score})::float8` })
-        .from(applications)
-        .where(
-          and(
-            eq(applications.userId, userId),
-            sql`lower(${applications.roleTitle}) = lower(${latest.roleTitle})`,
-            sql`lower(${applications.company}) = lower(${latest.company})`,
-          ),
-        )
-    : [];
 
   return {
     draftCount: totals?.drafts ?? 0,

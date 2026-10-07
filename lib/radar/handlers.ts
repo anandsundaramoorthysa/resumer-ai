@@ -3,7 +3,7 @@
  * session, a database or Next. app/api/radar/route.ts wires the real ones (a Next route file
  * may not export anything but its handlers, hence this file).
  *
- * Order on every request: signed in (401) -> approved by the owner (403) -> for POST, same
+ * Order on every request: signed in (401) -> consent to the current policy (403) -> approved by the owner (403) -> for POST, same
  * origin (403), JSON content type (415), small body (413), strict shape (400). Every lib call
  * takes the session's userId and filters on it, so another user's run is indistinguishable
  * from a missing one (404).
@@ -12,11 +12,14 @@
 import { z } from 'zod';
 import { BudgetExceededError } from '@/lib/ai/budget';
 import { authoredMessage } from '@/lib/server/user-message';
+import { CONSENT_REQUIRED_MESSAGE } from '@/lib/legal/config';
 import type { RadarStatus } from './events';
 
 export interface RadarHandlerDeps {
   userId(): Promise<string | null>;
   approval(userId: string): Promise<string>;
+  /** True when the user has accepted the CURRENT policy version. Omitted = not checked (tests); the route wires the real one. */
+  consent?(userId: string): Promise<boolean>;
   assertBurst(userId: string): Promise<void>;
   credits(): Promise<object>;
   /** Hostnames besides the request's own that count as this site (AUTH_URL's). */
@@ -27,6 +30,15 @@ export interface RadarHandlerDeps {
   select(userId: string, runId: string, key: string): Promise<RadarStatus & { jobText: string }>;
   cancel(userId: string, runId: string): Promise<RadarStatus>;
   get(userId: string, runId?: string): Promise<RadarStatus | null>;
+  /** Kill switch: throws FlagOffError when `radar_enabled` is off. Defaults to the real flag. */
+  assertEnabled?(): Promise<void>;
+}
+
+export const RADAR_PAUSED_MESSAGE = 'Job Radar is paused for maintenance. Try again later.';
+
+async function defaultAssertEnabled(): Promise<void> {
+  const { assertFlag } = await import('@/lib/server/flags');
+  await assertFlag('radar_enabled', RADAR_PAUSED_MESSAGE);
 }
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -61,6 +73,7 @@ export function isMissingTable(err: unknown): boolean {
 }
 
 function fail(err: unknown) {
+  if (err instanceof Error && err.name === 'FlagOffError') return json({ error: RADAR_PAUSED_MESSAGE }, 503);
   if (isMissingTable(err)) return json({ error: MISSING_TABLE_MESSAGE }, 503);
   if (err instanceof BudgetExceededError) return json({ error: err.message }, 429);
   const message = authoredMessage(err, 'Job Radar hit a problem. Try again in a minute.');
@@ -93,6 +106,8 @@ export function makeRadarHandlers(deps: RadarHandlerDeps) {
   async function gate(): Promise<{ userId: string } | { res: Response }> {
     const userId = await deps.userId();
     if (!userId) return { res: json({ error: 'Sign in first.' }, 401) };
+    await (deps.assertEnabled ?? defaultAssertEnabled)(); // FlagOffError -> 503 via fail()
+    if (deps.consent && !(await deps.consent(userId))) return { res: json({ error: CONSENT_REQUIRED_MESSAGE }, 403) };
     if ((await deps.approval(userId)) !== 'approved') return { res: json(WAITING, 403) };
     return { userId };
   }

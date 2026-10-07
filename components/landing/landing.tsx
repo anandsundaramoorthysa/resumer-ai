@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ResumeArtifact } from './resume-artifact';
+import { LegalFooter } from '@/components/legal-footer';
 
 const STEPS = [
   ['§ 1', 'Import', 'Upload a resume or connect GitHub. Facts are read out and shown to you first.'],
@@ -56,12 +57,13 @@ export function Landing() {
         </ol>
       </section>
 
-      <footer className="mt-10 border-t border-line py-6 text-xs text-muted">
-        <p className="mb-3 max-w-prose text-sm">
+      <footer className="mt-10 border-t border-line py-6 text-center text-xs text-muted sm:text-left">
+        <p className="mb-3 max-w-prose text-sm max-sm:mx-auto">
           It is a drafting tool, not a guarantee: scores are the model&apos;s estimate and you
           approve what goes on the page.
         </p>
-        Resumer AI · Read-only access to your repositories · Access by owner approval
+        Resumer AI · Read-only access to your repositories · Access by invite or owner approval
+        <LegalFooter className="mt-3" />
       </footer>
     </>
   );

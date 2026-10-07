@@ -23,7 +23,14 @@ import { coerceHeading } from './headings';
 import { tidyResumeText } from '../generate/display-text';
 import { rendersAsPlainLine } from './sections';
 
-const FONT = 'Arial';
+/**
+ * Arial for Latin, with explicit fallbacks for the other scripts. A run names ONE font per
+ * script class (ascii/hAnsi for Latin, cs for complex scripts such as Devanagari and Tamil,
+ * eastAsia for CJK); with only Arial named, Word substituted at open time and a machine
+ * without the substitute showed boxes. Nirmala UI covers Devanagari and Tamil on Windows
+ * and ships with Office for Mac; Microsoft YaHei covers CJK. Arial itself has the rupee sign.
+ */
+const FONT = { ascii: 'Arial', hAnsi: 'Arial', cs: 'Nirmala UI', eastAsia: 'Microsoft YaHei' };
 const BODY_SIZE = 21; // half-points => 10.5pt
 const NAME_SIZE = 36; // 18pt
 const HEADING_SIZE = 23; // 11.5pt

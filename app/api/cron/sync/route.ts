@@ -22,6 +22,8 @@ import { NextRequest } from 'next/server';
 import { eq, isNotNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { latestCommitSha, parseRepoRef } from '@/lib/sync/github';
+import { recordHeartbeat } from '@/lib/server/housekeeping';
+import { log } from '@/lib/log';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -108,6 +110,8 @@ async function run(req: NextRequest) {
     }
   }
 
+  log.info('portfolio freshness check', { route: '/api/cron/sync', checked, invalidated, skipped, stoppedEarly, errors: errors.length });
+  await recordHeartbeat('sync');
   return Response.json({
     ok: true,
     checked,

@@ -15,7 +15,7 @@ import {
 } from '@/lib/server/dismissals';
 import { composeBulletText } from './bullet';
 import { tidyDate, tidyRecordData, tidyText } from '../steward/tidy';
-import { roleDateProblem, roleIdentity } from '@/lib/sync/roles';
+import { roleDateProblem, roleIdentity, sameJob } from '@/lib/sync/roles';
 import {
   coerceFormValues,
   formFor,
@@ -259,13 +259,18 @@ function prepareRole(input: z.infer<typeof RoleInput>) {
 }
 
 /** Refuses a second copy of a job the profile already holds, however it is spelled. */
-async function assertNewJob(userId: string, role: { company: string; title: string }, exceptId?: string) {
+async function assertNewJob(
+  userId: string,
+  role: { company: string; title: string; startDate: string; endDate: string },
+  exceptId?: string,
+) {
   const others = await db
-    .select({ id: rolesTable.id, company: rolesTable.company, title: rolesTable.title })
+    .select({ id: rolesTable.id, company: rolesTable.company, title: rolesTable.title, startDate: rolesTable.startDate, endDate: rolesTable.endDate })
     .from(rolesTable)
     .where(and(eq(rolesTable.userId, userId), ne(rolesTable.reviewState, 'rejected')));
-  const identity = roleIdentity(role.company, role.title);
-  if (others.some((r) => r.id !== exceptId && roleIdentity(r.company, r.title) === identity)) {
+  // Same identity AND overlapping/adjacent dates: an internship then a full-time role at one
+  // company is two jobs, not a duplicate.
+  if (others.some((r) => r.id !== exceptId && sameJob(r, role))) {
     throw new DuplicateRecordError('That job is already on your profile.');
   }
 }

@@ -67,6 +67,11 @@
 #
 # Set CRON_SECRET in the site environment to enable it. Without that variable the route
 # refuses every request, which is the intended default: it walks stored GitHub tokens.
+#
+# The three schedules (all doorbells, all UTC): draft-alerts.mts hourly at :05,
+# housekeeping.mts daily 03:30 (retention sweep), daily-sync.mts daily 04:15. Each pings an
+# optional dead-man's-switch afterwards: HEARTBEAT_URL_<NAME> (DRAFT_ALERTS, HOUSEKEEPING,
+# DAILY_SYNC) or HEALTHCHECKS_BASE_URL. See RUNBOOK.md.
 
 [dev]
   command = "npm run dev"

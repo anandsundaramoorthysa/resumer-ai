@@ -36,7 +36,7 @@ export default async function ResumePage({
 
   return (
     <div className="min-h-screen min-h-dvh">
-      <AppHeader width="6xl" />
+      <AppHeader width="6xl" session={session} />
 
       <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-8 sm:px-5">
         <ResumeEditor

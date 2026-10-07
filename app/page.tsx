@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { auth, isAuthConfigured } from '@/auth';
+import { isAuthConfigured } from '@/auth';
+import { getSession } from '@/lib/server/session';
 import { isDatabaseConfigured } from '@/lib/db';
 import { isEncryptionConfigured } from '@/lib/auth/secret-box';
 import { hasAnyProvider, availableProviders } from '@/lib/ai/models';
@@ -9,8 +10,7 @@ import { Landing } from '@/components/landing/landing';
 import { ClearRadarHandoff } from '@/components/radar/clear-handoff';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { getDashboardData } from '@/lib/server/dashboard';
-import { approvalFor } from '@/lib/server/approval';
-import { redirect } from 'next/navigation';
+import { requireConsentAndApproval } from '@/lib/server/approval';
 
 export const metadata = { alternates: { canonical: '/' } };
 
@@ -32,7 +32,7 @@ export default async function HomePage() {
     );
   }
 
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user?.id) {
     return (
       <Shell>
@@ -41,8 +41,8 @@ export default async function HomePage() {
     );
   }
 
-  // Signed in is not the same as let in: a new account waits for the owner's approval.
-  if ((await approvalFor(session.user.id)) !== 'approved') redirect('/pending');
+  // Signed in is not the same as let in: consent to the current policy, then the owner's approval.
+  await requireConsentAndApproval(session.user.id);
 
   const data = await getDashboardData(session.user.id);
   const firstName = (session.user.name ?? 'there').split(' ')[0];

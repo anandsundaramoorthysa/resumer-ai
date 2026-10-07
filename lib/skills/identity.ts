@@ -52,9 +52,16 @@
  * difference between C, C++ and C#, and between Node and Node.js.
  */
 export function normalizeSkill(name: string): string {
+  // NFKC, then keep letters, digits and combining MARKS in any script. The old ASCII-only
+  // class turned "पायथन", "जावा" and "தமிழ்" into the empty string, so every non-Latin skill
+  // collapsed to nothing and dedupeSkillNames dropped them all. Marks matter: Indic vowel
+  // signs are \p{M}, and stripping them changes the word. Joiners are removed, not spaced,
+  // so a conjunct is not split in two.
   return name
+    .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^a-z0-9+#.\s-]/g, ' ')
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, '')
+    .replace(/[^\p{L}\p{N}\p{M}+#.\s-]/gu, ' ')
     .replace(/[-\s]+/g, ' ')
     .replace(/\.+$/, '')
     .trim();
@@ -275,6 +282,10 @@ export function titleCasePlain(name: string): string {
  */
 export function skillIdentity(name: string): string {
   const n = normalizeSkill(name);
+  // A name with no letters or digits at all (a lone symbol or emoji) has no normalised
+  // form; its identity is the raw text rather than "", which every caller would read as
+  // "no skill" and silently drop.
+  if (!n) return name.normalize('NFKC').trim().toLowerCase();
   const canonical = ALIASES[n];
   return canonical ? canonical.toLowerCase() : n;
 }

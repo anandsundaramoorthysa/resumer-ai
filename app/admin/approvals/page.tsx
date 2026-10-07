@@ -1,14 +1,15 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { auth } from '@/auth';
 import { AppHeader } from '@/components/app-header';
 import { accountsForReview, isOwnerSession } from '@/lib/server/approval';
 import { DecisionButtons } from './decision-buttons';
+import { formatDateTime } from '@/lib/format';
 
 export const metadata = { title: 'Approvals' };
 export const dynamic = 'force-dynamic';
 
-const when = (d: Date | null) =>
-  d ? `${d.toLocaleString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} UTC` : '—';
+const when = (d: Date | null) => (d ? formatDateTime(d) : '—');
 
 /**
  * The owner's review of new accounts. Anyone else gets a plain 404: this page should not
@@ -29,7 +30,9 @@ export default async function ApprovalsPage() {
         <p className="mt-2 max-w-prose text-sm text-muted">
           Someone who signs up can sign in and see a waiting page, and nothing else, until you
           decide. Approved accounts get the normal limit of 400 AI calls a day; denied ones stay
-          locked out and can delete themselves. Either way they are told by email.
+          locked out and can delete themselves. Either way they are told by email. Accounts with
+          a valid invite code are approved automatically, up to the daily quota.{' '}
+          <Link href="/admin/invites" className="underline">Manage invite codes</Link>.
         </p>
 
         <section className="mt-8 border-t border-line pt-4" aria-labelledby="pending-heading">

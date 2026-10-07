@@ -12,15 +12,15 @@
  */
 
 import 'server-only';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { auditLog, contactInfo, profileRecords, roles as rolesTable } from '@/lib/db/schema';
 import { audit } from '@/lib/server/profile';
-import { bulletHash, hashContent } from '@/lib/sync/reconcile';
+import { bulletHash, bulletHashVariants, hashContent, hashVariants } from '@/lib/sync/reconcile';
 import { formFor, hashInput, missingRequired, tagSource } from '@/lib/profile/forms';
 import { deriveTags } from '@/lib/sync/tags';
-import { isRoleDate, roleDateProblem, roleIdentity } from '@/lib/sync/roles';
+import { isRoleDate, roleDateProblem, roleIdentity, sameJob, type RoleLike } from '@/lib/sync/roles';
 import type { RecordSource } from '@/lib/types';
 import { tidyDate, tidyRecordData, tidyText } from '@/lib/steward/tidy';
 import { fillContactGaps, type ContactFields } from './contact-links';
@@ -117,7 +117,12 @@ export type CommitPayload = z.infer<typeof CommitPayloadSchema>;
 
 export interface CommitSummary {
   created: number;
+  /** Everything selected that did not become a new row (already present + dismissed). */
   duplicates: number;
+  /** Selected facts the profile already holds. */
+  alreadyPresent: number;
+  /** Selected facts the user had removed earlier, so they were not brought back. */
+  dismissed: number;
   rolesCreated: number;
   contactUpdated: boolean;
   /** Selected entries that carried no usable content and were skipped. */
@@ -174,22 +179,30 @@ export function datedRoles(incoming: IncomingRole[]): { roles: IncomingRole[]; u
  * jobs" bug, fixed for the sync and brought back by every import.
  */
 export function resolveRoles(
-  stored: Array<{ id: string; contentHash: string; company: string; title: string }>,
-  incoming: Array<{ company: string; title: string; startDate: string }>,
+  stored: Array<{ id: string; contentHash: string; company: string; title: string; startDate?: string; endDate?: string }>,
+  incoming: Array<{ company: string; title: string; startDate: string; endDate?: string }>,
 ): { targets: Array<{ existingId: string } | { newIndex: number }>; fresh: number[] } {
+  const like = (r: { company: string; title: string; startDate?: string; endDate?: string }): RoleLike => ({
+    company: r.company,
+    title: r.title,
+    startDate: r.startDate ?? '',
+    endDate: r.endDate ?? r.startDate ?? '',
+  });
   const byHash = new Map(stored.map((r) => [r.contentHash, r.id]));
-  const byIdentity = new Map(stored.map((r) => [roleIdentity(r.company, r.title), r.id]));
-  const newByIdentity = new Map<string, number>();
+  // Same company-and-title identity AND compatible dates (sameJob): an internship and the
+  // later full-time role at one company are two jobs, so bullets are not filed under the wrong one.
+  const storedLike = stored.map((r) => ({ id: r.id, role: like(r) }));
   const fresh: number[] = [];
+  const freshLike: Array<{ index: number; role: RoleLike }> = [];
 
   const targets = incoming.map((role, i) => {
     const hash = hashContent(['role', role.company, role.title, role.startDate]);
-    const identity = roleIdentity(role.company, role.title);
-    const existingId = byHash.get(hash) ?? byIdentity.get(identity);
+    const incomingLike = like(role);
+    const existingId = byHash.get(hash) ?? storedLike.find((s) => sameJob(s.role, incomingLike))?.id;
     if (existingId) return { existingId };
-    const seen = newByIdentity.get(identity);
-    if (seen !== undefined) return { newIndex: seen };
-    newByIdentity.set(identity, i);
+    const seen = freshLike.find((f) => sameJob(f.role, incomingLike));
+    if (seen) return { newIndex: seen.index };
+    freshLike.push({ index: i, role: incomingLike });
     fresh.push(i);
     return { newIndex: i };
   });
@@ -201,6 +214,8 @@ interface RowIn {
   contentHash: string;
   tags: string[];
   data: Record<string, unknown>;
+  /** Every hash this fact may already be stored under — see `hashVariants`. */
+  variants: string[];
 }
 
 export async function commitImport(
@@ -248,7 +263,7 @@ export async function commitImport(
   // nothing to group it under and it renders as a loose line with no employer.
   const stored = roles.length
     ? await db
-        .select({ id: rolesTable.id, contentHash: rolesTable.contentHash, company: rolesTable.company, title: rolesTable.title })
+        .select({ id: rolesTable.id, contentHash: rolesTable.contentHash, company: rolesTable.company, title: rolesTable.title, startDate: rolesTable.startDate, endDate: rolesTable.endDate })
         .from(rolesTable)
         // A job the user rejected is not one to file new bullets under — they would be
         // invisible, under a role no draft loads.
@@ -287,6 +302,7 @@ export async function commitImport(
       rows.push({
         type: 'experience-bullet',
         contentHash: bulletHash(company, bullet.text),
+        variants: bulletHashVariants(company, bullet.text),
         // Derived here, like every other writer. The browser's tags were stored as sent,
         // and tags decide which job keywords a resume is allowed to claim.
         tags: deriveTags(bullet.text),
@@ -318,6 +334,7 @@ export async function commitImport(
     rows.push({
       type: rec.type,
       contentHash: hashContent(hashInput(form, data)),
+      variants: hashVariants(hashInput(form, data)),
       tags: deriveTags(tagSource(form, data)),
       data,
     });
@@ -326,20 +343,47 @@ export async function commitImport(
   // Every row, bullets included, checked against the marks before anything is written.
   const wanted = rows.filter((r) => !wasRemoved(dismissalKeysFor(r.type, r.data, r.contentHash)));
 
-  const created = await insertRecords(userId, wanted, source);
+  // A row stored before hashes were Unicode-normalised sits under a different hash than
+  // the same text hashes to now, and the unique index cannot see them as one. Checked here
+  // against every hash the text could have been stored under.
+  const toInsert = await withoutLegacyTwins(userId, wanted);
+
+  const created = await insertRecords(userId, toInsert, source);
   const contactUpdated = await writeContact(userId, payload.contact ?? null, source);
+  // `dismissed` and `alreadyPresent` are different answers: one is "you removed this
+  // before", the other "you already have this". They used to be one number, shown as
+  // "already present", which told someone who had deleted an entry that it was still there.
+  const dismissed = rows.length - wanted.length;
+  const alreadyPresent = wanted.length - created;
+  // Kept for compatibility: everything selected that did not become a new row.
   const duplicates = rows.length - created;
   const rolesCreated = fresh.length;
 
   return {
     created,
     duplicates,
+    alreadyPresent,
+    dismissed,
     rolesCreated,
     contactUpdated,
     unreadable,
     undated,
-    message: summarize(created, duplicates, rolesCreated, contactUpdated, unreadable, undated),
+    message: summarize(created, alreadyPresent, rolesCreated, contactUpdated, unreadable, undated, dismissed),
   };
+}
+
+/** Drops rows whose text is already stored under a pre-normalisation hash. */
+async function withoutLegacyTwins(userId: string, rows: RowIn[]): Promise<RowIn[]> {
+  const all = [...new Set(rows.flatMap((r) => r.variants))];
+  const present = new Set<string>();
+  for (let i = 0; i < all.length; i += 500) {
+    const found = await db
+      .select({ contentHash: profileRecords.contentHash })
+      .from(profileRecords)
+      .where(and(eq(profileRecords.userId, userId), inArray(profileRecords.contentHash, all.slice(i, i + 500))));
+    for (const f of found) present.add(f.contentHash);
+  }
+  return rows.filter((r) => !r.variants.some((v) => present.has(v) && v !== r.contentHash));
 }
 
 /**
@@ -405,13 +449,14 @@ export async function writeContact(
   return true;
 }
 
-function summarize(
+export function summarize(
   created: number,
   duplicates: number,
   rolesCreated: number,
   contactUpdated: boolean,
   unreadable: number,
   undated = 0,
+  dismissed = 0,
 ): string {
   const undatedNote =
     undated > 0
@@ -421,15 +466,20 @@ function summarize(
     if (unreadable > 0) {
       return `${unreadable} selected entr${unreadable === 1 ? 'y was' : 'ies were'} incomplete and could not be saved.${undatedNote}`;
     }
-    return (
-      (duplicates > 0
-        ? `Everything selected was already in your profile — nothing added.`
-        : 'Nothing was selected, so nothing was added.') + undatedNote
-    );
+    const why =
+      duplicates > 0 && dismissed > 0
+        ? `Everything selected was already in your profile or something you removed earlier — nothing added.`
+        : duplicates > 0
+          ? `Everything selected was already in your profile — nothing added.`
+          : dismissed > 0
+            ? `Everything selected is something you removed earlier, so it was not added back.`
+            : 'Nothing was selected, so nothing was added.';
+    return why + undatedNote;
   }
   const bits = [`${created} fact${created === 1 ? '' : 's'} added`];
   if (rolesCreated > 0) bits.push(`${rolesCreated} role${rolesCreated === 1 ? '' : 's'}`);
   if (duplicates > 0) bits.push(`${duplicates} already present`);
+  if (dismissed > 0) bits.push(`${dismissed} removed earlier, skipped`);
   if (contactUpdated) bits.push('contact details filled in');
   if (unreadable > 0) bits.push(`${unreadable} incomplete and skipped`);
   return bits.join(', ') + undatedNote;

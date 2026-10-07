@@ -23,6 +23,23 @@
  * @param sessionsValidFrom   the account's last password reset, or null if there has
  *                            never been one.
  */
+/** Session lifetime: short, because a stateless JWT cannot be revoked any other way. */
+export const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+export const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
+
+/**
+ * Whether a token may still be used, given the account row it points at (or undefined
+ * when the row no longer exists). A deleted account's JWT used to stay valid for its whole
+ * lifetime; a missing row is now a dead session, not a pass.
+ */
+export function sessionIsLive(
+  authAt: unknown,
+  row: { sessionsValidFrom: Date | null } | null | undefined,
+): boolean {
+  if (!row) return false;
+  return sessionSurvivesReset(authAt, row.sessionsValidFrom);
+}
+
 export function sessionSurvivesReset(
   authAt: unknown,
   sessionsValidFrom: Date | null | undefined,

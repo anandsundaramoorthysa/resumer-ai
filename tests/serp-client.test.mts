@@ -158,14 +158,20 @@ await suiteAsync('budget and errors', async () => {
     assert.equal(s.searches().length, 45);
   });
 
-  await testAsync('a DB error on the hour count fails closed to replay', async () => {
+  await testAsync('a DB error on the hour count fails closed as UNAVAILABLE, never as sample data', async () => {
     const s = setup({ SERPAPI_API_KEY: KEY }, (u) => accountOk(u) ?? ok(jobsJson));
     s.store.countSince = async () => {
       throw new Error('db down');
     };
     const r = await searchJobs('closed developer', { userId: 'u1' });
-    assert.ok(r.ok && r.mode === 'replay');
+    assert.ok(!r.ok && r.reason === 'unavailable');
+    assert.match(r.message, /temporarily unavailable/);
     assert.equal(s.searches().length, 0);
+    const c = await creditStatus();
+    assert.ok(c.unavailable && c.mode === 'replay');
+    // Without a key there is nothing to be unavailable: replay stays honest sample data.
+    setup({}, () => ok({}));
+    assert.equal((await creditStatus()).unavailable, false);
   });
 
   await testAsync('out-of-credits 429 is budget, a bare 429 is rate', async () => {
@@ -176,12 +182,12 @@ await suiteAsync('budget and errors', async () => {
     assert.ok(!r.ok && r.reason === 'budget');
   });
 
-  await testAsync('empty results cost 0 credits and are cached briefly', async () => {
+  await testAsync('empty results are billed 1 credit (verified live 2026-10-08) and are cached briefly', async () => {
     const s = setup({ SERPAPI_API_KEY: KEY }, (u) =>
       accountOk(u) ?? ok({ error: "Google hasn't returned any results for this query." }),
     );
     const r = await searchJobs('nothing developer', { userId: 'u1' });
-    assert.ok(r.ok && r.credits === 0 && r.data.length === 0);
+    assert.ok(r.ok && r.credits === 1 && r.data.length === 0);
     const again = await searchJobs('nothing developer', { userId: 'u1' });
     assert.ok(again.ok && again.cached);
     assert.equal(s.searches().length, 1);
@@ -236,14 +242,17 @@ await suiteAsync('companyIntel and helpers', async () => {
     assert.equal(r.data.rating, 3.6);
     assert.equal(r.data.ratingSource, 'Glassdoor (via Google)');
     assert.equal(r.data.headlines.length, 1);
-    assert.equal(r.credits, 2);
+    assert.equal(r.credits, 3); // empty listing + news + google, each billed
     assert.ok(s.searches().some((u) => u.searchParams.get('q') === '"Acme" company India'));
   });
 
-  await testAsync('google_jobs timeout leaves room for slow live searches (was 15s: billed then dropped)', async () => {
+  await testAsync('every single SerpApi http call is bounded at 8s (a 40s call outlived the host and was billed in a loop)', async () => {
     resetSerpDeps();
     const { deps } = await import('@/lib/serp/budget');
-    assert.ok(deps.searchTimeoutMs('google_jobs') >= 30_000 && deps.searchTimeoutMs('google_jobs') < 45_000);
+    for (const e of ['google_jobs', 'google_news', 'google', 'google_jobs_listing']) {
+      assert.ok(deps.searchTimeoutMs(e) <= 8_000, e);
+    }
+    assert.ok(deps.timeoutMs <= 8_000, 'account.json');
   });
 
   await testAsync('cache keys ignore api_key and param order', async () => {

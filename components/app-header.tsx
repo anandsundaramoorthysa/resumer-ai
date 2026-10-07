@@ -31,7 +31,8 @@
 
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { auth, signOut } from '@/auth';
+import { signOut } from '@/auth';
+import { getSession } from '@/lib/server/session';
 import { AccountMenu } from '@/components/account-menu';
 import { DesktopSidebar } from '@/components/desktop-sidebar';
 import { Logo } from '@/components/logo';
@@ -104,14 +105,17 @@ export async function AppHeader({
    * prop lines up with the rest instead of inheriting the old 1024px outlier.
    */
   width = '6xl',
+  session: given,
 }: {
   /** The href of the page being rendered, so it can be marked in the nav. */
   current?: string;
   userName?: string | null;
   width?: HeaderWidth;
+  /** Pass the page's own session to skip a lookup; defaults to the per-request cached one. */
+  session?: Awaited<ReturnType<typeof getSession>>;
 }) {
   const container = `mx-auto ${WIDTHS[width]} px-4 sm:px-5`;
-  const session = await auth();
+  const session = given === undefined ? await getSession() : given;
   const signedIn = Boolean(session?.user?.id);
   const name = userName ?? session?.user?.name ?? null;
 

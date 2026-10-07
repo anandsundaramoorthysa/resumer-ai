@@ -1,0 +1,17 @@
+# Weekly npm updates grouped into one PR per kind (minor+patch together, majors on their own);
+# monthly for the workflow actions. Security updates are separate and always open immediately.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -5,7 +5,16 @@ import { db } from '@/lib/db';
 import { syncJobs, users } from '@/lib/db/schema';
 import { writeContact } from '@/lib/import/commit';
 import { authoredMessage } from '@/lib/server/user-message';
-import { fetchPortfolioFiles, latestCommitSha, parseRepoRef } from './github';
+import {
+  fetchPortfolioCorpus,
+  GithubRateLimitError,
+  latestCommitSha,
+  parseRepoRef,
+} from './github';
+import { drizzleJobStore, guardedStep, jobResult } from './guards';
+import type { Job, StepResult, StepWork } from './guards';
+import { judgePass, mark, splitPartials } from './partial';
+import type { PartialMark } from './partial';
 import {
   extractFromSlice,
   mergeExtractions,
@@ -38,15 +47,9 @@ import { assertDailyBudget, recordDailyUsage } from '@/lib/ai/daily-budget';
  * the provider that stalled is on cooldown and a healthy one takes it.
  */
 
-export interface StepResult {
-  jobId: string;
-  step: number;
-  totalSteps: number;
-  status: 'running' | 'done' | 'error';
-  message: string;
-  done: boolean;
-  error?: string;
-}
+export type { StepResult };
+
+const store = drizzleJobStore(db);
 
 /** Provisional; the real count is set once we know how many slices there are. */
 const INITIAL_TOTAL_STEPS = 8;
@@ -156,66 +159,37 @@ export async function advanceSyncJob(
   // step's cost and the budget has to cover the whole request, not just the AI call.
   const deadlineAt = Date.now() + STEP_BUDGET_MS;
 
-  const [job] = await db
-    .select()
-    .from(syncJobs)
-    .where(and(eq(syncJobs.id, jobId), eq(syncJobs.userId, userId)))
-    .limit(1);
-
-  if (!job) throw new Error('Sync job not found.');
-  if (job.status !== 'running') {
-    return {
-      jobId: job.id,
-      step: job.step,
-      totalSteps: job.totalSteps,
-      status: job.status as StepResult['status'],
-      message: job.message,
-      done: true,
-      error: job.error ?? undefined,
-    };
-  }
-
-  try {
-    return await runStep(userId, job, deadlineAt);
-  } catch (err) {
-    // Stored on the job and shown on the settings page, so it must be a sentence: a
-    // database error here used to put "Failed query: update …" in front of the user.
-    console.error('[sync] step failed for user', userId, err);
-    const message = authoredMessage(err, 'The sync stopped on our side. Try again in a minute.').slice(0, 400);
-    await db
-      .update(syncJobs)
-      .set({ status: 'error', error: message, message: 'Sync failed', updatedAt: new Date() })
-      .where(eq(syncJobs.id, job.id));
-    return {
-      jobId: job.id,
-      step: job.step,
-      totalSteps: job.totalSteps,
-      status: 'error',
-      message: 'Sync failed',
-      done: true,
-      error: message,
-    };
-  }
+  // Claim, run, write only if still at the step that was read — see lib/sync/guards.ts. A
+  // second tab (or a double click) that loses the claim runs nothing and spends nothing.
+  return guardedStep(
+    store,
+    userId,
+    jobId,
+    (job) => runStep(userId, job, deadlineAt),
+    (err) => {
+      // Stored on the job and shown on the settings page, so it must be a sentence: a
+      // database error here used to put "Failed query: update …" in front of the user.
+      console.error('[sync] step failed for user', userId, err);
+      return authoredMessage(err, 'The sync stopped on our side. Try again in a minute.').slice(0, 400);
+    },
+  );
 }
 
-type Job = typeof syncJobs.$inferSelect;
+/** A rate limit is a sentence of ours; the error class itself would be replaced by the fallback. */
+function plainRateLimit(err: unknown): never {
+  if (err instanceof GithubRateLimitError) throw new Error(err.message);
+  throw err;
+}
 
 async function runStep(
   userId: string,
   job: Job,
   deadlineAt: number,
-): Promise<StepResult> {
-  const finish = async (patch: Partial<Job>, res: Omit<StepResult, 'jobId' | 'totalSteps'>) => {
-    await db
-      .update(syncJobs)
-      .set({ ...patch, updatedAt: new Date() })
-      .where(eq(syncJobs.id, job.id));
-    return {
-      jobId: job.id,
-      totalSteps: patch.totalSteps ?? job.totalSteps,
-      ...res,
-    };
-  };
+): Promise<StepWork> {
+  const finish = async (
+    patch: Partial<Job>,
+    res: Omit<StepResult, 'jobId' | 'totalSteps'>,
+  ): Promise<StepWork> => ({ patch, result: res });
 
   // ---------------------------------------------------------- step 0: fetch --
   if (job.step === 0) {
@@ -231,9 +205,11 @@ async function runStep(
     }
     const token = access.token;
 
-    const sha = await latestCommitSha(ref, token);
+    const sha = await latestCommitSha(ref, token).catch(plainRateLimit);
 
-    // The SHA gate (NFR-7): unchanged means the whole job is already done.
+    // The SHA gate (NFR-7): unchanged means the whole job is already done. The SHA is only
+    // ever stored after a complete pass (see the final step), so "unchanged" really does
+    // mean everything was read.
     if (sha === user?.lastSyncedSha) {
       return finish(
         { status: 'done', step: job.totalSteps, message: 'Already up to date' },
@@ -241,8 +217,14 @@ async function runStep(
       );
     }
 
-    const files = await fetchPortfolioFiles(ref, token, sha);
+    const corpus = await fetchPortfolioCorpus(ref, token, sha).catch(plainRateLimit);
+    const files = corpus.files;
     if (files.length === 0) {
+      // Rate limits throw before this; a read that failed for any other reason is not an
+      // empty repository either.
+      if (corpus.incomplete.length > 0) {
+        throw new Error(`${corpus.incomplete[0]}. Nothing was changed — try again.`);
+      }
       throw new Error(
         'No readable content files found in that repository. Check the repo has your profile data in it.',
       );
@@ -260,6 +242,12 @@ async function runStep(
         step: 1,
         sha,
         corpus: slices,
+        // What step 0 could not read rides along with the output, so the final step knows
+        // the pass is partial. See lib/sync/partial.ts.
+        partials: [
+          ...corpus.incomplete.map((n) => mark('incomplete', n)),
+          ...corpus.unread.map((n) => mark('unread', n)),
+        ] as unknown as Job['partials'],
         totalSteps: slices.length + 2,
         message: `Read ${files.length} files — reading ${sliceLabel(slices[0])}…`,
       },
@@ -328,12 +316,20 @@ async function runStep(
     const nextStep = job.step + 1;
     const next = nextQueue[index + 1];
 
+    // A slice that has used every attempt is NOT read. Recorded, so the final step does
+    // not read its absence as "this was removed from the portfolio".
+    const skippedMark: PartialMark[] = failure !== null && !requeue ? [mark('skipped', label)] : [];
+
     return finish(
       {
         step: nextStep,
         corpus: retries.length > 0 ? nextQueue : undefined,
         totalSteps: nextQueue.length + 2,
-        partials: [...(job.partials ?? []), ...(partial ? [partial] : [])],
+        partials: [
+          ...(job.partials ?? []),
+          ...(partial ? [partial] : []),
+          ...skippedMark,
+        ] as unknown as Job['partials'],
         message: next ? `Read ${label} — next: ${sliceLabel(next)}…` : 'Saving…',
       },
       {
@@ -351,11 +347,23 @@ async function runStep(
 
   // --------------------------------------------- final step: merge and write --
   const totalSteps = queue.length + 2;
-  const merged = mergeExtractions(
-    (job.partials ?? []) as Array<Partial<ExtractedProfile>>,
+  const { extractions, ...tally } = splitPartials<Partial<ExtractedProfile>>(
+    (job.partials ?? []) as Array<Partial<ExtractedProfile> | PartialMark>,
   );
+  const verdict = judgePass(tally);
+  const merged = mergeExtractions(extractions);
   const parsed = toRecords(merged);
-  const summary = await applyParsedProfile(userId, parsed, job.sha ?? null);
+
+  // Only a complete pass may flag what it did not find, or remember the commit as done.
+  const applied = await applyParsedProfile(userId, parsed, job.sha ?? null, {
+    flagMissing: verdict.flagMissing,
+    storeSha: verdict.storeSha,
+  });
+  const summary = verdict.notice
+    ? applied === 'Already up to date'
+      ? verdict.notice
+      : `${verdict.notice}. ${applied}`
+    : applied;
 
   // Fills gaps only. This was an upsert of whatever the model read, which blanked a stored
   // name whenever the portfolio did not state one and bypassed the review queue entirely.
@@ -371,19 +379,6 @@ export async function getSyncJob(
   userId: string,
   jobId: string,
 ): Promise<StepResult | null> {
-  const [job] = await db
-    .select()
-    .from(syncJobs)
-    .where(and(eq(syncJobs.id, jobId), eq(syncJobs.userId, userId)))
-    .limit(1);
-  if (!job) return null;
-  return {
-    jobId: job.id,
-    step: job.step,
-    totalSteps: job.totalSteps,
-    status: job.status as StepResult['status'],
-    message: job.message,
-    done: job.status !== 'running',
-    error: job.error ?? undefined,
-  };
+  const job = await store.get(userId, jobId);
+  return job ? jobResult(job) : null;
 }

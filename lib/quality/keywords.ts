@@ -18,8 +18,11 @@ export const KEYWORD_GATE_THRESHOLD = 0.7;
 /** Normalizes for comparison: lowercase, strip punctuation, collapse whitespace. */
 function norm(s: string): string {
   return s
+    .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}+#.\s-]/gu, ' ')
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, '')
+    // Marks and "&" survive: see normalize() in vocabulary.ts.
+    .replace(/[^\p{L}\p{N}\p{M}+#.&\s-]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }

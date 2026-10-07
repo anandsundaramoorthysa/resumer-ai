@@ -1,0 +1,23 @@
+{
+  "extends": "../../scripts/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/lib/db": [
+        "./lib-db-stub.mts"
+      ],
+      "@/auth": [
+        "./auth-stub.mts"
+      ],
+      "@/*": [
+        "../../*"
+      ],
+      "server-only": [
+        "../../scripts/stubs/server-only.ts"
+      ]
+    }
+  },
+  "include": [],
+  "exclude": [
+    "../../node_modules"
+  ]
+}

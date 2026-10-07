@@ -9,9 +9,14 @@
     "start": "next start",
     "lint": "eslint",
     "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --tsconfig scripts/tsconfig.json scripts/migrate.mts up",
+    "db:migrate:status": "tsx --tsconfig scripts/tsconfig.json scripts/migrate.mts status",
+    "db:baseline": "tsx --tsconfig scripts/tsconfig.json scripts/migrate.mts baseline",
     "db:studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit && tsc --noEmit -p scripts/tsconfig.json",
-    "test": "tsx --tsconfig scripts/tsconfig.json tests/run.mts"
+    "test": "tsx --tsconfig scripts/tsconfig.json tests/run.mts",
+    "test:coverage": "node scripts/ci-coverage.mjs"
   },
   "dependencies": {
     "@ai-sdk/deepinfra": "^2.0.78",
@@ -27,9 +32,9 @@
     "drizzle-orm": "^0.45.2",
     "mammoth": "^1.12.2",
     "nanoid": "^5.1.16",
-    "next": "16.3.4",
+    "next": "16.3.8",
     "next-auth": "^5.0.0-beta.32",
-    "nodemailer": "^10.0.0",
+    "nodemailer": "^10.0.15",
     "pdf-parse": "^2.4.5",
     "postgres": "^3.4.9",
     "react": "19.2.8",
@@ -38,6 +43,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@netlify/plugin-nextjs": "^5.15.13",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
@@ -48,7 +54,7 @@
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
-    "eslint-config-next": "16.3.4",
+    "eslint-config-next": "16.3.8",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
     "typescript": "^5"

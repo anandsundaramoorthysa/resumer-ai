@@ -27,7 +27,7 @@ export default async function ApplicationsPage() {
 
   return (
     <div className="min-h-screen min-h-dvh">
-      <AppHeader current="/applications" width="6xl" />
+      <AppHeader current="/applications" width="6xl" session={session} />
 
       <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none">
         <p className="eyebrow">§ Applications</p>

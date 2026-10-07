@@ -15,6 +15,7 @@ import { BudgetExceededError, DraftBudget } from '@/lib/ai/budget';
 import { assertDailyBudget, recordDailyUsage } from '@/lib/ai/daily-budget';
 import { generateCoverLetter, coverLetterToText } from '@/lib/generate/cover-letter';
 import { generateInterviewPrep } from '@/lib/generate/interview';
+import { userMessage } from '@/lib/server/user-message';
 import type { JobRequirement, ResumeDocument } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -81,8 +82,10 @@ export async function POST(
       text: coverLetterToText(letter, doc),
     });
   } catch (err) {
+    // Raw `err.message` is a provider's error or a query with SQL in it; log it, say less.
+    console.error('[extras] generation failed for user', userId, err);
     return Response.json(
-      { error: err instanceof Error ? err.message : 'Generation failed.' },
+      { error: userMessage(err, 'Generation failed. Try again in a minute.') },
       { status: 500 },
     );
   } finally {

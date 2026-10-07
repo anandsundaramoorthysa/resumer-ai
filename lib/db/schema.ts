@@ -17,6 +17,7 @@ import {
   timestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
 /* ------------------------------------------------------------------ auth ---- */
@@ -412,7 +413,11 @@ export const applications = pgTable(
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
-  (t) => [index('application_user_idx').on(t.userId)],
+  (t) => [
+    index('application_user_idx').on(t.userId),
+    // FK without an index: deleting a snapshot scanned the table (11ms -> 0.2ms).
+    index('application_snapshot_idx').on(t.resumeSnapshotId),
+  ],
 );
 
 /* ------------------------------------------------------------ ops / audit ---- */
@@ -447,7 +452,11 @@ export const aiUsageDaily = pgTable(
     calls: integer('calls').notNull().default(0),
     tokens: integer('tokens').notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.day] })],
+  (t) => [
+    primaryKey({ columns: [t.userId, t.day] }),
+    // Covers the app-wide "spent today" sum as an index-only scan (155ms seq scan -> 3.3ms).
+    index('ai_usage_daily_day_idx').on(t.day, t.calls, t.tokens),
+  ],
 );
 
 /**
@@ -531,8 +540,22 @@ export const draftRuns = pgTable(
     errorKind: text('error_kind'),
     /** Developer-facing, redacted and truncated. Owner-visible only, never streamed. */
     errorDetail: text('error_detail'),
+    /**
+     * The client's per-attempt `Idempotency-Key` (lib/server/draft-idempotency.ts). Null for
+     * runs from before the key existed and for callers that send none. Unique per user
+     * while set, so two requests carrying one key cannot both start a pipeline.
+     */
+    idempotencyKey: text('idempotency_key'),
   },
-  (t) => [index('draft_run_user_idx').on(t.userId, t.startedAt)],
+  (t) => [
+    uniqueIndex('draft_run_idem_uq')
+      .on(t.userId, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} is not null`),
+    index('draft_run_user_idx').on(t.userId, t.startedAt),
+    index('draft_run_snapshot_idx').on(t.snapshotId),
+    // Retention sweep (lib/server/housekeeping.ts) deletes by age across all users.
+    index('draft_run_started_idx').on(t.startedAt),
+  ],
 );
 
 /**
@@ -678,3 +701,6 @@ export const dismissedRecords = pgTable(
 );
 
 export * from './schema-radar';
+export * from './schema-compliance';
+export * from './schema-ai';
+export * from './schema-ops';
