@@ -1,6 +1,6 @@
 export default function Loading() {
   return (
-    <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-8 sm:px-5">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-5">
       <div role="status" aria-live="polite">
         <span className="sr-only">Loading your resume…</span>
         <p className="eyebrow">Review</p>
@@ -11,6 +11,6 @@ export default function Loading() {
           ))}
         </div>
       </div>
-    </main>
+    </div>
   );
 }

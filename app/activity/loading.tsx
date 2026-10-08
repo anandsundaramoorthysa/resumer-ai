@@ -1,7 +1,7 @@
 /** Route-level fallback: hairline-rule skeleton, no cards. Announced once, not per bar. */
 export default function Loading() {
   return (
-    <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-5 py-8 outline-none" aria-busy="true">
+    <div className="mx-auto max-w-6xl px-5 py-8" aria-busy="true">
       <p role="status" className="sr-only">
         Loading activity
       </p>
@@ -17,6 +17,6 @@ export default function Loading() {
           ))}
         </div>
       </div>
-    </main>
+    </div>
   );
 }

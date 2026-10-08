@@ -57,11 +57,26 @@ await suiteAsync('rateLimit: the ceiling', async () => {
 
   await testAsync('the subject check runs first: both over -> the address message', async () => {
     await reset();
-    await seed('email:c@x.test', 'sign-in', LIMITS['sign-in'].subject.max, 1000);
+    await seed('pair:c@x.test|203.0.113.10', 'sign-in', LIMITS['sign-in'].subject.max, 1000);
     await seed('ip:203.0.113.10', 'sign-in', LIMITS['sign-in'].ip.max, 1000);
     const v = await rateLimit('sign-in', 'c@x.test', '203.0.113.10');
     assert.equal(v.allowed, false);
     assert.doesNotMatch(v.message ?? '', /connection/);
+  });
+
+  await testAsync('an attacker hammering a victim address from one IP does not lock the victim out elsewhere', async () => {
+    await reset();
+    const { max } = LIMITS['sign-in'].subject;
+    for (let i = 0; i < max + 2; i++) await rateLimit('sign-in', 'victim@x.test', '203.0.113.50');
+    assert.equal((await rateLimit('sign-in', 'victim@x.test', '203.0.113.50')).allowed, false, 'attacker is refused');
+    assert.equal((await rateLimit('sign-in', 'victim@x.test', '198.51.100.99')).allowed, true, 'victim from another IP is not');
+  });
+
+  await testAsync('a distributed attack still trips the address-wide ceiling', async () => {
+    await reset();
+    const { max } = LIMITS['sign-in'].account!;
+    await seed('email:dist@x.test', 'sign-in', max, 1000);
+    assert.equal((await rateLimit('sign-in', 'dist@x.test', '192.0.2.77')).allowed, false);
   });
 
   await testAsync('each action uses its own ceiling (sign-up allows 3, not 8)', async () => {
@@ -169,6 +184,15 @@ await suiteAsync('clearAttempts and purgeOldAttempts', async () => {
     assert.equal(await count('email:p@x.test', 'verify'), 2);
     assert.equal(await count('email:q@x.test', 'sign-in'), 3);
     assert.equal(await count('ip:192.0.2.4', 'sign-in'), 5);
+  });
+
+  await testAsync('clearAttempts also clears pair rows, and not those of a lookalike address', async () => {
+    await reset();
+    await seed('pair:p_@x.test|192.0.2.4', 'sign-in', 2, 1000);
+    await seed('pair:pa@x.test|192.0.2.4', 'sign-in', 2, 1000);
+    await clearAttempts('sign-in', 'p_@x.test');
+    assert.equal(await count('pair:p_@x.test|192.0.2.4', 'sign-in'), 0);
+    assert.equal(await count('pair:pa@x.test|192.0.2.4', 'sign-in'), 2, '_ must not act as a LIKE wildcard');
   });
 
   await testAsync('purgeOldAttempts drops rows older than two days and keeps the rest', async () => {

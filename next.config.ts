@@ -37,6 +37,14 @@ const nextConfig: NextConfig = {
   ],
 
   /**
+   * The dev server's own request logger (next/dist/server/dev/log-requests.js, never loaded in
+   * production) prints every server action with its ARGUMENTS: `signUpAction("a@b.c", "<password>",
+   * ..., {"inviteCode": "..."})`. That put plaintext passwords and invite codes into dev terminals,
+   * shared logs and any agent transcript. Request lines are still logged; the arguments are not.
+   */
+  logging: { serverFunctions: false },
+
+  /**
    * Security headers.
    *
    * `frame-ancestors`/`X-Frame-Options` is the one that closes a real hole: Next's

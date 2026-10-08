@@ -53,7 +53,7 @@ const rows = (r: unknown): Array<Record<string, unknown>> =>
 /** Cheap deep checks, each independently guarded so one failure cannot hide the rest. */
 async function deepChecks() {
   const started = Date.now();
-  const [tables, stuck, heartbeats, models, serp] = await Promise.all([
+  const [tables, stuck, heartbeats, models, serp, dbClock] = await Promise.all([
     within(
       3000,
       db.execute(
@@ -80,6 +80,24 @@ async function deepChecks() {
       const mod = await import('@/lib/serp/client').catch(() => null);
       return mod?.creditStatus ? await within(3000, mod.creditStatus()) : null;
     })().catch(() => null),
+    // Timestamp columns here are WITHOUT time zone, filled by the database's now() default and
+    // compared with values this process writes as UTC. They only agree when the database session
+    // runs in UTC (Neon does). A non-UTC session skews every window and cutoff by the offset (the
+    // sign-in limiter's 15 minutes became 5h45m on an IST database), so say so loudly.
+    within(
+      3000,
+      db.execute(sql`select current_setting('TimeZone') as tz, (now()::timestamp = (now() at time zone 'UTC')) as utc`),
+    )
+      .then((r) => {
+        const row = rows(r)[0];
+        const isUtc = row?.utc === true;
+        return {
+          name: String(row?.tz ?? ''),
+          isUtc,
+          ...(isUtc ? {} : { warning: 'Database session timezone is not UTC: time windows and cutoffs will be skewed by the offset.' }),
+        };
+      })
+      .catch(() => null),
   ]);
   return {
     tables,
@@ -87,6 +105,7 @@ async function deepChecks() {
     heartbeats,
     models,
     serp: serp && { mode: serp.mode, creditsLeft: serp.left, unavailable: serp.unavailable },
+    dbTimezone: dbClock,
     checksMs: Date.now() - started,
   };
 }

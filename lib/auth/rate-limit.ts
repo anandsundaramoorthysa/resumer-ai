@@ -6,15 +6,27 @@
  * instance happens to answer — which is no limit at all against anyone sending requests
  * in parallel.
  *
- * Limits are per action and applied to two subjects at once: the address being targeted,
- * and the caller's IP. The first stops one account being ground down; the second stops
- * one caller working through a list of addresses.
+ * Limits are per action. For the actions where the subject is an ADDRESS the caller chose
+ * (sign-in, sign-up, reset-request, verify) three buckets apply at once:
+ *
+ *   - the pair (address, caller IP) at the low per-subject ceiling, so one caller cannot grind
+ *     one account down, and — the point of the split — cannot burn the budget the account's
+ *     real owner needs. Before, the ceiling was per address alone, so anyone who knew a victim's
+ *     address could send eight bad sign-ins and lock the victim out for 15 minutes (or three
+ *     sign-up attempts and block their registration for an hour);
+ *   - the address overall at a higher ceiling, which bounds guessing spread across many IPs
+ *     (it can still be tripped, but only by a distributed attack, not by one machine);
+ *   - the caller's IP across all addresses, which stops one caller working through a list.
+ *
+ * Without a caller IP there is no pair, and the address is limited at the strict ceiling alone.
+ * Every other action keys on something the caller cannot aim at someone else (a user id), so it
+ * keeps the original two buckets.
  */
 
 import 'server-only';
 import { isIP } from 'node:net';
 import { headers } from 'next/headers';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, eq, gte, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { authAttempts } from '@/lib/db/schema';
 
@@ -66,11 +78,11 @@ interface Limit {
 // Exported so tests can assert the ceilings without a database. A limit that is quietly
 // raised, or an action added to `AuthAction` with no row here, is invisible in a running
 // app — everything still returns "allowed".
-export const LIMITS: Record<AuthAction, { subject: Limit; ip: Limit }> = {
-  'sign-in': { subject: { max: 8, windowMs: 15 * 60_000 }, ip: { max: 30, windowMs: 15 * 60_000 } },
-  'sign-up': { subject: { max: 3, windowMs: 60 * 60_000 }, ip: { max: 10, windowMs: 60 * 60_000 } },
-  'reset-request': { subject: { max: 3, windowMs: 60 * 60_000 }, ip: { max: 10, windowMs: 60 * 60_000 } },
-  verify: { subject: { max: 10, windowMs: 60 * 60_000 }, ip: { max: 40, windowMs: 60 * 60_000 } },
+export const LIMITS: Record<AuthAction, { subject: Limit; ip: Limit; /** address-wide ceiling; present only where the subject is a caller-chosen address */ account?: Limit }> = {
+  'sign-in': { subject: { max: 8, windowMs: 15 * 60_000 }, ip: { max: 30, windowMs: 15 * 60_000 }, account: { max: 50, windowMs: 15 * 60_000 } },
+  'sign-up': { subject: { max: 3, windowMs: 60 * 60_000 }, ip: { max: 10, windowMs: 60 * 60_000 }, account: { max: 12, windowMs: 60 * 60_000 } },
+  'reset-request': { subject: { max: 3, windowMs: 60 * 60_000 }, ip: { max: 10, windowMs: 60 * 60_000 }, account: { max: 12, windowMs: 60 * 60_000 } },
+  verify: { subject: { max: 10, windowMs: 60 * 60_000 }, ip: { max: 40, windowMs: 60 * 60_000 }, account: { max: 40, windowMs: 60 * 60_000 } },
   'set-password': { subject: { max: 10, windowMs: 60 * 60_000 }, ip: { max: 20, windowMs: 60 * 60_000 } },
   /*
    * Starting anything that spends AI — a fit check, a draft, an improvement pass, an import
@@ -155,6 +167,9 @@ export function isIpAddress(value: string): boolean {
   return value.length > 0 && value.length <= 45 && !value.includes('%') && isIP(value) !== 0;
 }
 
+/** Bucket for one caller's attempts at one address. Kept apart from `email:` and `ip:` by prefix. */
+const pairKey = (subject: string, ip: string) => `pair:${subject}|${ip}`;
+
 export interface RateVerdict {
   allowed: boolean;
   /** Deliberately vague — a precise "try again in 412s" is a tool for tuning an attack. */
@@ -212,13 +227,22 @@ export async function rateLimit(
     // identity that actually bounds it. Both land in the same column, kept apart from the
     // `ip:` rows and from each other by `action`.
     const rows = [{ subject: `email:${subject}`, action }];
-    if (ip) rows.push({ subject: `ip:${ip}`, action });
+    if (ip) {
+      rows.push({ subject: `ip:${ip}`, action });
+      // The (address, caller) pair, for the actions where an address can be aimed at someone else.
+      if (limits.account) rows.push({ subject: pairKey(subject, ip), action });
+    }
     await db.insert(authAttempts).values(rows);
   }
 
-  const subjectCount = await countSince(`email:${subject}`, action, limits.subject.windowMs);
-  if (subjectCount > limits.subject.max) {
-    return { allowed: false, message: 'Too many attempts. Wait a while and try again.' };
+  const TOO_MANY = { allowed: false, message: 'Too many attempts. Wait a while and try again.' } as const;
+  if (limits.account && ip) {
+    // Strict ceiling on this caller's attempts at this address; generous ceiling on the address
+    // overall. A caller who has used up their own pair can no longer touch the owner's budget.
+    if ((await countSince(pairKey(subject, ip), action, limits.subject.windowMs)) > limits.subject.max) return TOO_MANY;
+    if ((await countSince(`email:${subject}`, action, limits.account.windowMs)) > limits.account.max) return TOO_MANY;
+  } else if ((await countSince(`email:${subject}`, action, limits.subject.windowMs)) > limits.subject.max) {
+    return TOO_MANY;
   }
 
   if (ip) {
@@ -236,9 +260,20 @@ export async function rateLimit(
  * four times and then got it right is not still near the limit an hour later.
  */
 export async function clearAttempts(action: AuthAction, subject: string): Promise<void> {
+  // The address's own rows and every (address, caller) pair row. `starts_with` rather than LIKE:
+  // `_` and `%` are common in addresses and are wildcards in LIKE, which would also clear rows
+  // that belong to a different address.
   await db
     .delete(authAttempts)
-    .where(and(eq(authAttempts.subject, `email:${subject}`), eq(authAttempts.action, action)));
+    .where(
+      and(
+        eq(authAttempts.action, action),
+        or(
+          eq(authAttempts.subject, `email:${subject}`),
+          sql`starts_with(${authAttempts.subject}, ${`pair:${subject}|`})`,
+        ),
+      ),
+    );
 }
 
 /** Old rows serve no purpose once every window that could read them has passed. */
