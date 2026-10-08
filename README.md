@@ -169,6 +169,9 @@ key. It is allowed whenever `NODE_ENV` is not `production` (so under `npm run de
 production build needs `RADAR_PUBLIC_DEMO=1` (`app/radar/demo-gate.ts`). The rest of the app
 (sign-in, drafts) needs the full setup below.
 
+Without `AUTH_SECRET` the dev terminal prints one `[auth][error] MissingSecret` line on the first page load. The demo is
+unaffected (checked on a fresh clone: `/` and `/radar?demo=1` return 200); set `AUTH_SECRET` (any random string) to silence it.
+
 ### Full setup (real accounts, real runs)
 
 1. Postgres (`DATABASE_URL`), GitHub OAuth (`AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET`),
