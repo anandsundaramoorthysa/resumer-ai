@@ -1,0 +1,16 @@
+# Gitleaks config for this repository (used by .github/workflows/ci.yml).
+#
+# The four files below hold credentials that are deliberately fake: they are the inputs
+# the redaction and secret-box suites must recognise, so replacing them with something
+# less realistic would weaken the test. Nothing else in the repository is exempt.
+
+title = "resumer-ai"
+
+[[allowlists]]
+description = "Test fixtures: fake tokens that exist to prove they get redacted."
+paths = [
+  '''tests/log-scrub\.test\.mts$''',
+  '''tests/fit\.test\.mts$''',
+  '''tests/draft-run\.test\.mts$''',
+  '''tests/secret-box\.test\.mts$''',
+]
