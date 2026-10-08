@@ -10,6 +10,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Run the gate on demand from any branch (Actions -> CI -> Run workflow).
+  workflow_dispatch:
 
 # Least privilege: nothing here writes to the repository.
 permissions:
@@ -65,9 +67,9 @@ jobs:
       # Production dependencies only. A CRITICAL advisory blocks the build; HIGH is reported
       # without failing, because a high advisory with no fix available would otherwise stop
       # every merge. Triage the report weekly (Dependabot also opens the fix PRs).
-      - name: Dependency audit (blocking: critical)
+      - name: "Dependency audit (blocking: critical)"
         run: npm audit --omit=dev --audit-level=critical
-      - name: Dependency audit (report: high)
+      - name: "Dependency audit (report: high)"
         run: npm audit --omit=dev --audit-level=high
         continue-on-error: true
 
