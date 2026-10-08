@@ -68,8 +68,11 @@ Filename order, each idempotent, direct (non-pooled) connection:
 6. `2026-10-07-ops-indexes-flags.sql` (4 indexes + `app_setting`)
 7. `2026-10-07-radar-reliability.sql` (`agent_run.attempts`, `radar_search`; a no-op if file 3 was applied from its current copy)
 8. `2026-10-08-draft-idempotency.sql` (`draft_run.idempotency_key` + partial unique index)
+9. `2026-10-08-invite-tombstone.sql` (`invite_redemption.user_id` nullable, ON DELETE SET NULL; **not yet confirmed applied to production**: check `is_nullable` on that column first; the app works either way, a deleted account just loses its quota tombstone until it is applied)
 
 Apply each file before deploying the code that uses it (the draft route reads `idempotency_key`, so file 8 must be in place first).
+
+New databases use `npm run db:migrate` instead (the baseline already includes files 1-9); these files matter only for a database built before migrations existed.
 
 Base tables come from `npm run db:push` on first setup. Verified: the script run on a schema built from `lib/db/schema.ts` produces identical index definitions and `app_setting` columns (no drift) and is a no-op on re-run. Indexes are plain btrees (Drizzle cannot express `INCLUDE`; `(day, calls, tokens)` gives the same index-only scan).
 
