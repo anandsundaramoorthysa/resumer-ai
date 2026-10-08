@@ -33,7 +33,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2.3.9
@@ -53,7 +53,7 @@ jobs:
       NEXT_PUBLIC_SITE_URL: http://localhost:3000
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v5
         with:
@@ -116,7 +116,7 @@ jobs:
       AUTH_SECRET: ci-only-placeholder-value-not-a-secret
       NEXT_PUBLIC_SITE_URL: http://localhost:3000
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 22
