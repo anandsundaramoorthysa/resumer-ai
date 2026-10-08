@@ -141,7 +141,7 @@ export async function classifyUnknownSkills(
       schema: ClassifySchema,
       system: SYSTEM,
       prompt: `Sort these skills. One line per name.\n\n${ask.map(([, name]) => name).join('\n')}`,
-      options: draftCallOptions(budget, { temperature: 0, timeoutMs: 8_000 }),
+      options: draftCallOptions(budget, { temperature: 0, timeoutMs: 8_000, telemetry: { stage: 'skill-classify' } }),
     });
 
     const accepted = acceptClassifications(new Set(ask.map(([key]) => key)), data.skills);

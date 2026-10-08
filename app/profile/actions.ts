@@ -42,11 +42,13 @@ function refresh(): void {
  */
 export async function keepRecord(recordId: string): Promise<void> {
   const userId = await requireUserId();
-  await db
+  const updated = await db
     .update(profileRecords)
     .set({ flaggedForRemoval: false, source: 'manual', updatedAt: new Date() })
-    .where(and(eq(profileRecords.id, recordId), eq(profileRecords.userId, userId)));
-  await audit(userId, recordId, 'update', 'manual', { keptAfterFlag: true });
+    .where(and(eq(profileRecords.id, recordId), eq(profileRecords.userId, userId)))
+    .returning({ id: profileRecords.id });
+  // A foreign or missing id matched nothing, so there is nothing to put on the record.
+  if (updated.length > 0) await audit(userId, recordId, 'update', 'manual', { keptAfterFlag: true });
   revalidatePath('/profile');
   revalidatePath('/settings/portfolio');
   revalidatePath('/');

@@ -12,6 +12,11 @@ import { auth } from '@/auth';
 import { buildPreview } from '@/lib/import/parse';
 import type { ExtractedProfile } from '@/lib/sync/parse';
 
+import { guardMutation, readJsonLimited } from '@/lib/server/request-guard';
+
+/** Up to 64 per-chunk extractions. */
+const PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
+
 export const runtime = 'nodejs';
 
 const BodySchema = z.object({
@@ -24,7 +29,11 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Sign in first.' }, { status: 401 });
   }
 
-  const parsed = BodySchema.safeParse(await req.json().catch(() => null));
+  const refused = guardMutation(req, { contentTypes: ['application/json'], maxBytes: PREVIEW_MAX_BYTES });
+  if (refused) return refused;
+  const read = await readJsonLimited(req, PREVIEW_MAX_BYTES);
+  if (!read.ok) return read.res;
+  const parsed = BodySchema.safeParse(read.value);
   if (!parsed.success) {
     return Response.json({ error: 'Expected { partials: object[] }.' }, { status: 400 });
   }

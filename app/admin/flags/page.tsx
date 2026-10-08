@@ -16,7 +16,8 @@ const HELP: Record<FlagKey, string> = {
 };
 
 /** Owner-only kill switches. Anyone else gets a plain 404, like /admin/approvals. */
-export default async function FlagsPage() {
+export default async function FlagsPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = await searchParams;
   const session = await getSession();
   if (!(await isOwnerSession(session))) notFound();
 
@@ -32,6 +33,11 @@ export default async function FlagsPage() {
           Changes apply within about 15 seconds on each server instance. An environment variable
           <code> FLAG_&lt;NAME&gt;</code> overrides the value here. Every change is written to the audit log.
         </p>
+        {error ? (
+          <p role="alert" className="mt-4 text-sm font-semibold text-red-700 dark:text-red-400">
+            Not saved: {error.slice(0, 300)}
+          </p>
+        ) : null}
         <ul className="mt-6 divide-y divide-line border-y border-line">
           {current.map(([key, value]) => (
             <li key={key} className="py-4">
@@ -40,7 +46,7 @@ export default async function FlagsPage() {
               <form action={setFlagAction} className="mt-2 flex flex-wrap items-center gap-2">
                 <input type="hidden" name="key" value={key} />
                 {key === 'maintenance_message' ? (
-                  <input name="value" defaultValue={value} maxLength={500} className="input min-w-64 flex-1" aria-label={key} />
+                  <input name="value" defaultValue={value} maxLength={300} className="input min-w-64 flex-1" aria-label={key} />
                 ) : (
                   <select name="value" defaultValue={value} className="input" aria-label={key}>
                     <option value="true">on</option>

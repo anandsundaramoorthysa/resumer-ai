@@ -106,7 +106,10 @@ export async function AppHeader({
    */
   width = '6xl',
   session: given,
+  minimal = false,
 }: {
+  /** Wordmark, theme toggle and Sign out only - for accounts that are not approved yet. */
+  minimal?: boolean;
   /** The href of the page being rendered, so it can be marked in the nav. */
   current?: string;
   userName?: string | null;
@@ -161,6 +164,28 @@ export async function AppHeader({
   const collapsed = isSidebarCollapsed(jar.get(SIDEBAR_COOKIE)?.value);
   const themeCookie = jar.get(THEME_COOKIE)?.value;
   const theme: ThemeChoice = isThemeChoice(themeCookie) ? themeCookie : 'system';
+
+  // A signed-in account that is not approved yet (/pending): every nav link would bounce back
+  // here, so show only the wordmark, the theme toggle and Sign out.
+  if (minimal) {
+    return (
+      <header className="relative border-b border-line bg-paper">
+        <div className={`${container} flex h-14 items-center justify-between gap-3`}>
+          <Link href="/pending" className="inline-flex min-h-11 items-center" aria-label="Resumer AI">
+            <Logo size={28} />
+          </Link>
+          <div className="flex items-center gap-2">
+            <ThemeToggle inline choice={theme} />
+            <form action={signOutAction}>
+              <button type="submit" className="btn">
+                Sign out
+              </button>
+            </form>
+          </div>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <>

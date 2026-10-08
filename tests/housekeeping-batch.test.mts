@@ -11,6 +11,7 @@ await suiteAsync('housekeeping', async () => {
     assert(c.deniedAccount === '2026-09-07T03:30:00.000Z', c.deniedAccount);
     assert(c.auditLog === '2025-10-07T03:30:00.000Z', c.auditLog); // 12 months
     assert(c.inactiveAccount === '2024-10-07T03:30:00.000Z', c.inactiveAccount); // 24 months
+    assert(c.aiUsageDaily === '2025-10-07', c.aiUsageDaily); // 12 months, text 'YYYY-MM-DD'
     assert(RETENTION.auditPromptDays === 90 && c.syncJob === '2026-09-30T03:30:00.000Z', 'prompt 90d, sync jobs 7d');
   });
 

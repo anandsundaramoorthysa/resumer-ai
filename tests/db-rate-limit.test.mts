@@ -189,4 +189,41 @@ await suiteAsync('clearAttempts and purgeOldAttempts', async () => {
   });
 });
 
+/**
+ * Found by end-to-end testing on a database whose session timezone was Asia/Calcutta: `created_at`
+ * is a timestamp WITHOUT time zone filled by the database's now() default (session wall clock),
+ * while the window's lower bound was a JS Date serialised as UTC, so the 15-minute window became
+ * about 5h45m and locked callers out for hours. The window is now computed in SQL.
+ */
+await suiteAsync('rateLimit: the window is correct in a non-UTC database session', async () => {
+  await testAsync('15 minutes means 15 minutes when the session timezone is Asia/Calcutta', async () => {
+    await reset();
+    await pg.exec(`set time zone 'Asia/Calcutta'`);
+    try {
+      const { max, windowMs } = LIMITS['sign-in'].ip;
+      for (let i = 1; i <= max + 1; i++) await rateLimit('sign-in', `tz${i}@x.test`, '198.51.100.7');
+      const blocked = await rateLimit('sign-in', 'tz-fresh@x.test', '198.51.100.7');
+      assert.equal(blocked.allowed, false, 'a burst inside the window is refused');
+
+      // Age every row to just past the window, by a relative shift that is timezone-independent.
+      const pastMs = windowMs + 60_000;
+      await pg.exec(`update auth_attempt set created_at = created_at - interval '${Math.round(pastMs / 1000)} seconds'`);
+      const after = await rateLimit('sign-in', 'tz-after@x.test', '198.51.100.7');
+      assert.equal(after.allowed, true, 'rows older than the window no longer count, whatever the session timezone');
+    } finally {
+      await pg.exec(`set time zone 'UTC'`);
+    }
+  });
+
+  await testAsync('the same holds in a UTC session (no regression)', async () => {
+    await reset();
+    await pg.exec(`set time zone 'UTC'`);
+    const { max } = LIMITS['sign-in'].subject;
+    for (let i = 1; i <= max + 1; i++) await rateLimit('sign-in', 'utc@x.test', null);
+    assert.equal((await rateLimit('sign-in', 'utc@x.test', null)).allowed, false);
+    await pg.exec(`update auth_attempt set created_at = created_at - interval '2 hours'`);
+    assert.equal((await rateLimit('sign-in', 'utc@x.test', null)).allowed, true);
+  });
+});
+
 await t.close();

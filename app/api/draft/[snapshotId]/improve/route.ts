@@ -25,6 +25,7 @@ import {
 } from '@/lib/server/profile';
 import { recordDraftRun, startDraftRun } from '@/lib/server/draft-run';
 import { jsonError } from '@/lib/server/job-submission';
+import { guardMutation, isSafeId } from '@/lib/server/request-guard';
 import { eventStream } from '@/lib/server/sse';
 import { BudgetExceededError } from '@/lib/ai/budget';
 import { resumeFileName } from '@/lib/render/filename';
@@ -33,14 +34,18 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ snapshotId: string }> },
 ) {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) return jsonError('Sign in first.', 401);
 
+  const refused = guardMutation(req, { contentTypes: ['application/json'], maxBytes: 4096 });
+  if (refused) return refused;
+
   const { snapshotId } = await ctx.params;
+  if (!isSafeId(snapshotId)) return jsonError('That resume was not found.', 404);
   const snap = await loadSnapshotForImprove(userId, snapshotId);
   if (!snap) return jsonError('That resume was not found.', 404);
 

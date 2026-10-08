@@ -20,6 +20,8 @@ import {
   formatFromFile,
 } from '@/lib/import/text';
 
+import { guardMutation } from '@/lib/server/request-guard';
+
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
@@ -28,6 +30,9 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) {
     return Response.json({ error: 'Sign in first.' }, { status: 401 });
   }
+
+  const refused = guardMutation(req, { contentTypes: ['multipart/form-data'], maxBytes: MAX_UPLOAD_BYTES + 64 * 1024 });
+  if (refused) return refused;
 
   // Before `formData()` buffers the whole body: the multipart envelope adds a little to
   // the file, so allow 64 KB of slack. A body with no declared length (chunked) is refused

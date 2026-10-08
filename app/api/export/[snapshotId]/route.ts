@@ -15,6 +15,7 @@ import { renderPresentationPdf, renderResumePdf } from '@/lib/render/pdf';
 import { renderResumeDocx } from '@/lib/render/docx';
 import { attachmentHeader, resumeFileName } from '@/lib/render/filename';
 import type { ResumeDocument } from '@/lib/types';
+import { isSafeId } from '@/lib/server/request-guard';
 
 export const runtime = 'nodejs';
 
@@ -27,6 +28,7 @@ export async function GET(
   if (!userId) return new Response('Unauthorized', { status: 401 });
 
   const { snapshotId } = await ctx.params;
+  if (!isSafeId(snapshotId)) return new Response('Not found', { status: 404 });
   const format = req.nextUrl.searchParams.get('format') === 'docx' ? 'docx' : 'pdf';
   const presentation = req.nextUrl.searchParams.get('mode') === 'presentation';
 

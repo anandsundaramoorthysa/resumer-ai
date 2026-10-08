@@ -284,6 +284,7 @@ async function runStep(
     // import, and so there is a usage figure to record at all. This whole path used to
     // pass no budget: nothing capped it, and nothing counted it either.
     const budget = new DraftBudget(SLICE_BUDGET);
+    budget.userId = userId;
 
     let partial: Record<string, unknown> | null = null;
     let failure: string | null = null;

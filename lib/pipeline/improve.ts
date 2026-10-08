@@ -44,6 +44,7 @@ export async function runImprovePass(input: ImproveInput, emit: Emit): Promise<I
   await assertDailyBudget(input.userId);
 
   const budget = new DraftBudget();
+  budget.userId = input.userId;
   try {
     return await improve(input, emit, budget);
   } finally {

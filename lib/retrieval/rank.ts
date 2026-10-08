@@ -61,44 +61,48 @@ function hasNormTerm(text: string, t: string): boolean {
 
 /** Every searchable string a record contributes. */
 export function recordText(r: ProfileRecord): string {
-  const parts: string[] = [...r.tags];
+  // Records come from JSONB the importer and older syncs wrote, so any field can be missing:
+  // every access is defaulted rather than trusted to match the type.
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  const parts: string[] = list(r.tags);
   switch (r.type) {
     case 'skill':
-      parts.push(r.name, r.category);
+      parts.push(str(r.name), str(r.category));
       break;
     case 'experience-bullet':
-      parts.push(r.text, r.action, r.scale ?? '', r.outcome ?? '');
+      parts.push(str(r.text), str(r.action), str(r.scale), str(r.outcome));
       break;
     case 'project':
-      parts.push(r.name, r.description ?? '', ...r.stack, ...r.impactMetrics);
+      parts.push(str(r.name), str(r.description), ...list(r.stack), ...list(r.impactMetrics));
       break;
     case 'education':
-      parts.push(r.institution, r.credential, r.field ?? '');
+      parts.push(str(r.institution), str(r.credential), str(r.field));
       break;
     case 'certification':
-      parts.push(r.name, r.issuer);
+      parts.push(str(r.name), str(r.issuer));
       break;
     case 'achievement':
-      parts.push(r.title, r.description);
+      parts.push(str(r.title), str(r.description));
       break;
     case 'summary':
-      parts.push(r.text);
+      parts.push(str(r.text));
       break;
     case 'publication':
     case 'writing':
-      parts.push(r.title, r.venue);
+      parts.push(str(r.title), str(r.venue));
       break;
     case 'award':
-      parts.push(r.title, r.issuer ?? '', r.description ?? '');
+      parts.push(str(r.title), str(r.issuer), str(r.description));
       break;
     case 'volunteering':
-      parts.push(r.role, r.organization, r.description ?? '');
+      parts.push(str(r.role), str(r.organization), str(r.description));
       break;
     case 'language':
-      parts.push(r.name, r.proficiency ?? '');
+      parts.push(str(r.name), str(r.proficiency));
       break;
     case 'interest':
-      parts.push(r.name);
+      parts.push(str(r.name));
       break;
   }
   return norm(parts.join(' '));

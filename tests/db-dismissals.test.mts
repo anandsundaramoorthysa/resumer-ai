@@ -102,8 +102,23 @@ await suiteAsync('dismissals: restore and forget', async () => {
     const job = await one<{ id: string; review_state: string; end_date: string }>(pg, `select id, review_state, end_date from role where id='job-1'`);
     assert.equal(job?.review_state, 'approved');
     assert.equal(job?.end_date, '2022-01');
-    await restoreDismissal(u, bulletMark!.id);
+    // The line that was removed with the job comes back with it.
     assert.ok(await one(pg, `select 1 from profile_record where id='b-1'`));
+    assert.equal(await one(pg, `select 1 from dismissed_record where id=$1`, [bulletMark!.id]), undefined);
+  });
+
+  await testAsync('restoring a job brings back the lines removed with it, not ones removed earlier', async () => {
+    await dismissRecordRow(u, recordRow('b-early', 'hash-early', { roleId: 'job-2', text: 'Removed on its own', action: 'x' }, 'experience-bullet'));
+    await new Promise((r) => setTimeout(r, 15));
+    await dismissRoleRow(u, roleRow('job-2', 'Engineer', 'Globex'));
+    await dismissRecordRow(u, recordRow('b-with', 'hash-with', { roleId: 'job-2', text: 'Removed with the job', action: 'x' }, 'experience-bullet'));
+    await dismissRecordRow(u, recordRow('b-else', 'hash-else', { roleId: 'job-3', text: 'Another job', action: 'x' }, 'experience-bullet'));
+    const jobMark = await one<{ id: string }>(pg, `select id from dismissed_record where user_id=$1 and content_hash='rh-job-2'`, [u]);
+    await restoreDismissal(u, jobMark!.id);
+    assert.ok(await one(pg, `select 1 from profile_record where id='b-with' and review_state='approved'`));
+    assert.equal(await one(pg, `select 1 from profile_record where id='b-early'`), undefined, 'an earlier, individual removal stays removed');
+    assert.equal(await one(pg, `select 1 from profile_record where id='b-else'`), undefined, 'another job\'s line is untouched');
+    assert.ok(await one(pg, `select 1 from dismissed_record where user_id=$1 and content_hash='hash-early'`, [u]));
   });
 
   await testAsync('a job that belongs to someone else does not satisfy the bullet\'s parent check', async () => {

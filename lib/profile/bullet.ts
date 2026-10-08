@@ -53,7 +53,20 @@ export function composeBulletText(parts: BulletParts): string {
   let text = action;
   if (scale) text += ` ${scale}`;
   if (outcome) text += `, ${outcome}`;
-  return `${text}.`;
+  return endsNeedingPeriod(text) ? `${text}.` : text;
+}
+
+/**
+ * A Latin full stop belongs after Latin text only. Hindi ends in a danda (।), Tamil and the
+ * other scripts have their own conventions, and a '.' glued onto them is wrong; the user's
+ * own ending (or none) is kept. Digits, closing brackets and '%' still get the period.
+ */
+function endsNeedingPeriod(text: string): boolean {
+  const last = [...text].pop() ?? '';
+  if (/[।॥!?]/.test(last)) return false;
+  if (/[\p{M}]/u.test(last)) return false;
+  if (/\p{L}/u.test(last)) return /\p{Script=Latin}/u.test(last);
+  return true;
 }
 
 export function wordCount(text: string): number {

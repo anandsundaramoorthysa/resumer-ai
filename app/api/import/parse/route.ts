@@ -19,6 +19,11 @@ import { assertDailyBudget, recordDailyUsage } from '@/lib/ai/daily-budget';
 import { MAX_CHUNK_CHARS } from '@/lib/import/text';
 import { extractFromChunk } from '@/lib/import/parse';
 
+import { guardMutation, readJsonLimited } from '@/lib/server/request-guard';
+
+/** A chunk is <= 1,400 characters; this is generous, not a limit users meet. */
+const PARSE_MAX_BYTES = 64 * 1024;
+
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
@@ -30,6 +35,8 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Sign in first.' }, { status: 401 });
   }
   const userId = session.user.id;
+  const refused = guardMutation(req, { contentTypes: ['application/json'], maxBytes: PARSE_MAX_BYTES });
+  if (refused) return refused;
 
   // The per-request budget below caps one chunk. A file is chunked into many, and
   // nothing caps how many files — so the only real ceiling on what an import can spend
@@ -38,12 +45,15 @@ export async function POST(req: NextRequest) {
     await assertDailyBudget(userId);
   } catch (err) {
     if (err instanceof BudgetExceededError) {
-      return Response.json({ error: err.message }, { status: 429 });
+      // Consent / approval refusals are 403 (not a rate problem); real budget and rate limits stay 429.
+      return Response.json({ error: err.message }, { status: err.scope === 'approval' ? 403 : 429 });
     }
     throw err;
   }
 
-  const parsed = BodySchema.safeParse(await req.json().catch(() => null));
+  const read = await readJsonLimited(req, PARSE_MAX_BYTES);
+  if (!read.ok) return read.res;
+  const parsed = BodySchema.safeParse(read.value);
   if (!parsed.success) {
     return Response.json({ error: 'Expected { chunk: string }.' }, { status: 400 });
   }
@@ -53,6 +63,7 @@ export async function POST(req: NextRequest) {
   // function, and a killed request reached the browser as an HTML 502 that took every
   // chunk already read down with it.
   const budget = new DraftBudget({ maxCalls: 4, maxTokens: 60_000 }, 20_000, 1_000);
+  budget.userId = userId;
 
   try {
     const partial = await extractFromChunk(

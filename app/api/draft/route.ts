@@ -28,7 +28,8 @@ import {
 } from '@/lib/server/draft-idempotency';
 import { salvagedCompletePayload } from '@/lib/pipeline/early-persist';
 import type { GeneratedDraft } from '@/lib/pipeline/run';
-import { readJobSubmission, jsonError } from '@/lib/server/job-submission';
+import { readJobSubmission, jsonError, SUBMISSION_GUARD } from '@/lib/server/job-submission';
+import { guardMutation } from '@/lib/server/request-guard';
 import { eventStream } from '@/lib/server/sse';
 import { AssessmentTokenError, openAssessment } from '@/lib/fit/token';
 
@@ -42,6 +43,8 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) return jsonError('Sign in first.', 401);
+  const refused = guardMutation(req, SUBMISSION_GUARD);
+  if (refused) return refused;
 
   /*
    * Idempotency. The browser sends one `Idempotency-Key` per attempt and reuses it when it
@@ -130,6 +133,8 @@ export async function POST(req: NextRequest) {
         const result = await runDraftPipeline(
           {
             userId,
+            // The row this request claimed, so every AI call it makes is attributed to it exactly.
+            draftRunId: runId,
             contact: profile.contact,
             records: profile.records,
             roles: profile.roles,

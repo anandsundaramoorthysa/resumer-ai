@@ -16,6 +16,7 @@ import { assertDailyBudget, recordDailyUsage } from '@/lib/ai/daily-budget';
 import { generateCoverLetter, coverLetterToText } from '@/lib/generate/cover-letter';
 import { generateInterviewPrep } from '@/lib/generate/interview';
 import { userMessage } from '@/lib/server/user-message';
+import { guardMutation, isSafeId, readJsonLimited } from '@/lib/server/request-guard';
 import type { JobRequirement, ResumeDocument } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -29,8 +30,14 @@ export async function POST(
   const userId = session?.user?.id;
   if (!userId) return Response.json({ error: 'Sign in first.' }, { status: 401 });
 
+  const refused = guardMutation(req, { contentTypes: ['application/json'], maxBytes: 4096 });
+  if (refused) return refused;
+
   const { snapshotId } = await ctx.params;
-  const body = (await req.json().catch(() => ({}))) as { kind?: string };
+  if (!isSafeId(snapshotId)) return Response.json({ error: 'Not found.' }, { status: 404 });
+  const read = await readJsonLimited(req, 4096);
+  if (!read.ok) return read.res;
+  const body = (read.value && typeof read.value === 'object' ? read.value : {}) as { kind?: string };
   const kind = body.kind === 'interview' ? 'interview' : 'cover-letter';
 
   const [row] = await db
@@ -62,12 +69,13 @@ export async function POST(
     await assertDailyBudget(userId);
   } catch (err) {
     if (err instanceof BudgetExceededError) {
-      return Response.json({ error: err.message }, { status: 429 });
+      return Response.json({ error: err.message }, { status: err.scope === 'approval' ? 403 : 429 });
     }
     throw err;
   }
 
   const budget = new DraftBudget();
+  budget.userId = userId;
 
   try {
     if (kind === 'interview') {

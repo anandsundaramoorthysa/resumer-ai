@@ -23,6 +23,14 @@ import {
   type JobInputRejection,
 } from '@/lib/intake/job-input';
 
+import { JSON_MAX_BYTES, readJsonLimited } from '@/lib/server/request-guard';
+
+/** For guardMutation: a typed/pasted job or a sealed fit check as JSON, or a job file as multipart. */
+export const SUBMISSION_GUARD = {
+  contentTypes: ['application/json', 'multipart/form-data'],
+  maxBytes: MAX_UPLOAD_BYTES + 64 * 1024,
+};
+
 export type JobSubmission =
   | {
       ok: true;
@@ -109,7 +117,9 @@ export async function readJobSubmission(req: Request, userId: string): Promise<J
       return refuse(fileRejection('file-empty'));
     }
   } else {
-    const body = (await req.json().catch(() => ({}))) as {
+    const read = await readJsonLimited(req, JSON_MAX_BYTES);
+    if (!read.ok) return { ok: false, response: read.res };
+    const body = (read.value && typeof read.value === 'object' ? read.value : {}) as {
       jobInput?: unknown;
       assessment?: unknown;
     };

@@ -10,6 +10,7 @@ import { NextRequest } from 'next/server';
 import { auth } from '@/auth';
 import { advanceSyncJob, startSyncJob, getSyncJob } from '@/lib/sync/stepped';
 import { authoredMessage } from '@/lib/server/user-message';
+import { guardMutation, isSafeId, readJsonLimited } from '@/lib/server/request-guard';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -19,7 +20,12 @@ export async function POST(req: NextRequest) {
   const userId = session?.user?.id;
   if (!userId) return Response.json({ error: 'Sign in first.' }, { status: 401 });
 
-  const body = (await req.json().catch(() => ({}))) as { jobId?: string };
+  const refused = guardMutation(req, { contentTypes: ['application/json'], maxBytes: 4096 });
+  if (refused) return refused;
+  const read = await readJsonLimited(req, 4096);
+  if (!read.ok) return read.res;
+  const body = (read.value && typeof read.value === 'object' ? read.value : {}) as { jobId?: string };
+  if (body.jobId !== undefined && !isSafeId(body.jobId)) return Response.json({ error: 'Not found.' }, { status: 404 });
 
   try {
     const result = body.jobId
@@ -39,6 +45,7 @@ export async function GET(req: NextRequest) {
 
   const jobId = req.nextUrl.searchParams.get('jobId');
   if (!jobId) return Response.json({ error: 'jobId required.' }, { status: 400 });
+  if (!isSafeId(jobId)) return Response.json({ error: 'Not found.' }, { status: 404 });
 
   const job = await getSyncJob(userId, jobId);
   if (!job) return Response.json({ error: 'Not found.' }, { status: 404 });

@@ -85,7 +85,7 @@ ${jobBlock.close}
 
 CANDIDATE FACTS:
 ${args.facts}`,
-      options: draftCallOptions(args.budget, { temperature: 0.3 }),
+      options: draftCallOptions(args.budget, { temperature: 0.3, telemetry: { stage: 'summary' } }),
     });
     const text = data.summary.replace(/\s+/g, ' ').trim();
     if (!text || text.split(' ').length > MAX_WORDS) {

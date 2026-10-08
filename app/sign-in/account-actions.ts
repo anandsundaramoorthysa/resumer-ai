@@ -17,6 +17,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { cookies } from 'next/headers';
+import { after } from 'next/server';
 import { eq } from 'drizzle-orm';
 import {
   SIGNUP_BINDING_COOKIE,
@@ -37,6 +38,7 @@ import {
   sendVerificationEmail,
 } from '@/lib/auth/mail';
 import { callerIp, clearAttempts, rateLimit } from '@/lib/auth/rate-limit';
+import { holdUntilFloor } from '@/lib/server/timing';
 import { notifyOwnerOfSignup } from '@/lib/server/signup-notice';
 import { recordConsent } from '@/lib/legal/consent';
 import { signupMode } from '@/lib/legal/config';
@@ -73,6 +75,15 @@ const NEUTRAL =
  */
 const EVEN_RESPONSE_MS = 700;
 
+/**
+ * Sign-up answers take at least this long in total, measured from the start of the action, in
+ * every outcome that follows the account lookup. The old arrangement (hash, then a fixed 700 ms
+ * on the existing-address branches only) made "has an account" ~0.9-1.2 s against ~0.4 s for a
+ * new address. A floor above the slowest honest path makes the two indistinguishable; the
+ * password is hashed before the branch in both, so the CPU cost is equal too.
+ */
+const SIGNUP_FLOOR_MS = 1300;
+
 async function evenOut<T>(work: Promise<T> | null): Promise<void> {
   const pause = new Promise((resolve) => setTimeout(resolve, EVEN_RESPONSE_MS));
   // The work is awaited alongside the pause rather than detached: a serverless host may
@@ -87,6 +98,7 @@ export async function signUpAction(
   name: string,
   consent: { accepted: boolean; inviteCode?: string } = { accepted: false },
 ): Promise<AuthResult> {
+  const startedAt = Date.now();
   const verdict = await checkEmail(email);
   const ip = await callerIp();
 
@@ -152,7 +164,7 @@ export async function signUpAction(
     // The address already signs in with GitHub or Google. Adding a password here would
     // let anyone who knows the address set one, so nothing is written — and the reply is
     // the same sentence, so the attempt reveals nothing either.
-    await evenOut(null);
+    await holdUntilFloor(startedAt, SIGNUP_FLOOR_MS);
     return { ok: true, message: NEUTRAL };
   } else if (!existing.emailVerified) {
     // An unverified signup being repeated is someone who lost the email, so the password
@@ -165,7 +177,7 @@ export async function signUpAction(
     });
   } else {
     // A verified account already exists. Say nothing that confirms it.
-    await evenOut(null);
+    await holdUntilFloor(startedAt, SIGNUP_FLOOR_MS);
     return { ok: true, message: NEUTRAL };
   }
 
@@ -203,15 +215,16 @@ export async function signUpAction(
   }
 
   const { token } = await issueToken(verdict.normalized, 'verify-email');
-  const sent = await sendVerificationEmail(verdict.normalized, token);
-  if (!sent.ok) {
-    console.error('[auth] verification email failed:', sent.error);
-    return {
-      ok: false,
-      message: 'The account was created but the email could not be sent. Try requesting the link again.',
-    };
-  }
+  // Sent AFTER the response, not awaited here. Awaiting it made the new-address path as slow as
+  // the SMTP provider (so a slow provider could exceed the timing floor and tell a new address
+  // from an existing one) and let a mail failure return a message only new addresses ever see.
+  // Either would be an account-existence oracle. Someone who gets no email uses "resend".
+  after(async () => {
+    const sent = await sendVerificationEmail(verdict.normalized, token);
+    if (!sent.ok) console.error('[auth] verification email failed:', sent.error);
+  });
 
+  await holdUntilFloor(startedAt, SIGNUP_FLOOR_MS);
   return { ok: true, message: NEUTRAL };
 }
 

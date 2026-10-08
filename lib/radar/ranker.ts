@@ -168,8 +168,8 @@ export function heldSkills(records: ProfileRecord[], roles: RoleRecord[]): Set<s
   const text: string[] = [];
   for (const r of records) {
     text.push(recordText(r));
-    if (r.type === 'skill') canonicalSkills(r.name).forEach((s) => held.add(s));
-    if (r.type === 'project') r.stack.forEach((n) => canonicalSkills(n).forEach((s) => held.add(s)));
+    if (r.type === 'skill') canonicalSkills(r.name ?? '').forEach((s) => held.add(s));
+    if (r.type === 'project') (r.stack ?? []).forEach((n) => canonicalSkills(n ?? '').forEach((s) => held.add(s)));
   }
   text.push(...roles.map((r) => r.title));
   mentionedSkills(text.join('\n')).forEach((s) => held.add(s));

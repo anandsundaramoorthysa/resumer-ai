@@ -191,6 +191,34 @@ export async function restoreDismissal(userId: string, id: string): Promise<stri
         reviewState: 'approved',
       })
       .onConflictDoNothing();
+
+    // The lines removed together with the job come back with it, or the job returns empty.
+    // Removing a job writes its mark first and its lines' marks after (lib/profile/records.ts),
+    // so a line dismissed before this mark was removed on its own earlier and stays removed.
+    const lines = await db
+      .select()
+      .from(dismissed)
+      .where(and(eq(dismissed.userId, userId), eq(dismissed.kind, 'record'), eq(dismissed.type, 'experience-bullet')));
+    for (const line of lines) {
+      const s = line.snapshot as Record<string, unknown>;
+      const d = (s.data ?? {}) as Record<string, unknown>;
+      if (d.roleId !== String(snap.id) || line.createdAt < row.createdAt) continue;
+      await db
+        .insert(profileRecords)
+        .values({
+          id: String(s.id),
+          userId,
+          type: line.type,
+          source: String(s.source ?? 'manual'),
+          contentHash: String(s.contentHash ?? line.contentHash),
+          tags: (s.tags as string[]) ?? [],
+          data: d,
+          reviewState: 'approved',
+          flaggedForRemoval: false,
+        })
+        .onConflictDoNothing();
+      await db.delete(dismissed).where(and(eq(dismissed.userId, userId), eq(dismissed.id, line.id)));
+    }
   } else {
     // A bullet points at its job by id. If that job was removed too and not yet brought
     // back, restoring the line would hide it under a job that no longer exists — so say

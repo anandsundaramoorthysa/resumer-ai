@@ -219,7 +219,7 @@ export default function PrivacyPage() {
       <h2>6. How long we keep it</h2>
       <ul>
         <li>Account, profile, resumes, applications: until you delete your account. We review accounts inactive for {RETENTION.inactiveAccountMonths} months and delete them after notice; this review and deletion is currently a manual process (the system only produces a report).</li>
-        <li>Draft run history: {RETENTION.runHistoryDays} days. Per-call AI telemetry (provider, model, token counts, timing, error class; no prompt text): {RETENTION.aiCallDays} days. Profile change log (audit log): {RETENTION.auditLogMonths} months, with any prompt text in it removed after {RETENTION.auditPromptDays} days.</li>
+        <li>Draft run history: {RETENTION.runHistoryDays} days. Per-call AI telemetry (provider, model, token counts, timing, error class; no prompt text): {RETENTION.aiCallDays} days. Daily usage counts (calls and tokens per day, no prompt or resume text): {RETENTION.usageCountsMonths} months. Profile change log (audit log): {RETENTION.auditLogMonths} months, with any prompt text in it removed after {RETENTION.auditPromptDays} days.</li>
         <li>Job Radar run logs: {RETENTION.radarRunDays} days.</li>
         <li>Job search cache (not tied to your identity): {RETENTION.searchCacheHours} hours, and at most {RETENTION.searchCacheMaxDays} days.</li>
         <li>Accounts the owner did not approve: deleted automatically by a daily job {RETENTION.deniedAccountDays} days after the decision.</li>

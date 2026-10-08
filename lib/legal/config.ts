@@ -53,6 +53,7 @@ export const RETENTION = {
   auditLogMonths: 12,
   auditPromptDays: 90,
   backupPurgeDays: 30,
+  usageCountsMonths: 12,
 } as const;
 
 export const MIN_AGE = 18;

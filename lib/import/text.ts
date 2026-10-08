@@ -9,7 +9,8 @@
  * resume is read by exactly the same code path that verifies a generated one.
  */
 
-import { extractTextFromDocx, extractTextFromPdf } from '../render/selftest';
+import mammoth from 'mammoth';
+import { extractTextFromPdf } from '../render/selftest';
 import { NotAZipError, ZipLimitError, inflatedSize } from './zip';
 
 export type UploadFormat = 'pdf' | 'docx';
@@ -115,7 +116,7 @@ export async function extractUploadText(
 
   const raw =
     format === 'docx'
-      ? await extractTextFromDocx(buffer)
+      ? await docxTextWithBreaks(buffer)
       : await extractTextFromPdf(buffer);
 
   const cleaned = normalize(raw);
@@ -123,6 +124,29 @@ export async function extractUploadText(
   const text = truncated ? cleaned.slice(0, MAX_TEXT_CHARS) : cleaned;
 
   return { text, chunks: chunkResumeText(text), truncated };
+}
+
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+/**
+ * Upload text for a DOCX. mammoth's raw-text mode drops <w:br/> and the boundaries between
+ * table cells, which glued a two-column resume into "SKILLSPython...EXPERIENCESoftware
+ * Engineer". Its HTML mode keeps <br>, <p>, <td>, so line ends are rebuilt from that.
+ * (Not used for the self-test of our own output, which has no tables.)
+ */
+async function docxTextWithBreaks(buffer: Buffer): Promise<string> {
+  const { value: html } = await mammoth.convertToHtml({ buffer });
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|tr|td|th|li|h[1-6]|table)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+      if (e[0] === '#') {
+        const cp = e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+        return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : m;
+      }
+      return ENTITIES[e.toLowerCase()] ?? m;
+    });
 }
 
 /**

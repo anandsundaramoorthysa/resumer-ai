@@ -15,9 +15,8 @@ import type { NextRequest } from 'next/server';
 import { cronAuthorized } from '@/lib/server/cron-auth';
 import { runDraftAlerts } from '@/lib/server/draft-alerts';
 import {
-  claimAlert,
   collectOpsFindings,
-  composeOpsAlert,
+  dispatchOpsAlerts,
   recordHeartbeat,
   runHousekeeping,
   type OpsFinding,
@@ -29,14 +28,19 @@ export const runtime = 'nodejs';
 
 async function sendOpsAlerts(dryRun: boolean): Promise<{ findings: OpsFinding[]; sent: boolean }> {
   const all = await collectOpsFindings();
-  const fresh: OpsFinding[] = [];
-  for (const f of all) if (dryRun || (await claimAlert(f.kind))) fresh.push(f);
-  const mail = composeOpsAlert(fresh);
-  const to = process.env.ALERT_EMAIL?.trim();
-  if (!mail || dryRun || !to || !isMailConfigured()) return { findings: all, sent: false };
-  const result = await sendOperatorEmail(to, mail.subject, `${mail.text}\n\n${appUrl('/api/health')}`);
-  if (!result.ok) log.error('ops alert not sent', { route: '/api/cron/alerts', err: result.error });
-  return { findings: all, sent: result.ok };
+  return dispatchOpsAlerts(all, {
+    dryRun,
+    footer: appUrl('/api/health'),
+    mailer: {
+      to: process.env.ALERT_EMAIL?.trim(),
+      configured: isMailConfigured(),
+      send: async (to, subject, text) => {
+        const result = await sendOperatorEmail(to, subject, text);
+        if (!result.ok) log.error('ops alert not sent', { route: '/api/cron/alerts', err: result.error });
+        return result;
+      },
+    },
+  });
 }
 
 async function run(req: NextRequest) {

@@ -43,6 +43,7 @@ import { gatherFitFacts } from '@/lib/fit/assess';
 import { runFitAgent } from '@/lib/fit/agent';
 import { AssessmentTokenError, openAssessment, sealAssessment } from '@/lib/fit/token';
 import { jsonError } from '@/lib/server/job-submission';
+import { JSON_MAX_BYTES, guardMutation, readJsonLimited } from '@/lib/server/request-guard';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -51,8 +52,12 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) return jsonError('Sign in first.', 401);
+  const refused = guardMutation(req, { contentTypes: ['application/json'], maxBytes: JSON_MAX_BYTES });
+  if (refused) return refused;
 
-  const body = (await req.json().catch(() => ({}))) as { assessment?: unknown; text?: unknown };
+  const read = await readJsonLimited(req, JSON_MAX_BYTES);
+  if (!read.ok) return read.res;
+  const body = (read.value && typeof read.value === 'object' ? read.value : {}) as { assessment?: unknown; text?: unknown };
   const text = typeof body.text === 'string' ? body.text.trim() : '';
 
   if (text.length < MIN_CLAIM_CHARS) {
@@ -77,6 +82,7 @@ export async function POST(req: NextRequest) {
 
   await assertDailyBudget(userId);
   const budget = new DraftBudget(DRAFT_BUDGET, ASSESS_TIME_BUDGET_MS, ASSESS_RESERVE_MS);
+  budget.userId = userId;
 
   try {
     const missing = assessed.fit.skills.missing;

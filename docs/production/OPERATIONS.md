@@ -48,7 +48,9 @@ All are doorbells: one authenticated request (`x-cron-secret`), always HTTP 200 
 | `audit_log` | 12 months | batched delete |
 | `audit_log.diff.prompt` | nulled after 90 days | `jsonb_set(diff,'{prompt}','null')`, idempotent |
 | `ai_call` | 90 days | `pruneAiCalls` (`lib/ai/telemetry.ts`) |
+| `ai_usage_daily` | 12 months | batched delete on `(user_id, day)` (composite key, no `id` column) |
 | `auth_attempt` | 2 days | existing purge |
+| `resume_snapshot` | until the account is deleted (**owner decision 2026-10-08: no automatic purge** - these are the user's own resumes; erasure is on account delete, cascade) | `onDelete: 'cascade'` only |
 | `auth_token` | 7 days past expiry | existing purge |
 | `sync_job` | 7 days (never `running`); failed-job corpus cleared | existing logic |
 

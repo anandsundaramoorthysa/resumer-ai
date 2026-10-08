@@ -212,6 +212,7 @@ export async function reviewSection(
     const unplaced = profile.records.filter((r) => r.type === 'skill' && !classifySkill(String(r.data.name ?? '')));
     if (unplaced.length > 0) {
       const budget = new DraftBudget(DRAFT_BUDGET, REVIEW_TIME_BUDGET_MS, 1_000);
+      budget.userId = userId;
       try {
         await assertDailyBudget(userId);
         const found = await classifyUnknownSkills(unplaced.map((r) => String(r.data.name ?? '')), budget);
@@ -248,6 +249,7 @@ export async function reviewSection(
   if (slice.length > 0) {
     await assertDailyBudget(userId);
     const budget = new DraftBudget(DRAFT_BUDGET, REVIEW_TIME_BUDGET_MS, 1_000);
+    budget.userId = userId;
     try {
       const { proposals } = await proposeChanges({ section, records: slice, roles: profile.roles, budget });
       const verified = verifyProposals(proposals, slice, profile.roles, rules);
@@ -507,6 +509,7 @@ export async function checkCandidate(
   if (field && !structuredBullet && wordingNeedsReview(text)) {
     const candidate: StewardRecord = { id: 'candidate', type, source: 'manual', reviewState: 'approved', contentHash: 'candidate', data };
     const budget = new DraftBudget(DRAFT_BUDGET, 9_000, 500);
+    budget.userId = userId;
     try {
       await assertDailyBudget(userId);
       const { proposals } = await proposeChanges({ section: sectionOf(type), records: [candidate], roles: profile.roles, budget });
@@ -548,6 +551,7 @@ export interface AssistantExtraction {
 export async function extractForProfile(userId: string, text: string): Promise<AssistantExtraction> {
   await assertDailyBudget(userId);
   const budget = new DraftBudget(DRAFT_BUDGET, REVIEW_TIME_BUDGET_MS, 1_000);
+  budget.userId = userId;
   try {
     const claim = await extractClaims({ text, budget });
     const grounded = groundClaims(claim, text);
@@ -682,9 +686,10 @@ export async function reviewImportCandidates(
       data: tidyRecordData(c.type, c.record),
     }));
     const budget = new DraftBudget(DRAFT_BUDGET, REVIEW_TIME_BUDGET_MS, 1_000);
+    budget.userId = userId;
     try {
       await assertDailyBudget(userId);
-      const section = records[0].type === 'experience-bullet' ? 'experience' : 'projects';
+      const section =records[0].type === 'experience-bullet' ? 'experience' : 'projects';
       const { proposals } = await proposeChanges({ section, records, roles: profile.roles, budget });
       const { suggestions } = verifyProposals(proposals, records, profile.roles);
       for (const s of suggestions) {

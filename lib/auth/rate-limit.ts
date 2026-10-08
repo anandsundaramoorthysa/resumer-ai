@@ -161,7 +161,19 @@ export interface RateVerdict {
   message?: string;
 }
 
-async function countSince(subject: string, action: AuthAction, since: Date): Promise<number> {
+/**
+ * Attempts in the last `windowMs`, measured on the DATABASE's clock.
+ *
+ * `created_at` is a timestamp WITHOUT time zone filled by the database's `now()` default, i.e. the
+ * wall clock of the database session's timezone. A JavaScript `Date` passed as the lower bound is
+ * serialised as UTC, so on any database whose session timezone is not UTC the window silently
+ * shifted by the offset: on an IST database the 15-minute window became about 5h45m and locked
+ * every caller out for hours (found by end-to-end testing). Computing the bound in SQL with
+ * `now()` compares like with like in every timezone. Neon runs in UTC, which is why this never
+ * showed in production.
+ */
+async function countSince(subject: string, action: AuthAction, windowMs: number): Promise<number> {
+  const seconds = windowMs / 1000;
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(authAttempts)
@@ -169,7 +181,7 @@ async function countSince(subject: string, action: AuthAction, since: Date): Pro
       and(
         eq(authAttempts.subject, subject),
         eq(authAttempts.action, action),
-        gte(authAttempts.createdAt, since),
+        gte(authAttempts.createdAt, sql`now() - (${seconds}::double precision * interval '1 second')`),
       ),
     );
   return row?.n ?? 0;
@@ -189,7 +201,6 @@ export async function rateLimit(
   options: { record?: boolean } = {},
 ): Promise<RateVerdict> {
   const limits = LIMITS[action];
-  const now = Date.now();
 
   // `record: false` reads the counter without adding to it, so a path that is checked
   // twice — the form's friendly pre-check and the authoritative check inside
@@ -205,17 +216,13 @@ export async function rateLimit(
     await db.insert(authAttempts).values(rows);
   }
 
-  const subjectCount = await countSince(
-    `email:${subject}`,
-    action,
-    new Date(now - limits.subject.windowMs),
-  );
+  const subjectCount = await countSince(`email:${subject}`, action, limits.subject.windowMs);
   if (subjectCount > limits.subject.max) {
     return { allowed: false, message: 'Too many attempts. Wait a while and try again.' };
   }
 
   if (ip) {
-    const ipCount = await countSince(`ip:${ip}`, action, new Date(now - limits.ip.windowMs));
+    const ipCount = await countSince(`ip:${ip}`, action, limits.ip.windowMs);
     if (ipCount > limits.ip.max) {
       return { allowed: false, message: 'Too many attempts from this connection. Try again later.' };
     }

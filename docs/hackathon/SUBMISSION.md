@@ -81,15 +81,16 @@ Done:
 - [x] README rewritten for this release: judge quickstart, full setup with SQL apply order, roles, kill switches, observability, testing.
 - [x] `.env.example` lists every variable the code reads, with placeholders only.
 - [x] SerpApi usage, prior-existence and AI-tools disclosures drafted above.
+- [x] **Repo is PUBLIC** (`anandsundaramoorthysa/resumer-ai`, checked 2026-10-08). `.env` has never been tracked; only `.env.example` is.
+- [x] Owner decisions recorded in `docs/production/DECISIONS.md` (grievance contact, 18+ gate, retention, providers, plans).
 
 Not done (owner decisions; deliberately not done by tooling):
 
-- [ ] **Repo is still PRIVATE.** It must be made public (or access granted as the rules require) before submitting.
-- [ ] **Branch `feat/serpapi-job-radar` is not merged to `main`**, and the default branch must hold the final code. Note that `main` deploys to Netlify production: merging also ships the work to the live site, and the SQL files in `scripts/` must be applied to the production database first.
+- [ ] **Branch `feat/serpapi-job-radar` is not merged to `main`**, and the default branch must hold the final code. Note that `main` deploys to Netlify production: merging also ships the work to the live site, and the SQL files in `scripts/` must be applied to the production database first. *(Owner decision 2026-10-08: deliberately pending.)*
 - [ ] Secrets scan passes on the working tree and history (CI runs gitleaks; run `gitleaks detect` locally too); `.env` is not committed.
 - [ ] Fixtures recorded with `SERP_MODE=record` contain no personal data (only if you recorded any).
 - [ ] README quickstart confirmed from a fresh clone with only `.env.example` copied.
 - [ ] `npm test`, `npm run typecheck` and `npm run lint` pass on the final commit (run them; this document does not claim a result).
-- [ ] Demo video recorded, under 3 minutes, opens in an incognito window, shows the project running locally, hides keys and personal data. Video link added to the form.
+- [ ] Demo video recorded, under 3 minutes, opens in an incognito window, shows the project running locally, hides keys and personal data. Video link added to the form. *(Owner decision 2026-10-08: deliberately pending.)*
 - [ ] Track(s) and AI-tool disclosure pasted into the form.
 - [ ] Submitted before 2026-10-10 23:59 IST (aim for a day earlier).

@@ -97,7 +97,7 @@ export async function reviseDocument(
         prompt: `Strengthen these bullets. Return each original alongside its revision.\n\n${evidenceTargets
           .map((t, i) => `${i + 1}. ${t}`)
           .join('\n')}`,
-        options: draftCallOptions(budget, { temperature: 0.25 }),
+        options: draftCallOptions(budget, { temperature: 0.25, telemetry: { stage: 'revise' } }),
       });
 
       const map = new Map<string, string>();

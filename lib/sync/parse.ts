@@ -16,6 +16,7 @@ import type { ParsedRecord } from './reconcile';
 import { bulletHash, hashContent } from './reconcile';
 import { asHonorType, classifyHonor, honorHashParts, HONOR_RULE } from '../profile/honors';
 import { classifySkill } from '../skills/categories';
+import { spokenLanguage } from '../skills/spoken';
 import { generateStructured } from '../ai/chain';
 import type { DraftBudget } from '../ai/budget';
 import type { RepoFile } from './github';
@@ -358,6 +359,7 @@ END FILE CONTENT`,
       maxRetriesPerProvider: 0,
       timeoutMs: options.timeoutMs,
       deadlineMs: options.deadlineMs,
+      telemetry: { stage: 'sync-parse' },
     },
   });
   return data;
@@ -437,7 +439,22 @@ function certainCategory(name: string): string | null {
 export function toRecords(data: ExtractedProfile): ParseResult {
   const records: ParsedRecord[] = [];
 
-  for (const s of data.skills) {
+  // A spoken language filed as a skill ("English", "हिन्दी") is a language, not a skill:
+  // as a skill of category 'language' it printed next to Python. Moved, not dropped.
+  const spoken = new Set((data.languages ?? []).map((l) => spokenLanguage(l.name) ?? l.name.toLowerCase()));
+  const movedLanguages: NonNullable<ExtractedProfile['languages']> = [];
+  const skills = data.skills.filter((s) => {
+    const canonical = spokenLanguage(s.name);
+    if (!canonical) return true;
+    if (!spoken.has(canonical)) {
+      spoken.add(canonical);
+      movedLanguages.push({ name: s.name.trim() });
+    }
+    return false;
+  });
+  data = { ...data, languages: [...(data.languages ?? []), ...movedLanguages] };
+
+  for (const s of skills) {
     records.push({
       type: 'skill',
       name: s.name,

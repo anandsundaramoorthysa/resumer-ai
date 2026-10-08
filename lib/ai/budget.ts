@@ -155,6 +155,9 @@ export interface BudgetUsage {
 export class DraftBudget {
   private usage: BudgetUsage = { calls: 0, tokens: 0 };
   private readonly startedAt = Date.now();
+  /** Who the spend is attributed to in ai_call rows (lib/ai/chain.ts reads these). */
+  userId?: string;
+  draftRunId?: string;
 
   constructor(
     private readonly limits: BudgetLimits = DRAFT_BUDGET,

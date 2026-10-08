@@ -381,7 +381,11 @@ function tracker(ctx: Ctx, cfg: ProviderConfig, path: 'structured' | 'json' | 't
   const model = ctx.tier === 'fast' ? cfg.fastModel : cfg.model;
   return (inTokens, outTokens, errorClass, finishReason) =>
     recordAiCall({
-      ...(ctx.options.telemetry ?? { stage: 'unknown' }),
+      // Every call site names its stage; 'unlabelled' only flags one that forgot to.
+      ...(ctx.options.telemetry ?? { stage: 'unlabelled' }),
+      // Attribution rides on the budget the caller already passes (lib/ai/budget.ts).
+      userId: ctx.options.telemetry?.userId ?? ctx.budget?.userId ?? null,
+      draftRunId: ctx.options.telemetry?.draftRunId ?? ctx.budget?.draftRunId ?? null,
       provider: cfg.id,
       model,
       path,

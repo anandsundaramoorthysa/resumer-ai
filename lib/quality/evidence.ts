@@ -263,7 +263,7 @@ export async function scoreEvidence(
         seed: 7,
         // One short entry per line; the floor leaves room for a provider's own overhead.
         maxOutputTokens: Math.min(2500, Math.max(800, 300 + 45 * lines.length)),
-        telemetry: { stage: 'evidence', promptVersion: PROMPT_VERSION },
+        telemetry: { stage: 'judge', promptVersion: PROMPT_VERSION },
       }),
     });
 

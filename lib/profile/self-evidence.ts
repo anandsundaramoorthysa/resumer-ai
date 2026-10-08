@@ -351,7 +351,7 @@ export async function findSelfEvidence(args: {
         '',
       ]),
     ].join('\n'),
-    options: draftCallOptions(budget, { temperature: 0.1 }),
+    options: draftCallOptions(budget, { temperature: 0.1, telemetry: { stage: 'self-evidence' } }),
   });
 
   const sources: EvidenceSource[] = pages.map((p) => ({

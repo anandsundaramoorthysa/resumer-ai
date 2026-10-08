@@ -101,15 +101,42 @@ export async function assertFlag(key: FlagKey, message?: string): Promise<void> 
   if (!(await flagOn(key))) throw new FlagOffError(key, message);
 }
 
+export class FlagValueError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FlagValueError';
+  }
+}
+
+export const MAINTENANCE_MESSAGE_MAX = 300;
+
+/** The value to store for `key`, or a FlagValueError written for the owner. */
+export function validateFlagValue(key: FlagKey, value: string): string {
+  if (typeof value !== 'string') throw new FlagValueError('Value must be text.');
+  const clean = value.trim();
+  if (key === 'maintenance_message') {
+    if (clean.length > MAINTENANCE_MESSAGE_MAX) {
+      throw new FlagValueError(`The maintenance message is limited to ${MAINTENANCE_MESSAGE_MAX} characters.`);
+    }
+    // Plain text only: no markup and no control characters (it is shown to every visitor).
+    if (/[<>\u0000-\u0008\u000b-\u001f\u007f]/.test(clean)) {
+      throw new FlagValueError('The maintenance message must be plain text (no < > or control characters).');
+    }
+    return clean;
+  }
+  if (clean !== 'true' && clean !== 'false') throw new FlagValueError(`${key} must be "true" or "false".`);
+  return clean;
+}
+
 /** Owner write: upserts the row and records who/what changed in audit_log. */
 export async function setFlag(key: FlagKey, value: string, userId: string): Promise<void> {
+  const clean = validateFlagValue(key, value);
   const [{ db }, { appSetting }, { auditLog }, { eq }] = await Promise.all([
     import('@/lib/db'),
     import('@/lib/db/schema-ops'),
     import('@/lib/db/schema'),
     import('drizzle-orm'),
   ]);
-  const clean = value.trim().slice(0, 500);
   const [prev] = await db.select({ value: appSetting.value }).from(appSetting).where(eq(appSetting.key, key));
   await db
     .insert(appSetting)

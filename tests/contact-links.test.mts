@@ -162,7 +162,7 @@ suite('contact details from an extraction fill gaps only', () => {
     const { merged, changed } = fillContactGaps(stored, { portfolioUrl: 'anand.dev' });
     assert(merged.fullName === 'Anand S' && merged.email === 'a@example.com', 'name and email kept');
     assert(merged.phone === stored.phone && merged.githubUrl === stored.githubUrl, 'phone and links kept');
-    assert(merged.portfolioUrl === 'anand.dev' && changed, 'the empty field is filled');
+    assert(merged.portfolioUrl === 'https://anand.dev' && changed, 'the empty field is filled');
   });
 
   test('an injected email cannot replace the real one', () => {

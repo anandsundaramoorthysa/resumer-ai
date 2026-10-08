@@ -15,6 +15,8 @@ import { auth } from '@/auth';
 import { buildLinkedInPreview } from '@/lib/import/linkedin';
 import { NotAZipError, readZip } from '@/lib/import/zip';
 
+import { guardMutation } from '@/lib/server/request-guard';
+
 export const runtime = 'nodejs';
 
 /** Comfortably above a real export, which is a few hundred kilobytes of CSV. */
@@ -25,6 +27,9 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) {
     return Response.json({ error: 'Sign in first.' }, { status: 401 });
   }
+
+  const refused = guardMutation(req, { contentTypes: ['multipart/form-data'], maxBytes: MAX_UPLOAD_BYTES + 64 * 1024 });
+  if (refused) return refused;
 
   // Checked before `formData()` buffers the body; chunked bodies cannot be bounded.
   const declared = Number(req.headers.get('content-length'));

@@ -173,7 +173,7 @@ export async function extractJobRequirement(
     options: draftCallOptions(budget, {
       temperature: 0.1,
       maxOutputTokens: 3000,
-      telemetry: { stage: 'intake-extract', promptVersion: PROMPT_VERSION },
+      telemetry: { stage: 'understand', promptVersion: PROMPT_VERSION },
     }),
   });
 

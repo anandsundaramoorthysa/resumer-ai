@@ -400,7 +400,9 @@ Procedures: [`RUNBOOK.md`](./RUNBOOK.md). Reference: [`docs/production/OPERATION
 This is a strong single-owner engine, not yet a production service for the public. The current
 status of every audited gap (done, partial, open) is at the top of
 [`docs/production/READINESS.md`](./docs/production/READINESS.md); legal placeholders awaiting
-counsel are in [`docs/production/LEGAL-REVIEW.md`](./docs/production/LEGAL-REVIEW.md).
+counsel are in [`docs/production/LEGAL-REVIEW.md`](./docs/production/LEGAL-REVIEW.md); the
+owner's settled choices (privacy, retention, pricing, access) are in
+[`docs/production/DECISIONS.md`](./docs/production/DECISIONS.md).
 
 ---
 

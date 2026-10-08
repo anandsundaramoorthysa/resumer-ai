@@ -13,7 +13,7 @@ Re-checked against the code (grep or read; nothing was run). The register below 
 | G03 PII to vendors | PARTIAL | `AI_PII_PROVIDERS` and `AI_DISABLED_PROVIDERS` (`lib/ai/models.ts`), `lib/ai/redact.ts`; the provider choice, Groq ZDR and the Gemini unpaid tier remain owner decisions |
 | G04 grievance contact | DONE (address is personal Gmail) | `app/contact`, `GRIEVANCE` in `lib/legal/config.ts` |
 | G05 breach procedure | PARTIAL | incident checklist in `RUNBOOK.md`; no breach-notification procedure or comms templates |
-| G06 retention | DONE | `lib/server/housekeeping.ts`, `lib/radar/housekeeping.ts`, daily function `housekeeping.mts` |
+| G06 retention | DONE | `lib/server/housekeeping.ts` (incl. `ai_usage_daily` 12 months, added 2026-10-08), `lib/radar/housekeeping.ts`, daily function `housekeeping.mts`; `resume_snapshot` deliberately not purged - see `DECISIONS.md` |
 | G07 denied/inactive accounts | PARTIAL | denied purged after 30 days; inactive accounts are report-only, deleted by hand |
 | G08 erasure is DB-only | OPEN | residual windows are stated in the privacy notice, not removed |
 | G09 export completeness | DONE | `lib/legal/export-tables.ts` includes radar runs, dismissals, enrichment, installations, consent; `tests/legal-export.test.mts` |

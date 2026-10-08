@@ -25,7 +25,7 @@ export default async function PendingPage() {
 
   return (
     <div className="min-h-screen min-h-dvh">
-      <AppHeader width="6xl" />
+      <AppHeader width="6xl" minimal />
       <main id="main" tabIndex={-1} className="mx-auto max-w-lg px-5 py-20">
         {approval === 'denied' ? (
           <>

@@ -5,6 +5,7 @@
 
 import type { JobRequirement, ProfileRecord } from '../types';
 import { recordText } from '../retrieval/rank';
+import { isSpokenLanguage, spokenLanguage } from '../skills/spoken';
 import { keywordMatches, normalizeForMatch } from '../quality/keywords';
 
 /* ------------------------------------------------------------------ skills -- */
@@ -59,7 +60,8 @@ export function groupSkills(
   for (const name of names) {
     const n = name.toLowerCase().trim();
     if (!n) continue;
-    let label = SKILL_RULES.find(([, test]) => test.test(n))?.[0];
+    // Rows stored before the importer separated them: English is not a programming language.
+    let label = isSpokenLanguage(name) ? 'Languages' : SKILL_RULES.find(([, test]) => test.test(n))?.[0];
     if (!label) {
       const category = categoryOf(name);
       label =
@@ -74,6 +76,27 @@ export function groupSkills(
     rows.set(label, [...(rows.get(label) ?? []), name.trim()]);
   }
   return ROW_ORDER.filter((l) => rows.has(l)).map((label) => ({ label, names: rows.get(label)! }));
+}
+
+/**
+ * Adds the spoken languages the profile holds as language records to the 'Languages' row,
+ * which groupSkills may already have started from skills that are really spoken languages.
+ * One entry per language: "English" as a skill and "English (Fluent)" as a record are one.
+ * Records go first, since they carry the proficiency.
+ */
+export function mergeLanguageRow(rows: SkillRow[], labels: string[]): SkillRow[] {
+  const existing = rows.find((r) => r.label === 'Languages');
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const n of [...labels, ...(existing?.names ?? [])]) {
+    const key = spokenLanguage(n) ?? n.toLowerCase().trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    names.push(n);
+  }
+  if (names.length === 0) return rows;
+  const merged = { label: 'Languages', names };
+  return existing ? rows.map((r) => (r === existing ? merged : r)) : [...rows, merged];
 }
 
 export function formatSkillRow(row: SkillRow): string {

@@ -26,6 +26,9 @@ import type {
   ResumeDocument,
   RoleRecord,
 } from '../types';
+import { and, desc, eq, isNull } from 'drizzle-orm';
+import { db } from '@/lib/db';
+import { draftRuns } from '@/lib/db/schema';
 import { DRAFT_BUDGET, DraftBudget, GRADING_RESERVE_MS } from '../ai/budget';
 import { assertDailyBudget, recordDailyUsage } from '../ai/daily-budget';
 import { MeteredBudget } from './metered-budget';
@@ -81,8 +84,30 @@ export function newDraftRunTrace(): DraftRunTrace {
   };
 }
 
+/**
+ * The draft_run row the route claimed for this attempt, for ai_call attribution. The route
+ * does not hand its run id down, so the newest still-running, snapshot-less row of this user
+ * is used. Best effort: null on any failure (no database, no row) and the draft goes on.
+ */
+export async function openDraftRunId(userId: string): Promise<string | null> {
+  if (!process.env.DATABASE_URL?.trim()) return null;
+  try {
+    const [row] = await db
+      .select({ id: draftRuns.id })
+      .from(draftRuns)
+      .where(and(eq(draftRuns.userId, userId), eq(draftRuns.status, 'running'), isNull(draftRuns.snapshotId)))
+      .orderBy(desc(draftRuns.startedAt))
+      .limit(1);
+    return row?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export interface PipelineInput {
   userId: string;
+  /** The claimed draft_run row, when the caller knows it; otherwise looked up (see above). */
+  draftRunId?: string | null;
   contact: ContactInfo;
   records: ProfileRecord[];
   roles: RoleRecord[];
@@ -172,7 +197,14 @@ export async function runDraftPipeline(
   // Metered: usage is billed after each counted call, so a process killed mid-run (where
   // this `finally` never executes) has still paid for what it spent. The `finally` flushes
   // only the remainder — deltas, never the whole snapshot again.
-  const budget = new MeteredBudget((u) => recordDailyUsage(input.userId, u));
+  const budget = new MeteredBudget(
+    (u) => recordDailyUsage(input.userId, u),
+    undefined,
+    undefined,
+    undefined,
+    input.userId,
+  );
+  budget.draftRunId = (input.draftRunId ?? (await openDraftRunId(input.userId))) ?? undefined;
   try {
     return await runDraft(input, emit, budget);
   } finally {
@@ -243,6 +275,7 @@ export async function runAssessment(
     DRAFT_BUDGET,
     ASSESS_TIME_BUDGET_MS,
     ASSESS_RESERVE_MS,
+    input.userId,
   );
   try {
     const records = await syncProfile(input, emit);

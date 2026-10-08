@@ -125,7 +125,7 @@ export async function generateCoverLetter(
     ]
       .filter(Boolean)
       .join('\n'),
-    options: draftCallOptions(budget, { temperature: 0.4 }),
+    options: draftCallOptions(budget, { temperature: 0.4, telemetry: { stage: 'cover-letter' } }),
   });
 
   // Same verification as the resume, against the resume and NOTHING else.

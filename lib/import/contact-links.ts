@@ -215,6 +215,32 @@ export interface ContactFields {
 }
 
 /**
+ * A contact URL that is safe to print, or null.
+ *
+ * A model asked for a portfolio sometimes answers with a guess built from the email
+ * ("anand.sundar" from anand.sundar@example.com), which then printed on the resume header.
+ * Accepted: an http(s) URL, or a bare domain/path that gets https:// added, whose host has a
+ * dot and an alphabetic TLD. Anything else, and anything equal to the email's local part,
+ * is dropped.
+ */
+export function cleanContactUrl(raw: string | null | undefined, email?: string | null): string | null {
+  const value = (raw ?? '').trim();
+  if (!value || /\s/.test(value)) return null;
+  const bare = value.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/+$/, '').toLowerCase();
+  const local = (email ?? '').split('@')[0]?.trim().toLowerCase();
+  if (local && bare === local) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`;
+  try {
+    const url = new URL(withScheme);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(url.hostname)) return null;
+    return withScheme;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The stored contact block with only its empty fields filled from `incoming`, and whether
  * anything changed.
  *
@@ -228,7 +254,12 @@ export function fillContactGaps(
   existing: Partial<ContactFields> | null | undefined,
   incoming: Partial<Record<keyof ContactFields, string | null | undefined>>,
 ): { merged: ContactFields; changed: boolean } {
-  const pick = (key: keyof ContactFields) => existing?.[key]?.trim() || incoming[key]?.trim() || null;
+  const email = existing?.email?.trim() || incoming.email?.trim() || '';
+  const URL_FIELDS = ['portfolioUrl', 'githubUrl', 'linkedinUrl'];
+  // Incoming URLs are validated; what is already stored was typed or approved by the user.
+  const fresh = (key: keyof ContactFields) =>
+    URL_FIELDS.includes(key) ? cleanContactUrl(incoming[key], email) : incoming[key]?.trim();
+  const pick = (key: keyof ContactFields) => existing?.[key]?.trim() || fresh(key) || null;
   const merged: ContactFields = {
     fullName: pick('fullName') ?? '',
     email: pick('email') ?? '',

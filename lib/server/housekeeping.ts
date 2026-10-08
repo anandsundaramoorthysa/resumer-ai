@@ -10,6 +10,7 @@
  *   denied accounts      30 days after the decision (owners never)
  *   audit_log.diff.prompt  nulled after 90 days (prompt text is the most sensitive column)
  *   ai_call              90 days (lib/ai/telemetry.ts)
+ *   ai_usage_daily       12 months (per-user daily counts; no prompt or output text)
  *   inactive accounts    24 months: REPORT ONLY (dry run). Nothing is deleted; the owner
  *                        emails a notice first - see docs/production/OPERATIONS.md.
  *
@@ -35,6 +36,7 @@ export const RETENTION = {
   deniedAccountDays: 30,
   inactiveAccountMonths: 24,
   aiCallDays: 90,
+  aiUsageDailyMonths: 12,
 } as const;
 
 export const DEFAULT_BUDGET_MS = 8_000;
@@ -57,6 +59,8 @@ export function cutoffs(now: Date) {
     auditPrompt: days(RETENTION.auditPromptDays),
     deniedAccount: days(RETENTION.deniedAccountDays),
     inactiveAccount: months(RETENTION.inactiveAccountMonths),
+    /** Compared against the `day` column, which is text 'YYYY-MM-DD' in UTC. */
+    aiUsageDaily: months(RETENTION.aiUsageDailyMonths).slice(0, 10),
   };
 }
 
@@ -105,6 +109,16 @@ const nullPromptBatch = (cutoff: string) => (limit: number) =>
               and jsonb_typeof(diff -> 'prompt') <> 'null'
             limit ${limit}
           ) returning 1) select count(*)::int as n from t`,
+    )
+    .then(countOf);
+
+/** Composite primary key, so this one cannot use `deleteBatch` (`... where id in (...)`). */
+const deleteUsageBatch = (cutoff: string) => (limit: number) =>
+  db
+    .execute(
+      sql`with gone as (delete from ai_usage_daily where (user_id, day) in (
+            select user_id, day from ai_usage_daily where day < ${cutoff} limit ${limit}
+          ) returning 1) select count(*)::int as n from gone`,
     )
     .then(countOf);
 
@@ -179,6 +193,7 @@ export interface HousekeepingOutcome {
   auditPromptsNulled: number;
   deniedAccountsDeleted: number;
   aiCallsPruned: boolean;
+  aiUsageDailyDeleted: number;
   radar: unknown;
   /** Dry run only - see header. */
   inactiveAccounts: { count: number; sampleIds: string[] } | null;
@@ -205,6 +220,7 @@ export async function runHousekeeping(
     auditPromptsNulled: 0,
     deniedAccountsDeleted: 0,
     aiCallsPruned: false,
+    aiUsageDailyDeleted: 0,
     radar: null,
     inactiveAccounts: null,
     more: false,
@@ -284,6 +300,11 @@ export async function runHousekeeping(
       out.aiCallsPruned = !r.more;
       if (r.more) out.more = true;
     });
+    await run(
+      'ai usage daily',
+      deleteUsageBatch(c.aiUsageDaily),
+      (n) => (out.aiUsageDailyDeleted = n),
+    );
     await guard('inactive accounts (report only)', async () => {
       out.inactiveAccounts = await selectInactiveAccounts(now);
     });
@@ -336,6 +357,43 @@ export async function claimAlert(kind: string, windowMs = DAY): Promise<boolean>
   } catch {
     return true;
   }
+}
+
+/** Gives the 24h window back (the mail was not sent, so the next run must try again). */
+export async function releaseAlert(kind: string): Promise<void> {
+  try {
+    await db.execute(sql`delete from app_setting where key = ${`alert:${kind}`}`);
+  } catch {
+    /* the window then simply runs out on its own */
+  }
+}
+
+export interface OpsMailer {
+  /** Recipient (ALERT_EMAIL) and whether SMTP is set up; without both nothing is claimed. */
+  to: string | undefined;
+  configured: boolean;
+  send(to: string, subject: string, text: string): Promise<{ ok: boolean; error?: string }>;
+}
+
+/**
+ * Claim -> send -> release on failure. A finding's 24h window is only spent by a mail that
+ * actually went out; with no recipient/SMTP, or a failed send, the next hourly run tries again.
+ */
+export async function dispatchOpsAlerts(
+  all: OpsFinding[],
+  o: { dryRun: boolean; mailer: OpsMailer; footer?: string },
+): Promise<{ findings: OpsFinding[]; sent: boolean }> {
+  const { mailer } = o;
+  if (o.dryRun || !mailer.to || !mailer.configured) return { findings: all, sent: false };
+  const fresh: OpsFinding[] = [];
+  for (const f of all) if (await claimAlert(f.kind)) fresh.push(f);
+  const mail = composeOpsAlert(fresh);
+  if (!mail) return { findings: all, sent: false };
+  const result = await mailer
+    .send(mailer.to, mail.subject, o.footer ? `${mail.text}\n\n${o.footer}` : mail.text)
+    .catch((err) => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+  if (!result.ok) for (const f of fresh) await releaseAlert(f.kind);
+  return { findings: all, sent: result.ok };
 }
 
 export interface OpsFinding {

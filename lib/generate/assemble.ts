@@ -54,6 +54,7 @@ import {
   educationYears,
   formatSkillRow,
   groupSkills,
+  mergeLanguageRow,
   relevanceScore,
   topByRelevance,
 } from './resume-lines';
@@ -488,7 +489,7 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
         schema: RewriteSchema,
         system: REWRITE_SYSTEM,
         prompt: buildRewritePrompt(trimmedBullets, job),
-        options: draftCallOptions(budget, { temperature: 0.25 }),
+        options: draftCallOptions(budget, { temperature: 0.25, telemetry: { stage: 'rewrite' } }),
       });
 
       for (const b of data.bullets) {
@@ -556,11 +557,13 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
     // Labelled rows — "Databases: MongoDB, MySQL" — the layout the owner asked for.
     // Spoken languages are the last row rather than a section of their own.
     const categoryOf = new Map(ordered.map((s) => [canonicalSkillName(s.name), s.category]));
-    const rows = groupSkills(
-      ordered.map((s) => canonicalSkillName(s.name)),
-      (n) => categoryOf.get(n),
+    const rows = mergeLanguageRow(
+      groupSkills(
+        ordered.map((s) => canonicalSkillName(s.name)),
+        (n) => categoryOf.get(n),
+      ),
+      languages.map(languageLabel),
     );
-    if (languages.length > 0) rows.push({ label: 'Languages', names: languages.map(languageLabel) });
     byKey.skills = {
       key: 'skills',
       heading: coerceHeading('skills', undefined),
@@ -569,9 +572,11 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
   }
 
   if (roles.length > 0 || trimmedBullets.length > 0) {
-    // EVERY role, newest first, with its dates exactly as stored — including roles with no
-    // bullets. A role missing from the resume is a gap in the timeline a recruiter asks about.
-    const groups = rolesByRecency(roles).map((role) => ({
+    // Roles newest first, with their dates exactly as stored. A role with no bullet prints as a
+    // bare title and dates (and its date column detaches in the PDF text layer), so it is left
+    // out — unless no role has a bullet at all, when they stay rather than print an empty
+    // Experience section.
+    const allGroups = rolesByRecency(roles).map((role) => ({
       title: role.title,
       subtitle: role.company,
       dateRange: formatDateRange(role.startDate, role.endDate),
@@ -579,6 +584,8 @@ export async function assembleResume(input: AssembleInput): Promise<AssembleResu
         .filter((b) => b.roleId === role.id)
         .map((b) => ({ text: bulletText(b), sourceRecordId: b.id })),
     }));
+    const withBullets = allGroups.filter((g) => g.items.length > 0);
+    const groups = withBullets.length > 0 ? withBullets : allGroups;
 
     const orphans = trimmedBullets
       .filter((b) => !roles.some((r) => r.id === b.roleId))

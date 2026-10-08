@@ -17,6 +17,7 @@ import { selfTest } from '@/lib/render/selftest';
 import { scoreFormatting } from '@/lib/quality/formatting';
 import { rankRecords, selectTop } from '@/lib/retrieval/rank';
 import type { JobRequirement } from '@/lib/types';
+import { guardMutation } from '@/lib/server/request-guard';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -35,10 +36,12 @@ const NEUTRAL: JobRequirement = {
   flags: [],
 };
 
-export async function POST() {
+export async function POST(req: Request) {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) return Response.json({ error: 'Sign in first.' }, { status: 401 });
+  const refused = guardMutation(req, { contentTypes: ['application/json'], maxBytes: 4096 });
+  if (refused) return refused;
 
   const profile = await loadProfileForUser(userId);
   if (profile.records.length === 0) {

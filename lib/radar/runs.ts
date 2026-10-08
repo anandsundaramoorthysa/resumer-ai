@@ -544,7 +544,7 @@ async function preload(d: RadarDeps): Promise<void> {
     marketSignal: market.marketSignal,
     // Fast and small: one planner call, a few seconds, nothing held back for rendering.
     newBudget: (userId) =>
-      new metered.MeteredBudget((u) => daily.recordDailyUsage(userId, u), { maxCalls: 3, maxTokens: 20_000 }, 6_500, 0),
+      new metered.MeteredBudget((u) => daily.recordDailyUsage(userId, u), { maxCalls: 3, maxTokens: 20_000 }, 6_500, 0, userId),
   };
 }
 
@@ -943,8 +943,18 @@ async function runStep(run: Run, d: RadarDeps): Promise<Work> {
   /* rank + market */
   if (run.phase === 'rank') {
     const profile = await d.loadProfile(run.userId);
-    const ranked = d.rankPostings(s.postings, profile, 5);
-    const market = d.marketSignal(s.postings, skillNames(profile.records));
+    let ranked: RankedPosting[];
+    let market: ReturnType<RadarDeps['marketSignal']>;
+    try {
+      ranked = d.rankPostings(s.postings, profile, 5);
+      market = d.marketSignal(s.postings, skillNames(profile.records));
+    } catch (err) {
+      console.error('[radar] rank failed for user', run.userId, err);
+      // A plain Error is final and shown as written: no retry, so nothing more is spent.
+      throw new Error(
+        'Ranking failed on this profile record data; no more credits were used. Credits already spent on the search are not refunded.',
+      );
+    }
     const byKey = new Map(s.postings.map((p) => [p.key, p]));
     const targets: RunState['intelTargets'] = [];
     for (const r of ranked) {

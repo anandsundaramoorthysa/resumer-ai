@@ -292,7 +292,7 @@ export async function researchEmployer(args: {
       scraped.text.slice(0, MAX_PAGE_CHARS),
       'END PAGE TEXT',
     ].join('\n'),
-    options: draftCallOptions(budget, { temperature: 0.2 }),
+    options: draftCallOptions(budget, { temperature: 0.2, telemetry: { stage: 'employer-context' } }),
   });
 
   const facts = data.companyFacts.map((f) => f.trim()).filter(Boolean).slice(0, 6);

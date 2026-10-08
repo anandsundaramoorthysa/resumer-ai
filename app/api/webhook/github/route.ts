@@ -19,7 +19,12 @@ import { users } from '@/lib/db/schema';
 import { forgetInstallation } from '@/lib/github/app';
 import { markInstallationRemoved } from '@/lib/server/repo-access';
 
+import { readTextLimited } from '@/lib/server/request-guard';
+
 export const runtime = 'nodejs';
+
+/** GitHub caps webhook payloads at 25 MB but a push/installation event is a few KB. */
+const WEBHOOK_MAX_BYTES = 1024 * 1024;
 
 export async function POST(req: NextRequest) {
   const secret = process.env.GITHUB_WEBHOOK_SECRET;
@@ -27,7 +32,10 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Webhook not configured.' }, { status: 501 });
   }
 
-  const raw = await req.text();
+  // Capped before the HMAC: an unauthenticated caller must not be able to make us buffer 30 MB.
+  const read = await readTextLimited(req, WEBHOOK_MAX_BYTES);
+  if (!read.ok) return read.res;
+  const raw = read.text;
   const signature = req.headers.get('x-hub-signature-256');
 
   if (!signature || !verifySignature(raw, signature, secret)) {

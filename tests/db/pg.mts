@@ -60,6 +60,11 @@ async function ddl(): Promise<string[]> {
 
 export async function createTestDb() {
   const pg = new PGlite();
+  // PGlite takes its session timezone from the host (a developer's IST machine gives
+  // 'Etc/GMT-5'; a CI runner gives UTC), so suites behaved differently by where they ran.
+  // Production (Neon) is UTC: pin the test database to it. A suite that needs another
+  // timezone sets it itself and puts it back.
+  await pg.exec(`set time zone 'UTC'`);
   for (const s of await ddl()) await pg.exec(s);
   const db = drizzle(pg, { schema });
   return { pg, db, close: () => pg.close() };

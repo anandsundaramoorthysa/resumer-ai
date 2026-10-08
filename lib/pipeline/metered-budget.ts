@@ -24,8 +24,10 @@ export class MeteredBudget extends DraftBudget {
     limits?: BudgetLimits,
     timeBudgetMs?: number,
     reserveMs?: number,
+    userId?: string,
   ) {
     super(limits, timeBudgetMs, reserveMs);
+    this.userId = userId;
   }
 
   override record(tokens: number): void {

@@ -19,7 +19,8 @@ import { auth } from '@/auth';
 import { runAssessment, newDraftRunTrace, PipelineError } from '@/lib/pipeline/run';
 import { loadProfileForUser, buildSyncStep } from '@/lib/server/profile';
 import { discardDraftRun, errorKindFor, recordDraftRun, startDraftRun } from '@/lib/server/draft-run';
-import { readJobSubmission, jsonError } from '@/lib/server/job-submission';
+import { readJobSubmission, jsonError, SUBMISSION_GUARD } from '@/lib/server/job-submission';
+import { guardMutation } from '@/lib/server/request-guard';
 import { eventStream } from '@/lib/server/sse';
 import { sealAssessment } from '@/lib/fit/token';
 
@@ -33,6 +34,8 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) return jsonError('Sign in first.', 401);
+  const refused = guardMutation(req, SUBMISSION_GUARD);
+  if (refused) return refused;
 
   const submission = await readJobSubmission(req, userId);
   if (!submission.ok) return submission.response;

@@ -112,6 +112,7 @@ async function withinBudget<T extends { proposals: RewriteProposal[] }>(
   run: (budget: DraftBudget) => Promise<T>,
 ): Promise<{ ok: true; value: T } | { ok: false; message: string }> {
   const budget = new DraftBudget(RESEARCH_BUDGET, RESEARCH_TIME_MS, 1_000);
+  budget.userId = userId;
   try {
     await assertDailyBudget(userId);
     const value = await run(budget);

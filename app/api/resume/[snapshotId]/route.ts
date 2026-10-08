@@ -17,6 +17,10 @@ import { db } from '@/lib/db';
 import { profileRecords, resumeSnapshots } from '@/lib/db/schema';
 import type { ResumeDocument } from '@/lib/types';
 import { sentApplicationStatus } from '@/lib/server/profile';
+import { guardMutation, isSafeId, readJsonLimited } from '@/lib/server/request-guard';
+
+/** 200 edits x 2,000 chars, with room for multi-byte text. */
+const PATCH_MAX_BYTES = 1024 * 1024;
 
 export const runtime = 'nodejs';
 
@@ -65,6 +69,7 @@ export async function GET(
   if (!userId) return Response.json({ error: 'Sign in first.' }, { status: 401 });
 
   const { snapshotId } = await ctx.params;
+  if (!isSafeId(snapshotId)) return Response.json({ error: 'Not found.' }, { status: 404 });
   const row = await loadOwned(userId, snapshotId);
   if (!row) return Response.json({ error: 'Not found.' }, { status: 404 });
 
@@ -123,7 +128,11 @@ export async function PATCH(
   const userId = session?.user?.id;
   if (!userId) return Response.json({ error: 'Sign in first.' }, { status: 401 });
 
+  const refused = guardMutation(req, { contentTypes: ['application/json'], maxBytes: PATCH_MAX_BYTES });
+  if (refused) return refused;
+
   const { snapshotId } = await ctx.params;
+  if (!isSafeId(snapshotId)) return Response.json({ error: 'Not found.' }, { status: 404 });
   const row = await loadOwned(userId, snapshotId);
   if (!row) return Response.json({ error: 'Not found.' }, { status: 404 });
 
@@ -137,7 +146,9 @@ export async function PATCH(
     );
   }
 
-  const parsed = EditsSchema.safeParse(await req.json().catch(() => null));
+  const read = await readJsonLimited(req, PATCH_MAX_BYTES);
+  if (!read.ok) return read.res;
+  const parsed = EditsSchema.safeParse(read.value);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return Response.json(

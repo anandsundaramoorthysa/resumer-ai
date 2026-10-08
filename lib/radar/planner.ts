@@ -128,7 +128,7 @@ export async function planSearch(
       system:
         'You plan Google Jobs searches for a candidate. Return at most 3 distinct queries, each formatted "<role> <city>". Use only the roles, skills and city in the digest. Fill every field; use "" when unknown.',
       prompt: `CANDIDATE DIGEST\n${digest}`,
-      options: draftCallOptions(budget, { tier: 'fast', temperature: 0.2, maxOutputTokens: 600 }),
+      options: draftCallOptions(budget, { tier: 'fast', temperature: 0.2, maxOutputTokens: 600, telemetry: { stage: 'planner' } }),
     });
     const queries = dedupeQueries(groundedQueries(data.queries, digest));
     if (queries.length === 0) return fallback;
