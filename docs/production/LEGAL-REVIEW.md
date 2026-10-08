@@ -64,7 +64,7 @@ Text changed to match the code (code was not weakened):
 
 Code changes touching legal behaviour:
 - Consent is now enforced outside pages too: `app/page.tsx`, `assertDailyBudget` (all AI routes; owner NOT exempt from consent, only from quotas) and the radar gate return "Please accept the Terms and Privacy Policy to continue." Consent page, account deletion and export stay reachable without consent.
-- Invite quota tombstones: `invite_redemption.user_id` is nullable, ON DELETE SET NULL (`scripts/2026-10-08-invite-tombstone.sql`, idempotent, NOT applied; apply by hand). Tombstone rows hold no personal data and are exported to no one.
+- Invite quota tombstones: `invite_redemption.user_id` is nullable, ON DELETE SET NULL (`scripts/2026-10-08-invite-tombstone.sql`, idempotent; confirmed applied to production 2026-10-08). Tombstone rows hold no personal data and are exported to no one.
 - Erasure now deletes `ai_call` rows; export includes a trimmed `aiCalls`; `radar_search` is excluded from export with a reason (deleted by cascade).
 - Password signups redeem an invite only after the email is verified (code held in an httpOnly cookie; other browser: enter the code on /pending).
 - Sentry events are scrubbed over the whole event; rate limiting uses one trusted IP header (`TRUST_PROXY`).
