@@ -25,6 +25,20 @@ TEST_FILTER=db- ...                                                 # only the P
    (120+ suites; `db-*` suites run on PGlite with `tests/db/tsconfig.json`)
 4. `node node_modules/next/dist/bin/next build`
 
+## CI (`.github/workflows/ci.yml`)
+
+Triggers: push to `main`, any PR, and `workflow_dispatch` (run it from any branch —
+`gh workflow run CI --ref <branch>`; a push to a feature branch alone will not run it).
+Three jobs: `gitleaks`, `check` (audit, typecheck, lint, tests, build, PDF-without-canvas),
+`coverage` (`npm run test:coverage` against the floors in `scripts/ci-coverage.mjs`).
+Last green run: `37760449060` (2026-10-08).
+
+- **Editing this file:** a step name like `name: Dependency audit (blocking: critical)` is
+  invalid YAML — a plain scalar cannot contain `": "`. The failure mode is invisible: the
+  run completes in 0s with **zero jobs** and no annotation. Quote the value.
+- **gitleaks** scans the whole history. `.gitleaks.toml` allowlists four test fixtures whose
+  deliberately fake tokens are what the suites assert on; do not widen that list.
+
 ## Rules the owner has set
 
 - **Commits carry no Claude/Anthropic attribution** and no `.env` value ever appears in a diff.

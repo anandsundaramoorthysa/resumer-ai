@@ -140,7 +140,7 @@ Suggested SLOs: draft success >= 90 % (30 d); radar run completion >= 95 %; `/ap
 
 ## 8. CI
 
-`.github/workflows/ci.yml`: least-privilege token, concurrency cancel-in-progress, job timeouts, `npm audit --omit=dev --audit-level=critical` blocking plus a non-blocking `high` report, and a gitleaks job (official action, pinned to a release; commit-SHA pin is stricter). `.github/dependabot.yml`: npm weekly (minor/patch grouped), actions monthly. `.nvmrc` = 22.
+`.github/workflows/ci.yml`: least-privilege token, concurrency cancel-in-progress, job timeouts, `npm audit --omit=dev --audit-level=critical` blocking plus a non-blocking `high` report, and a gitleaks job (official action, pinned to a release; commit-SHA pin is stricter). Triggers: push to `main`, any pull request, and `workflow_dispatch` (run it from any branch: Actions -> CI -> Run workflow) — the branch filter means a push to a feature branch alone does not run it. `.gitleaks.toml` allowlists four test fixtures whose deliberately fake tokens are the fixtures the redaction suites assert on; every other path in history is scanned. `.github/dependabot.yml`: npm weekly (minor/patch grouped), actions monthly. `.nvmrc` = 22.
 
 ## 9. Known limits
 

@@ -8,7 +8,7 @@ the code or the docs. "Keep" means the current behaviour is intentional, not an 
 
 | # | Decision | Where |
 |---|---|---|
-| 1 | **Repository is public.** Checked `gh repo view`: `anandsundaramoorthysa/resumer-ai` is `PUBLIC`. `.env` was never tracked (only `.env.example`), and CI runs gitleaks on every push. | GitHub settings |
+| 1 | **Repository is public.** Checked `gh repo view`: `anandsundaramoorthysa/resumer-ai` is `PUBLIC`. `.env` was never tracked (only `.env.example`), and CI gitleaks scans the whole history on every run (green, run `37760449060`, 2026-10-08). | GitHub settings |
 | 2 | **Merge `feat/serpapi-job-radar` into `main`: PENDING, on purpose.** `main` deploys to Netlify. When this happens, the SQL files in `scripts/` (filename order) must be applied to the production Neon database first, and existing accounts will land on `/consent` once. | `docs/hackathon/SUBMISSION.md` checklist |
 | 3 | **Demo video: PENDING, on purpose.** Script is in `docs/hackathon/SUBMISSION.md` (under 3 minutes, sample data or a real run with keys hidden). | same |
 | 4 | **License: PolyForm Noncommercial 1.0.0 + paid commercial option, kept.** Source-available, not OSI open source. Chosen for the hackathon; revisit if this becomes a product. | `LICENSE`, `COMMERCIAL-LICENSE.md`, `package.json` |

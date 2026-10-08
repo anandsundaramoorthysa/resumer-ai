@@ -4,6 +4,8 @@ Re-scored 2026-10-08 by reading code, config and docs (grep + read, file:line ci
 
 Checks run: `node node_modules/typescript/bin/tsc --noEmit` = 0 errors. Targeted suites, all pass: legal-export (5), consent-config (15), housekeeping-batch (5), flags (6), flags-cache (4), env-validate (3), sentry-options (3), log-scrub (6), wiring-pii (4), invite-redeem (13). `npm audit` not run (live registry call).
 
+**Update, later the same day.** The working tree above was committed (`df757f0`, `97c5a78`, `a4c69e9`) and CI now runs green end to end — run `37760449060`: gitleaks, check (audit, typecheck, lint, 122 test suites, build, PDF-without-canvas) and coverage (all floors met). Two defects found while getting there: `ci.yml` was invalid YAML (`name: Dependency audit (blocking: critical)` — a plain scalar cannot contain `": "`), which had made every run since the workflow landed fail in 0 seconds with zero jobs and no visible reason; and gitleaks flagged four test fixtures, now allowlisted in `.gitleaks.toml`. Scores below that say "never run in CI" were true when written and are superseded by that run.
+
 Verdicts: VERIFIED-DONE, PARTIAL, OPEN, OVERCLAIMED (marked DONE in the status table but not true), UNVERIFIABLE (lives in a dashboard or needs a live call).
 
 ## Summary counts (72 items)
