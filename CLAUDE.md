@@ -31,7 +31,7 @@ Triggers: push to `main`, any PR, and `workflow_dispatch` (run it from any branc
 `gh workflow run CI --ref <branch>`; a push to a feature branch alone will not run it).
 Three jobs: `gitleaks`, `check` (audit, typecheck, lint, tests, build, PDF-without-canvas),
 `coverage` (`npm run test:coverage` against the floors in `scripts/ci-coverage.mjs`).
-Last green run: `37760449060` (2026-10-08).
+All three jobs green on this branch as of 2026-10-08 (`gh run list`).
 
 - **Editing this file:** a step name like `name: Dependency audit (blocking: critical)` is
   invalid YAML — a plain scalar cannot contain `": "`. The failure mode is invisible: the
