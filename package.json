@@ -60,7 +60,7 @@
     "typescript": "^5"
   },
   "engines": {
-    "node": ">=20.9"
+    "node": ">=22"
   },
   "overrides": {
     "esbuild": "^0.25.4"

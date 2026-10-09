@@ -30,9 +30,10 @@
   # reports, public by design, and the browser needs it in its bundle.
   SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SITE_URL,NEXT_PUBLIC_SENTRY_DSN"
 
-  # Pinned rather than floating. Next 16 requires Node 20.9+, and "20" resolves to
-  # whatever the build image ships that day — a moving target under a framework with a
-  # hard floor. 22 is the current LTS and what Next 16 is developed against.
+  # Pinned rather than floating. Next 16 requires Node 20.9+, but the Vercel AI SDK
+  # (`ai`, `@ai-sdk/gateway`) declares `>=22`, so 20 is not usable here whatever Next
+  # allows. "20" would also resolve to whatever the build image ships that day — a moving
+  # target. 22 is the current LTS and what Next 16 is developed against.
   NODE_VERSION = "22"
 
 # The Next.js runtime handles routing, SSR, streaming and image optimization.
