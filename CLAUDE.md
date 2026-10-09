@@ -42,11 +42,16 @@ All three jobs green on this branch as of 2026-10-08 (`gh run list`).
 ## Rules the owner has set
 
 - **Commits carry no Claude/Anthropic attribution** and no `.env` value ever appears in a diff.
-- **`main` is the default branch and holds the merged work** (tip `8e20030`, merged 2026-10-08 via PR #9 on 2026-10-09).
+- **`main` is the default branch and holds the merged work** (tip `c6c7354`, merged 2026-10-09).
   It deploys to Netlify production (`resumeraiapp.netlify.app`) and enforces required status
   checks, so push a branch and open a PR rather than pushing to `main` directly.
 - **The demo video is still a deliberately pending owner action** (script in
   `docs/hackathon/SUBMISSION.md`).
+- **External monitoring is configured (2026-10-09):** Healthchecks.io checks
+  (`draft-alerts`, `housekeeping`, `daily-sync`) with `HEARTBEAT_URL_*` set on Netlify, and an
+  UptimeRobot monitor on `/api/health` (expected 200; its auto-retries absorb the single
+  503 Neon cold start). The ping URLs and monitor are secrets — never print, commit or log them.
+  Steps live in `docs/production/ALERTING-RUNBOOK.md`.
 - Never spend SerpApi credits without being asked; live checks are capped (10 credits) and
   clean up their own rows. `SERP_MODE=replay` needs no key.
 - Never clear the sign-in rate-limit table or spoof client IPs to get around a lockout.
