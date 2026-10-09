@@ -86,9 +86,9 @@ Done:
 
 Not done (owner decisions; deliberately not done by tooling):
 
-- [ ] **Branch `feat/serpapi-job-radar` is not merged to `main`**, and the default branch must hold the final code. Note that `main` deploys to Netlify production: merging also ships the work to the live site, and the SQL files in `scripts/` must be applied to the production database first. *(Owner decision 2026-10-08: deliberately pending.)*
+- [x] **Merged to `main` on 2026-10-08 and the default branch holds the final code.** `origin/main` is `8a44a59`, the branch tip. The `scripts/*.sql` files were applied to production in filename order first (file 9 confirmed on the production column on 2026-10-08 — see `docs/production/OPERATIONS.md` §4), Netlify production builds from `main` and has published `8a44a59` to `resumeraiapp.netlify.app`, and `main` now has required status checks (`check`, `coverage`, `gitleaks`) — so later changes go through a PR. The `/consent` re-prompt for existing accounts is accepted (decision 18).
 - [x] Secrets scan: CI gitleaks passes on the **full history** (run `37760449060`, 2026-10-08). `.gitleaks.toml` allowlists exactly four test fixtures whose fake tokens are the thing being tested; nothing else is exempt. `.env` has never been tracked.
-- [ ] Fixtures recorded with `SERP_MODE=record` contain no personal data (only if you recorded any).
+- [x] Fixtures contain no personal data: all five files under `fixtures/serpapi/` are hand-written and carry `"_synthetic": true` ("not real postings, companies or links"). No `SERP_MODE=record` capture was committed, and that is the only fixture directory (checked 2026-10-09).
 - [ ] README quickstart confirmed from a fresh clone with only `.env.example` copied.
 - [x] `npm test`, `npm run typecheck` and `npm run lint` pass on this commit — the CI `check` job runs typecheck, lint, 122 test suites, build and the PDF-without-canvas harness, and passed green in run `37760449060` (2026-10-08). Re-run on the final commit.
 - [ ] Demo video recorded, under 3 minutes, opens in an incognito window, shows the project running locally, hides keys and personal data. Video link added to the form. *(Owner decision 2026-10-08: deliberately pending.)*

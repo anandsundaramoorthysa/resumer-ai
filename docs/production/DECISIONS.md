@@ -9,7 +9,7 @@ the code or the docs. "Keep" means the current behaviour is intentional, not an 
 | # | Decision | Where |
 |---|---|---|
 | 1 | **Repository is public.** Checked `gh repo view`: `anandsundaramoorthysa/resumer-ai` is `PUBLIC`. `.env` was never tracked (only `.env.example`), and CI gitleaks scans the whole history on every run (green, run `37760449060`, 2026-10-08). | GitHub settings |
-| 2 | **Merge `feat/serpapi-job-radar` into `main`: PENDING, on purpose.** `main` deploys to Netlify. When this happens, the SQL files in `scripts/` (filename order) must be applied to the production Neon database first, and existing accounts will land on `/consent` once. | `docs/hackathon/SUBMISSION.md` checklist |
+| 2 | **Merge to `main`: DONE** (branch tip `8a44a59` merged 2026-10-08; confirmed on `origin/main` 2026-10-09). The `scripts/*.sql` files were applied to production in filename order first (file 9 confirmed 2026-10-08 — `OPERATIONS.md` §4), so no migration step is outstanding for this release. Netlify production builds from `main` and served `8a44a59` when checked. `main` now enforces required status checks (`check`, `coverage`, `gitleaks`) — further work lands by PR. | `docs/hackathon/SUBMISSION.md` checklist |
 | 3 | **Demo video: PENDING, on purpose.** Script is in `docs/hackathon/SUBMISSION.md` (under 3 minutes, sample data or a real run with keys hidden). | same |
 | 4 | **License: PolyForm Noncommercial 1.0.0 + paid commercial option, kept.** Source-available, not OSI open source. Chosen for the hackathon; revisit if this becomes a product. | `LICENSE`, `COMMERCIAL-LICENSE.md`, `package.json` |
 

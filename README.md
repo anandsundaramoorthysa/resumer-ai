@@ -36,8 +36,9 @@ Branch `feat/serpapi-job-radar` (not yet merged to `main`). On top of the base a
 
 Honest limits you should know before you try it:
 
-- **Node 22 is required.** A dependency declares it; on Node 20 `npm install` reports
-  `EBADENGINE`. (`.nvmrc` and `netlify.toml` pin 22.)
+- **Node 22 is required.** The Vercel AI SDK (`ai`, `@ai-sdk/gateway`) declares `>=22`, so
+  on Node 20 `npm install` reports `EBADENGINE`. `.nvmrc`, `netlify.toml` and
+  `package.json` (`engines`) all pin it.
 - **Free-tier AI capacity is small.** On Groq's free tier expect roughly 10-15 drafts a day.
 - **SerpApi's free plan is 250 searches a month**, and a search that finds nothing is still billed.
 - **Indic PDF text layer.** Devanagari and Tamil names render correctly, but the text layer
