@@ -70,7 +70,7 @@ Under-claimed by the status table (better than it says): S12, R29, R35, R37.
 
 | ID | Verdict | Evidence | What remains |
 |---|---|---|---|
-| R01 | PARTIAL | Restore + drill procedure `RUNBOOK.md:14-15`; drill log "(none yet)" `:72`. No dump job. Plan and actual restore window are dashboard facts (UNVERIFIABLE-DASHBOARD). Privacy promises backups purge within 30 days. | Run one drill; upgrade or nightly dump. |
+| R01 | PARTIAL | Drill done 2026-10-09, `RUNBOOK.md:72`: branch restored from a past point-in-time, counts matched production (user 3 / draft latest 2026-09-11T23:01:13Z / agent_run 1), branch deleted. Free restore window is short and no nightly dump job exists — RPO/RTO unmet. | Upgrade to 7-day PITR or schedule nightly `pg_dump`; state a target RPO/RTO. |
 | R02 | PARTIAL | Still `db:push` + 8 hand-run idempotent SQL files `scripts/2026-*.sql`, order documented in `docs/production/OPERATIONS.md:57-68`, `README.md:296-303`, `RUNBOOK.md:13`. No `drizzle/` folder, no history table. CI DB suites build DDL from the Drizzle schema (`tests/db/build-ddl.mts`), not from the SQL files, so drift between the two is untested. | Versioned migrations or a test that applies the SQL and diffs. |
 | R03 | OPEN | No contexts in `netlify.toml`. | Neon branch staging. |
 | R04 | PARTIAL | 8 PGlite `db-*` suites inside `npm test`, run by `ci.yml:92`. `verify-*` harnesses not in CI (`ci.yml` footer comment); no Playwright config; no deploy gate. | Postgres service container, smoke E2E. |
@@ -150,7 +150,7 @@ User-FK tables: user, account, session, github_installation, contact_info, role,
 1. Netlify done 2026-10-09: `CRON_SECRET`, `ALERT_EMAIL`, `SMTP_USER`, `SMTP_PASS`, `OWNER_EMAILS` set; scheduled functions run; `/api/cron/alerts?dryRun=1` verified 200. Still to set: `SIGNUP_MODE=invite`, `AI_PII_PROVIDERS`, `AI_DISABLED_PROVIDERS=google` (or buy paid Gemini).
 2. Done 2026-10-09: Healthchecks.io checks + the three `HEARTBEAT_URL_*` (Netlify, scope all); UptimeRobot monitor on `/api/health`. Still open: create the five Sentry alert rules; set Sentry retention and sign its DPA.
 3. Enable Groq Zero Data Retention; read Fireworks/Together/DeepInfra terms; decide on paid AI tier.
-4. Neon: confirm region and restore window; upgrade for 7-day restore or schedule a dump; do and log one restore drill.
+4. Neon: confirm region and restore window (first drill logged 2026-10-09, `RUNBOOK.md:72`); upgrade for 7-day restore or schedule a nightly dump.
 5. Counsel review of privacy/terms (jurisdiction placeholder, DPDP wording, breach wording); decide legal entity; replace personal Gmail with a business mailbox and sending domain (R06/R12).
 6. Run `npm audit --omit=dev` and resolve criticals/highs; turn on GitHub branch protection; apply the 8 SQL files in order on production before deploying.
 7. Write the breach-notification procedure and templates (G05).
