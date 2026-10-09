@@ -2,16 +2,17 @@
 
 External-provider hardening that has no runtime code in this repo: heartbeat checks, an uptime monitor, a Neon point-in-time-restore drill, and the Sentry alert rules. Everything below is a **dashboard action** on external accounts - none of it can be done from this repository alone. What the repo already provides (code and endpoints) is listed first so the manual work is only the account side.
 
-Current state (verified live 2026-10-09, commit `6f541ed`):
+Current state (checked 2026-10-09, tip `c6c7354`):
 
-- **Done, app-side:** `/api/health` answers 200; the three Netlify scheduled functions (`draft-alerts` `5 * * * *`, `housekeeping` `30 3 * * *`, `daily-sync` `15 4 * * *` UTC) are doorbells that call `pingHeartbeat` (`lib/log.ts:122`) on every run, including `/fail` on failure; `?dryRun=1` on `/api/cron/alerts` returned 200 with one finding and sent no email.
-- **Not set, provider-side:** none of `HEARTBEAT_URL_DRAFT_ALERTS`, `HEARTBEAT_URL_HOUSEKEEPING`, `HEARTBEAT_URL_DAILY_SYNC`, `HEALTHCHECKS_BASE_URL` exist on Netlify (check: `netlify env:list --json`); no external uptime monitor polls `/api/health`; no Neon PITR drill has been run; no Sentry alert rule is configured. `SENTRY_AUTH_TOKEN` is unset (source-map uploads only - not needed for alerting).
+- **Done (§1 heartbeats):** Healthchecks.io checks `draft-alerts` (1 h), `housekeeping` (1 d), `daily-sync` (1 d) created; `HEARTBEAT_URL_DRAFT_ALERTS`/`_HOUSEKEEPING`/`_DAILY_SYNC` set on Netlify (scope all) and deployed; `draft-alerts` pings hourly at :05 UTC, the others daily. Ping URLs are capability links - keep them out of the repo and out of logs.
+- **Done (§2 uptime):** UptimeRobot HTTP(S) monitor on `https://resumeraiapp.netlify.app/api/health` (10 min, email, default 2xx/3xx=up); its built-in 3x retries absorb the single Neon cold-start 503.
+- **Not done:** Neon PITR drill (§3) and the Sentry alert rules (§4). `SENTRY_AUTH_TOKEN` is unset (only needed for source-map uploads, not for alerting).
 
 ## Prereq: the cold-start caveat (read once)
 
 Neon free suspends an idle database; the first `/api/health` probe after idle pays the resume and returns 503 `{"status":"degraded"}`. Every monitor below must therefore use **two consecutive failures** before alerting, or an interval short enough that a 503 (resume) or 200 (warm) is fine either way. See `OPERATIONS.md` §9. Do not set a monitor to alert on the first non-200.
 
-## 1. Heartbeat checks (dead-man's switch for the three cron jobs)
+## 1. Heartbeat checks (dead-man's switch for the three cron jobs) — DONE 2026-10-09
 
 Provider: **Healthchecks.io** (free) is the best fit because the repo already follows its convention (`/fail` on failure). BetterStack heartbeats work too but have no fail-endpoint convention - a missed ping is the only signal there.
 
@@ -43,7 +44,7 @@ Provider: **Healthchecks.io** (free) is the best fit because the repo already fo
    - Confirm `hb:` rows are recorded: `GET https://resumeraiapp.netlify.app/api/health` with `x-cron-secret` shows `deep.heartbeats`.
 7. Confirm a **missed** ping alerts: Healthchecks flip-alert to email is on by default; you can also check one check's "grace" behavior by toggling its status from the API during the drill.
 
-## 2. External uptime monitor on `/api/health`
+## 2. External uptime monitor on `/api/health` — DONE 2026-10-09 (UptimeRobot, 10 min, email)
 
 Provider: UptimeRobot free or a second Healthchecks.io HTTP check. BetterStack = paid.
 

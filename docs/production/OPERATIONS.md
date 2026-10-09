@@ -4,6 +4,8 @@ Companion to `RUNBOOK.md` (the one-page procedures). This is the reference: envi
 
 > External-provider work that this file only documents the ingredients for (heartbeat checks, uptime monitor, Neon PITR drill, Sentry alert rules) is walked through step by step in `ALERTING-RUNBOOK.md`.
 
+> Status 2026-10-09: heartbeats (Healthchecks.io + `HEARTBEAT_URL_*`) and the `/api/health` UptimeRobot monitor are configured. Remaining: Neon PITR drill and the Sentry alert rules (§5 below). See `ALERTING-RUNBOOK.md`.
+
 ## 1. Environment matrix
 
 Validated by `validateEnv()` in `lib/env.ts` (zod; returns names only, never throws, never runs at import). `GET /api/health` with the cron secret returns it under `env`.
