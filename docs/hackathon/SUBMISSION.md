@@ -1,6 +1,39 @@
 # Submission: SerpApi India Hackathon 2026
 
-Deadline: 2026-10-10 23:59 IST. Text below is form-ready; facts were checked against the code on 2026-10-08.
+Deadline: 2026-10-10 23:59 IST. Text below is form-ready; facts were checked against the code on 2026-10-08 and again on 2026-10-09 (after the merge to `main`).
+
+## Form fields (copy-paste)
+
+Everything the form asks for, in one place. The only value still to fill is the video link.
+
+```
+Project name:      Resumer AI, with Job Radar
+Tagline:           Job search that shows its sources and never invents facts: SerpApi finds
+                   the openings, your verified profile ranks them, and a grounded tailor
+                   writes the resume.
+Track (primary):   Knowledge & Public Interest
+Track (secondary): AI Agents
+Repo (public):     https://github.com/anandsundaramoorthysa/resumer-ai
+Live URL:          https://resumeraiapp.netlify.app
+Demo (no login):   https://resumeraiapp.netlify.app/radar?demo=1
+Video (<3 min):    <PENDING — paste the link here>
+Built with:        Next.js 16, React 19, TypeScript, Tailwind CSS v4, Drizzle ORM on
+                   Postgres (Neon), NextAuth (GitHub OAuth), Vercel AI SDK with Groq /
+                   Fireworks AI / Together AI / DeepInfra / Google Gemini, SerpApi
+                   (google_jobs, google, google_news, account.json), Netlify functions and
+                   scheduled functions, react-pdf / docx / pdf-parse / mammoth for
+                   rendering and import.
+SerpApi APIs used: google_jobs (async submit + Search Archive read), google
+                   ("<company> reviews"), google_news, account.json (free credit check).
+AI tools used:     Developed with Claude Code (Anthropic) for planning, code, tests and
+                   documentation. At runtime the app calls Groq, Fireworks AI, Together
+                   AI, DeepInfra and Gemini; ranking, salary parsing, market signal and all
+                   SerpApi handling are deterministic code.
+Judging note:      /radar?demo=1 needs no login, no database and no key (it runs on
+                   labelled synthetic sample data). A real run needs the env in the README.
+```
+
+Description, prior-existence and SerpApi-detail text: the sections below.
 
 ## Project name
 
@@ -83,14 +116,13 @@ Done:
 - [x] SerpApi usage, prior-existence and AI-tools disclosures drafted above.
 - [x] **Repo is PUBLIC** (`anandsundaramoorthysa/resumer-ai`, checked 2026-10-08). `.env` has never been tracked; only `.env.example` is.
 - [x] Owner decisions recorded in `docs/production/DECISIONS.md` (grievance contact, 18+ gate, retention, providers, plans).
-
-Not done (owner decisions; deliberately not done by tooling):
-
-- [x] **Merged to `main` on 2026-10-08 and the default branch holds the final code.** `origin/main` is `8a44a59`, the branch tip. The `scripts/*.sql` files were applied to production in filename order first (file 9 confirmed on the production column on 2026-10-08 — see `docs/production/OPERATIONS.md` §4), Netlify production builds from `main` and has published `8a44a59` to `resumeraiapp.netlify.app`, and `main` now has required status checks (`check`, `coverage`, `gitleaks`) — so later changes go through a PR. The `/consent` re-prompt for existing accounts is accepted (decision 18).
-- [x] Secrets scan: CI gitleaks passes on the **full history** (run `37760449060`, 2026-10-08). `.gitleaks.toml` allowlists exactly four test fixtures whose fake tokens are the thing being tested; nothing else is exempt. `.env` has never been tracked.
+- [x] **Merged to `main`; the default branch holds the final code.** `origin/main` is `8e20030` (PR #9, merged 2026-10-09), on top of the branch tip `8a44a59` merged 2026-10-08. The `scripts/*.sql` files were applied to production in filename order first (file 9 confirmed on the production column on 2026-10-08 — `docs/production/OPERATIONS.md` §4). Netlify production builds from `main`; `main` now enforces required status checks (`check`, `coverage`, `gitleaks`), so later changes go through a PR. The `/consent` re-prompt for existing accounts is accepted (decision 18).
+- [x] Secrets scan: CI gitleaks passes over the **full history**. `.gitleaks.toml` allowlists exactly four test fixtures whose fake tokens are the thing being tested; nothing else is exempt. `.env` has never been tracked.
 - [x] Fixtures contain no personal data: all five files under `fixtures/serpapi/` are hand-written and carry `"_synthetic": true` ("not real postings, companies or links"). No `SERP_MODE=record` capture was committed, and that is the only fixture directory (checked 2026-10-09).
-- [ ] README quickstart confirmed from a fresh clone with only `.env.example` copied.
-- [x] `npm test`, `npm run typecheck` and `npm run lint` pass on this commit — the CI `check` job runs typecheck, lint, 122 test suites, build and the PDF-without-canvas harness, and passed green in run `37760449060` (2026-10-08). Re-run on the final commit.
-- [ ] Demo video recorded, under 3 minutes, opens in an incognito window, shows the project running locally, hides keys and personal data. Video link added to the form. *(Owner decision 2026-10-08: deliberately pending.)*
-- [ ] Track(s) and AI-tool disclosure pasted into the form.
-- [ ] Submitted before 2026-10-10 23:59 IST (aim for a day earlier).
+- [x] `npm test`, `npm run typecheck` and `npm run lint` pass on the merged commit — the CI `check` job (typecheck, lint, 122 test suites, build, PDF-without-canvas) and `coverage` (all floors met) run on every PR; both were green on PR #9.
+
+Still to do:
+
+- [ ] README quickstart confirmed from a fresh clone with only `.env.example` copied. (Node 22 is required — the AI SDK declares `>=22`; this machine runs Node 20, so clone-and-run on 22 was not verifiable here.)
+- [ ] Demo video recorded, under 3 minutes, opens in an incognito window, shows the project running locally, hides keys and personal data. Video link added to the form and to the copy-paste block above. *(Owner decision: deliberately pending.)*
+- [ ] Form submitted with the copy-paste block above, before 2026-10-10 23:59 IST (aim for 2026-10-09).
