@@ -71,4 +71,4 @@ Owner: Anand Sundaramoorthy (jothianandanand036@gmail.com). Vendors: Neon (neon.
 
 ## Restore-drill log
 
-(none yet)
+**2026-10-09** → **PITR drill done** (first run). Created branch `pitr-drill-2026-10-09` from `production` restored to a past point-in-time (the free create-branch form offers "from a past point in time"; the picker's earliest bound is the effective window and a deeper restore needs a paid plan). Verified the restored branch matched production reference counts — user = 3, latest draft = 2026-09-11T23:01:13Z, agent_run = 1 — then deleted the branch. No prod changes, no downtime. Reference query set: `count(*) from "user"`, `max(started_at) from draft_run`, `count(*) from agent_run`.
