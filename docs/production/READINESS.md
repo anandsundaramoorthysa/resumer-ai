@@ -2,6 +2,8 @@
 
 ## Status as of 2026-10-08
 
+> Superseded by `READINESS-REVERIFY.md` (re-checked 2026-10-09): R07 uptime monitor, R08 alerting and R16 cron heartbeats are now VERIFIED-DONE, and the first Neon PITR restore drill is logged at `RUNBOOK.md:72`. Rows below are the original 2026-10-06 audit and are left unedited.
+
 Re-checked against the code (grep or read; nothing was run). The register below is the original 2026-10-06 audit and is left unedited. DONE = implemented in code; PARTIAL = implemented in part or needs an owner action; OPEN = not addressed; UNVERIFIABLE = lives outside the repo. "Done" means present in code, not that it has been reviewed by counsel or deployed.
 
 **Verdict is unchanged in kind:** a strong single-owner engine. The P0 items that were code are now done; what remains is mostly owner decisions (entity, providers, paid plans, counsel).
