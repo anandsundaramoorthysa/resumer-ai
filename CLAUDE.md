@@ -48,9 +48,11 @@ All three jobs green on this branch as of 2026-10-08 (`gh run list`).
 - **The demo video is still a deliberately pending owner action** (script in
   `docs/hackathon/SUBMISSION.md`).
 - **External monitoring is configured (2026-10-09):** Healthchecks.io checks
-  (`draft-alerts`, `housekeeping`, `daily-sync`) with `HEARTBEAT_URL_*` set on Netlify, and an
+  (`draft-alerts`, `housekeeping`, `daily-sync`) with `HEARTBEAT_URL_*` set on Netlify, an
   UptimeRobot monitor on `/api/health` (expected 200; its auto-retries absorb the single
-  503 Neon cold start). The ping URLs and monitor are secrets — never print, commit or log them.
+  503 Neon cold start), five Sentry alert rules (`new-issue`, `regression`, `spike`,
+  `draft-pipeline-errors`, `providers-failed`, all emailing the owner), and the first Neon
+  PITR restore drill is logged at `RUNBOOK.md:72`. The ping URLs and monitor are secrets — never print, commit or log them.
   Steps live in `docs/production/ALERTING-RUNBOOK.md`.
 - Never spend SerpApi credits without being asked; live checks are capped (10 credits) and
   clean up their own rows. `SERP_MODE=replay` needs no key.
