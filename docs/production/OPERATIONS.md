@@ -4,7 +4,7 @@ Companion to `RUNBOOK.md` (the one-page procedures). This is the reference: envi
 
 > External-provider work that this file only documents the ingredients for (heartbeat checks, uptime monitor, Neon PITR drill, Sentry alert rules) is walked through step by step in `ALERTING-RUNBOOK.md`.
 
-> Status 2026-10-09: heartbeats (Healthchecks.io + `HEARTBEAT_URL_*`) and the `/api/health` UptimeRobot monitor are configured; the first Neon PITR drill is logged in `RUNBOOK.md:72`. Remaining: the Sentry alert rules (§5 below).
+> Status 2026-10-09: all four external items are done — heartbeats (Healthchecks.io + `HEARTBEAT_URL_*`), the `/api/health` UptimeRobot monitor, the first Neon PITR drill (`RUNBOOK.md:72`), and the five Sentry alert rules (§5 below). Release health / the Sentry DPA are intentionally skipped (no session data; legal). `SERPAPI_API_KEY` is not set, so the budget-crush alert is not armed.
 
 ## 1. Environment matrix
 
@@ -80,7 +80,7 @@ New databases use `npm run db:migrate` instead (the baseline already includes fi
 
 Base tables come from `npm run db:push` on first setup. Verified: the script run on a schema built from `lib/db/schema.ts` produces identical index definitions and `app_setting` columns (no drift) and is a no-op on re-run. Indexes are plain btrees (Drizzle cannot express `INCLUDE`; `(day, calls, tokens)` gives the same index-only scan).
 
-## 5. Sentry alert rules (create in the Sentry UI)
+## 5. Sentry alert rules (create in the Sentry UI) — DONE 2026-10-09
 
 Environment filter on all: `production`.
 
