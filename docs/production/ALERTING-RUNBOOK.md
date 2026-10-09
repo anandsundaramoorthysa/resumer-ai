@@ -6,7 +6,8 @@ Current state (checked 2026-10-09, tip `c6c7354`):
 
 - **Done (§1 heartbeats):** Healthchecks.io checks `draft-alerts` (1 h), `housekeeping` (1 d), `daily-sync` (1 d) created; `HEARTBEAT_URL_DRAFT_ALERTS`/`_HOUSEKEEPING`/`_DAILY_SYNC` set on Netlify (scope all) and deployed; `draft-alerts` pings hourly at :05 UTC, the others daily. Ping URLs are capability links - keep them out of the repo and out of logs.
 - **Done (§2 uptime):** UptimeRobot HTTP(S) monitor on `https://resumeraiapp.netlify.app/api/health` (10 min, email, default 2xx/3xx=up); its built-in 3x retries absorb the single Neon cold-start 503.
-- **Not done:** Neon PITR drill (§3) and the Sentry alert rules (§4). `SENTRY_AUTH_TOKEN` is unset (only needed for source-map uploads, not for alerting).
+- **Done (§3 Neon PITR drill):** first drill run 2026-10-09, logged at `RUNBOOK.md:72` — branch restored from a past point-in-time on free, reference counts matched production, branch deleted.
+- **Done (§4 Sentry alert rules, 2026-10-09):** issue alerts `new-issue`, `regression`, and metric Monitors `spike` (errors >10 in 1 h), `draft-pipeline-errors` (>3 in 15 m, `message:*draft*`), `providers-failed` (>3 in 15 m, `message:*all-providers-failed*`), each emailing `sanand03072005@gmail.com`. `SENTRY_AUTH_TOKEN` is unset (only needed for source-map uploads, not for alerting). Release health and the DPA are intentionally skipped (no session data; legal).
 
 ## Prereq: the cold-start caveat (read once)
 
@@ -67,7 +68,7 @@ Provider: UptimeRobot free or a second Healthchecks.io HTTP check. BetterStack =
 3. Record the drill: date, rows seen, result. The point is that the *restore path works before you ever need it*, not that the data is meaningful.
 4. Owner note: this needs Neon console access (or a Neon API token). No token is stored anywhere in this repo or repo env, so it stays a manual dashboard task.
 
-## 4. Sentry alert rules (OPERATIONS.md §5, unchanged)
+## 4. Sentry alert rules (OPERATIONS.md §5) — DONE 2026-10-09
 
 All rules: environment filter = `production`. Create in Sentry > Alerts > Create alert.
 
