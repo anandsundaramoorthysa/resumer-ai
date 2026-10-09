@@ -42,7 +42,7 @@ All three jobs green on this branch as of 2026-10-08 (`gh run list`).
 ## Rules the owner has set
 
 - **Commits carry no Claude/Anthropic attribution** and no `.env` value ever appears in a diff.
-- **`main` is the default branch and holds the merged work** (tip `8a44a59`, merged 2026-10-08).
+- **`main` is the default branch and holds the merged work** (tip `8e20030`, merged 2026-10-08 via PR #9 on 2026-10-09).
   It deploys to Netlify production (`resumeraiapp.netlify.app`) and enforces required status
   checks, so push a branch and open a PR rather than pushing to `main` directly.
 - **The demo video is still a deliberately pending owner action** (script in
