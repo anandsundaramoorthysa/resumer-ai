@@ -2,11 +2,11 @@
 
 External-provider hardening that has no runtime code in this repo: heartbeat checks, an uptime monitor, a Neon point-in-time-restore drill, and the Sentry alert rules. Everything below is a **dashboard action** on external accounts - none of it can be done from this repository alone. What the repo already provides (code and endpoints) is listed first so the manual work is only the account side.
 
-Current state (checked 2026-10-09, tip `c6c7354`):
+Current state (checked 2026-10-09, code merged in PR #9; later commits are docs only):
 
 - **Done (§1 heartbeats):** Healthchecks.io checks `draft-alerts` (1 h), `housekeeping` (1 d), `daily-sync` (1 d) created; `HEARTBEAT_URL_DRAFT_ALERTS`/`_HOUSEKEEPING`/`_DAILY_SYNC` set on Netlify (scope all) and deployed; `draft-alerts` pings hourly at :05 UTC, the others daily. Ping URLs are capability links - keep them out of the repo and out of logs.
 - **Done (§2 uptime):** UptimeRobot HTTP(S) monitor on `https://resumeraiapp.netlify.app/api/health` (10 min, email, default 2xx/3xx=up); its built-in 3x retries absorb the single Neon cold-start 503.
-- **Done (§3 Neon PITR drill):** first drill run 2026-10-09, logged at `RUNBOOK.md:72` — branch restored from a past point-in-time on free, reference counts matched production, branch deleted.
+- **Done (§3 Neon PITR drill):** first drill run 2026-10-09, logged at the "Restore-drill log" in `RUNBOOK.md` — branch restored from a past point-in-time on free, reference counts matched production, branch deleted.
 - **Done (§4 Sentry alert rules, 2026-10-09):** issue alerts `new-issue`, `regression`, and metric Monitors `spike` (errors >10 in 1 h), `draft-pipeline-errors` (>3 in 15 m, `message:*draft*`), `providers-failed` (>3 in 15 m, `message:*all-providers-failed*`), each emailing `sanand03072005@gmail.com`. `SENTRY_AUTH_TOKEN` is unset (only needed for source-map uploads, not for alerting). Release health and the DPA are intentionally skipped (no session data; legal).
 
 ## Prereq: the cold-start caveat (read once)
@@ -63,7 +63,7 @@ Provider: UptimeRobot free or a second Healthchecks.io HTTP check. BetterStack =
    - Branches > Create branch, name `pitr-drill-<yyyy-mm-dd>`, "origin" = the production branch, point in time = a few minutes ago.
    - Wait for the branch to finish provisioning (green). Copy the branch connection string (same password model as production).
    - Connect (e.g. `psql` or Neon SQL editor opened on the branch) and sanity-check:
-     `select count(*) from "user";` and `select max(created_at) from draft_run;` - compare roughly to what production must have looked like at that time.
+     `select count(*) from "user";` and `select max(started_at) from draft_run;` - compare roughly to what production must have looked like at that time.
    - Delete the branch. Confirm deletion frees the storage.
 3. Record the drill: date, rows seen, result. The point is that the *restore path works before you ever need it*, not that the data is meaningful.
 4. Owner note: this needs Neon console access (or a Neon API token). No token is stored anywhere in this repo or repo env, so it stays a manual dashboard task.
@@ -79,7 +79,7 @@ All rules: environment filter = `production`. Create in Sentry > Alerts > Create
 5. Release health: not used (no sessions, traces off). Skip.
 6. Turn the weekly digest on. Ignore known noisy errors by *fingerprint*, never by silencing the project.
 
-`NEXT_PUBLIC_SENTRY_DSN` is already set and errors are captured today; only the rules are missing. Optional follow-up if you want source maps + a release tag: set `SENTRY_AUTH_TOKEN` (build scope) in Netlify; `COMMIT_REF`/`CONTEXT` already arrive from Netlify.
+`NEXT_PUBLIC_SENTRY_DSN` is already set and errors are captured today; the five alert rules are configured (see OPERATIONS.md §5). Optional follow-up if you want source maps + a release tag: set `SENTRY_AUTH_TOKEN` (build scope) in Netlify; `COMMIT_REF`/`CONTEXT` already arrive from Netlify.
 
 ## 5. One-time cleanup observed during verification
 
@@ -97,7 +97,7 @@ update agent_run
 
 Update the readiness rows (dates + who ran them):
 
-- `READINESS-REVERIFY.md`: R07 (uptime monitor) -> DONE, R08 (alerting) -> DONE with `?dryRun=1` result, R16 (cron heartbeats) -> DONE with check names, R01 (Neon backups) -> DONE with drill date.
+- `READINESS-REVERIFY.md`: R07 (uptime monitor) -> DONE, R08 (alerting) -> DONE with `?dryRun=1` result, R16 (cron heartbeats) -> DONE with check names, R01 (Neon backups) -> PARTIAL with drill date.
 - `OPERATIONS.md` §9: remove the "no uptime monitor" wording if one now exists; keep the cold-start note (it stays true forever).
 
 These four workstreams are the last open ops items before the site is self-watching. None of them are needed for the SerpApi hackathon submission.
