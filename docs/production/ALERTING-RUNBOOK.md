@@ -7,7 +7,7 @@ Current state (checked 2026-10-09, code merged in PR #9; later commits are docs 
 - **Done (§1 heartbeats):** Healthchecks.io checks `draft-alerts` (1 h), `housekeeping` (1 d), `daily-sync` (1 d) created; `HEARTBEAT_URL_DRAFT_ALERTS`/`_HOUSEKEEPING`/`_DAILY_SYNC` set on Netlify (scope all) and deployed; `draft-alerts` pings hourly at :05 UTC, the others daily. Ping URLs are capability links - keep them out of the repo and out of logs.
 - **Done (§2 uptime):** UptimeRobot HTTP(S) monitor on `https://resumeraiapp.netlify.app/api/health` (10 min, email, default 2xx/3xx=up); its built-in 3x retries absorb the single Neon cold-start 503.
 - **Done (§3 Neon PITR drill):** first drill run 2026-10-09, logged at the "Restore-drill log" in `RUNBOOK.md` — branch restored from a past point-in-time on free, reference counts matched production, branch deleted.
-- **Done (§4 Sentry alert rules, 2026-10-09):** issue alerts `new-issue`, `regression`, and metric Monitors `spike` (errors >10 in 1 h), `draft-pipeline-errors` (>3 in 15 m, `message:*draft*`), `providers-failed` (>3 in 15 m, `message:*all-providers-failed*`), each emailing `sanand03072005@gmail.com`. `SENTRY_AUTH_TOKEN` is unset (only needed for source-map uploads, not for alerting). Release health and the DPA are intentionally skipped (no session data; legal).
+- **Done (§4 Sentry alert rules, 2026-10-09):** issue alerts `new-issue`, `regression`, and metric Monitors `spike` (errors >10 in 1 h), `draft-pipeline-errors` (>3 in 15 m, `message:*draft*`), `providers-failed` (>3 in 15 m, `message:*all-providers-failed*`), each emailing `the owner alert address`. `SENTRY_AUTH_TOKEN` is unset (only needed for source-map uploads, not for alerting). Release health and the DPA are intentionally skipped (no session data; legal).
 
 ## Prereq: the cold-start caveat (read once)
 
@@ -17,7 +17,7 @@ Neon free suspends an idle database; the first `/api/health` probe after idle pa
 
 Provider: **Healthchecks.io** (free) is the best fit because the repo already follows its convention (`/fail` on failure). BetterStack heartbeats work too but have no fail-endpoint convention - a missed ping is the only signal there.
 
-1. Sign up at healthchecks.io (free plan covers 20 checks) and set the **Integrations** email to `ALERT_EMAIL` (`sanand03072005@gmail.com`).
+1. Sign up at healthchecks.io (free plan covers 20 checks) and set the **Integrations** email to `ALERT_EMAIL` (`the owner alert address`).
 2. Create three checks, period = the schedule, grace large enough that a Netlify deploy tick or cold function start does not page:
 
    | Check | Period | Grace |
