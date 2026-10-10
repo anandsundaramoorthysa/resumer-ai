@@ -11,7 +11,7 @@ Project name:      Resumer AI, with Job Radar
 Tagline:           Job search that shows its sources and never invents facts: SerpApi finds
                    the openings, your verified profile ranks them, and a grounded tailor
                    writes the resume.
-Track (one only):  Knowledge & Public Interest   (the form takes one track; SerpApi may reassign)
+Track (one only):  AI Agents   (the form takes one track; SerpApi may reassign)
 Predates event:    Yes. Resumer AI existed before the hackathon (base commit 14fcb20, 12 Sep 2026);
                    Job Radar and the UI redesign were built for it. Details: prior-existence section.
 How you heard:     (your answer)
@@ -52,8 +52,8 @@ Resumer AI keeps one verified professional profile and tailors an ATS-safe resum
 
 ## Track
 
-- **Primary: Knowledge & Public Interest.** Job seekers in India, especially freshers, face scattered listings, opaque scores and resumes padded with claims they cannot defend. Radar turns public search results into evidence a person can check: sources are shown, salary figures say whether they were detected or estimated, and nothing is applied on the user's behalf.
-- **Also relevant (not a second submission; the form takes one track): AI Agents.** Radar is a multi-agent pipeline (planner, searcher, ranker, employer-intel, market-signal, tailor, critic) with two human approval gates, budgets and a visible event timeline. Most of the agents are deterministic code on purpose, and a model is used only where language is needed.
+- **Also relevant (not a second submission): Knowledge & Public Interest.** Job seekers in India, especially freshers, face scattered listings, opaque scores and resumes padded with claims they cannot defend. Radar turns public search results into evidence a person can check: sources are shown, salary figures say whether they were detected or estimated, and nothing is applied on the user's behalf.
+- **Submitted track: AI Agents.** Radar is a multi-agent pipeline (planner, searcher, ranker, employer-intel, market-signal, tailor, critic) with two human approval gates, budgets and a visible event timeline. Most of the agents are deterministic code on purpose, and a model is used only where language is needed.
 
 ## How SerpApi is used (core, not decoration)
 
