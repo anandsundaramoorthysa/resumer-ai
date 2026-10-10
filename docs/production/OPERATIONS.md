@@ -87,7 +87,8 @@ Environment filter on all: `production`.
 1. **New issue**: when a new issue is created -> email. (Everything first-seen is worth a look at this scale.)
 2. **Regression**: when an issue changes state from resolved to unresolved -> email.
 3. **Spike**: issue seen more than 10 times in 1 hour -> email.
-4. **Draft pipeline errors**: issues where `message` or `culprit` contains `draft` or `all-providers-failed`, more than 3 events in 15 minutes -> email.
+4. **Draft pipeline errors**: issues where `message` or `culprit` contains `draft`, more than 3 events in 15 minutes -> email.
+   **All providers failed**: issues where `message` or `culprit` contains `all-providers-failed`, more than 3 events in 15 minutes -> email.
 5. **Release health** is not used (no sessions); traces are off (`tracesSampleRate` 0).
 6. Weekly digest on; ignore noisy known errors by *fingerprint*, not by silencing the project.
 

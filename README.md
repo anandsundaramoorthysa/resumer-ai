@@ -14,7 +14,7 @@ resume until it clears a quality bar — before you ever see it.
 
 ## What's in this release
 
-Branch `feat/serpapi-job-radar` (not yet merged to `main`). On top of the base app
+Merged to `main`. On top of the base app
 (commit `14fcb20`) it adds:
 
 - **Job Radar** on SerpApi: planner, async search with a credit ledger, deterministic
@@ -420,7 +420,7 @@ npx tsx scripts/smoke.mts     # 18 checks: scorers, grounding guard, retrieval, 
 npx tsx scripts/ai-check.mts  # confirms your AI provider chain actually responds
 ```
 
-There are 105 suites (`tests/*.test.mts`, counted 2026-10-08; other work may add more). They are offline and need no keys. The ones named
+There are 122 suites (`tests/*.test.mts`, counted 2026-10-10). They are offline and need no keys. The ones named
 `db-*` (8 of them: approval, dismissals, enrichment, radar, rate limit, routes, sync, sync
 review) run the real application modules against an in-memory Postgres (PGlite) through a
 stand-in `@/lib/db` (`tests/db/`), so no database server is needed. Radar and SerpApi are
