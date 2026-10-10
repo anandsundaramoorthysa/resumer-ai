@@ -14,7 +14,7 @@ resume until it clears a quality bar — before you ever see it.
 
 ## What's in this release
 
-Branch `feat/serpapi-job-radar` (not yet merged to `main`). On top of the base app
+Merged to `main`. On top of the base app
 (commit `14fcb20`) it adds:
 
 - **Job Radar** on SerpApi: planner, async search with a credit ledger, deterministic

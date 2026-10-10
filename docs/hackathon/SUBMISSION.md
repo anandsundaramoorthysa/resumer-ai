@@ -1,6 +1,6 @@
 # Submission: SerpApi India Hackathon 2026
 
-Deadline: 2026-10-10 23:59 IST. Text below is form-ready; facts were checked against the code on 2026-10-08 and again on 2026-10-09 (after the merge to `main`).
+Deadline: 2026-10-10 23:59 IST. Text below is form-ready; facts were checked against the code on 2026-10-08 and again on 2026-10-09 (after the merge to `main`); `main` has since had documentation-only changes.
 
 ## Form fields (copy-paste)
 
@@ -116,7 +116,7 @@ Done:
 - [x] SerpApi usage, prior-existence and AI-tools disclosures drafted above.
 - [x] **Repo is PUBLIC** (`anandsundaramoorthysa/resumer-ai`, checked 2026-10-08). `.env` has never been tracked; only `.env.example` is.
 - [x] Owner decisions recorded in `docs/production/DECISIONS.md` (grievance contact, 18+ gate, retention, providers, plans).
-- [x] **Merged to `main`; the default branch holds the final code.** `origin/main` is `8e20030` (PR #9, merged 2026-10-09), on top of the branch tip `8a44a59` merged 2026-10-08. The `scripts/*.sql` files were applied to production in filename order first (file 9 confirmed on the production column on 2026-10-08 — `docs/production/OPERATIONS.md` §4). Netlify production builds from `main`; `main` now enforces required status checks (`check`, `coverage`, `gitleaks`), so later changes go through a PR. The `/consent` re-prompt for existing accounts is accepted (decision 18).
+- [x] **Merged to `main`; the default branch holds the final code.** the code was merged in PR #9 on 2026-10-09 (later `main` commits are docs only), on top of the branch tip `8a44a59` merged 2026-10-08. The `scripts/*.sql` files were applied to production in filename order first (file 9 confirmed on the production column on 2026-10-08 — `docs/production/OPERATIONS.md` §4). Netlify production builds from `main`; `main` now enforces required status checks (`check`, `coverage`, `gitleaks`), so later changes go through a PR. The `/consent` re-prompt for existing accounts is accepted (decision 18).
 - [x] Secrets scan: CI gitleaks passes over the **full history**. `.gitleaks.toml` allowlists exactly four test fixtures whose fake tokens are the thing being tested; nothing else is exempt. `.env` has never been tracked.
 - [x] Fixtures contain no personal data: all five files under `fixtures/serpapi/` are hand-written and carry `"_synthetic": true` ("not real postings, companies or links"). No `SERP_MODE=record` capture was committed, and that is the only fixture directory (checked 2026-10-09).
 - [x] `npm test`, `npm run typecheck` and `npm run lint` pass on the merged commit — the CI `check` job (typecheck, lint, 122 test suites, build, PDF-without-canvas) and `coverage` (all floors met) run on every PR; both were green on PR #9.
@@ -125,4 +125,4 @@ Still to do:
 
 - [ ] README quickstart confirmed from a fresh clone with only `.env.example` copied. (Node 22 is required — the AI SDK declares `>=22`; this machine runs Node 20, so clone-and-run on 22 was not verifiable here.)
 - [ ] Demo video recorded, under 3 minutes, opens in an incognito window, shows the project running locally, hides keys and personal data. Video link added to the form and to the copy-paste block above. *(Owner decision: deliberately pending.)*
-- [ ] Form submitted with the copy-paste block above, before 2026-10-10 23:59 IST (aim for 2026-10-09).
+- [ ] Form submitted with the copy-paste block above, before 2026-10-10 23:59 IST (submit today).

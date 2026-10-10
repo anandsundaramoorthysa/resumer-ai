@@ -89,7 +89,7 @@ All 72 rows (G01-G18, S01-S17, R01-R37) are covered above.
 
 Audited 2026-10-06, branch `feat/serpapi-job-radar` @ `ba13484`. Read-only audit; this file is the only thing written.
 Method: read config/auth/db/ai/api/cron/CI, grep-verified every "absent" claim, ran `tsc --noEmit` (clean, 0 errors) and `npm audit --omit=dev` (on a copy of package files in a scratch dir; **8 vulns: 1 critical, 4 high, 3 moderate**). No secrets were read or printed; no paid API was called.
-Prior work: `PRODUCTION-AUDIT.md` (2026-09-11) fixed the engineering-level findings. This audit is about what is *around* the code.
+Prior work: the earlier engineering audit (2026-09-11, removed from the repo) (2026-09-11) fixed the engineering-level findings. This audit is about what is *around* the code.
 
 ---
 
@@ -210,7 +210,7 @@ Severity: P0 blocker (no real users until fixed) / P1 must-have before real user
 | R19 | Rollback | Netlify rollback exists but schema is not reversible | Rolling code back past a `db:push` breaks | see R02 | P2 | S | Expand/contract rule in CONTRIBUTING | no |
 | R20 | Release | No semver tags, CHANGELOG or release notes | Cannot correlate incidents to releases | `package.json` 0.1.0; no CHANGELOG.md | P3 | S | Tag releases; Sentry release = git SHA | no |
 | R21 | SDLC | No evidence of branch protection, required review, CODEOWNERS or PR template (GitHub settings not verifiable from repo) | Unreviewed merges to main | `.github/` contents | P2 | S | Enable protection; CODEOWNERS | no |
-| R22 | Testing | 71 offline suites but no coverage metric, no E2E in CI, no load or restore test | Unknown blind spots | `tests/`; `scripts/latency.mts` is manual | P2 | M | Coverage floor on critical libs; k6 on /api/draft with replay providers | no |
+| R22 | Testing | 71 offline suites but no coverage metric, no E2E in CI, no load or restore test | Unknown blind spots | `tests/`; latency was measured manually | P2 | M | Coverage floor on critical libs; k6 on /api/draft with replay providers | no |
 | R23 | Capacity | No capacity plan: Neon pool max 5/instance, Netlify concurrency, SerpApi 50/h, provider RPM | Unknown first bottleneck | `lib/db/index.ts:44` (`max: 5`) | P2 | M | Document per-dependency limits; load test | no |
 | R24 | Data | Free-plan storage cap plus unbounded tables | Hard failure when full | see G06 | P2 | S | Size monitor; alert at 70% | no |
 | R25 | Data | Most timestamps are `timestamp` without time zone | Subtle bugs across zones | `lib/db/schema.ts` (only 2 `withTimezone`) | P3 | M | Standardise `timestamptz` in a migration | no |
