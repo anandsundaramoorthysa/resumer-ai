@@ -111,6 +111,14 @@ async function deepChecks() {
 }
 
 export async function GET(req: NextRequest) {
+  // Liveness only, no database touch. A 5-minute uptime monitor on the full check keeps the
+  // Neon compute awake around the clock and used up the free plan's monthly compute hours
+  // (every query then failed with 53000 quota exceeded). Point the monitor here; the hourly
+  // alerts cron still checks the database and emails when it is down.
+  if (req.nextUrl.searchParams.get('shallow') === '1') {
+    return Response.json({ status: 'ok', shallow: true }, { headers: NO_STORE });
+  }
+
   const auth = {
     AUTH_SECRET: present('AUTH_SECRET'),
     AUTH_GITHUB_ID: present('AUTH_GITHUB_ID'),

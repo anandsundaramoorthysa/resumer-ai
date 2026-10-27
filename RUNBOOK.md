@@ -50,7 +50,7 @@ One page. Longer reference: `docs/production/OPERATIONS.md`. Health: `GET /api/h
 
 ## Monitoring setup
 
-- **UptimeRobot** (free): HTTP(s) monitor on `https://<site>/api/health`, 5-minute interval, keyword `"status":"ok"`, alert contact = your email/phone.
+- **UptimeRobot** (free): HTTP(s) monitor on `https://<site>/api/health?shallow=1` (no database touch: a 5-minute monitor on the full check keeps Neon compute awake 24/7 and exhausted the free plan, 2026-10-27, error 53000), 5-minute interval, keyword `"status":"ok"`, alert contact = your email/phone.
 - **Healthchecks.io** (free): create checks `draft-alerts` (period 1h, grace 15m), `housekeeping` (1 day, grace 2h), `daily-sync` (1 day, grace 2h). Set Netlify env `HEARTBEAT_URL_DRAFT_ALERTS`, `HEARTBEAT_URL_HOUSEKEEPING`, `HEARTBEAT_URL_DAILY_SYNC` to each ping URL (or one `HEALTHCHECKS_BASE_URL=https://hc-ping.com/<project-ping-key>` and name the checks by slug). The functions ping on 2xx and `/fail` otherwise.
 - **Sentry** alert rules (Project -> Alerts): see OPERATIONS.md "Sentry alert rules".
 - Emails go to `ALERT_EMAIL`: draft failures hourly; credits low (< `SERP_LOW_CREDITS`, default 25), stuck radar runs, database down - each at most once per 24 h per condition.
