@@ -48,6 +48,10 @@ One page. Longer reference: `docs/production/OPERATIONS.md`. Health: `GET /api/h
 7. Leaked secret? Rotate per the table above, then redeploy, then check Sentry for events carrying it (they are scrubbed, but check).
 8. Write down: what, when, fix, follow-up.
 
+## Incident log
+
+- **2026-10-27: database quota exhausted.** Every query failed with Neon error 53000 (free-plan quota) and `/api/health` returned 503. A 5-minute monitor on the full health check kept compute awake around the clock. Moved to a new Neon project (Singapore), built with `npm run db:migrate` (31 tables, all data from the old project was not carried over: users re-register, GitHub is reconnected, invites are recreated). Monitor now uses `/api/health?shallow=1`. The old project, its restore-drill branch and the PITR notes above refer to the retired database.
+
 ## Monitoring setup
 
 - **UptimeRobot** (free): HTTP(s) monitor on `https://<site>/api/health?shallow=1` (no database touch: a 5-minute monitor on the full check keeps Neon compute awake 24/7 and exhausted the free plan, 2026-10-27, error 53000), 5-minute interval, keyword `"status":"ok"`, alert contact = your email/phone.
