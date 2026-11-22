@@ -14,7 +14,6 @@ import { setSession } from './db/auth-stub.mjs';
 import { setTestDb } from './db/lib-db-stub.mjs';
 import { mkRecord, mkUser, one } from './db/seed.mjs';
 import { POST as webhook } from '../app/api/webhook/github/route';
-import { GET as alerts } from '../app/api/cron/alerts/route';
 import { GET as cronSync } from '../app/api/cron/sync/route';
 import { GET as housekeeping } from '../app/api/cron/housekeeping/route';
 import { GET as health } from '../app/api/health/route';
@@ -98,7 +97,6 @@ await suiteAsync('POST /api/webhook/github', async () => {
 
 type CronRoute = (r: NextRequest) => Promise<Response>;
 const cronRoutes: Array<[string, CronRoute, string]> = [
-  ['/api/cron/alerts', alerts as CronRoute, '/api/cron/alerts?dryRun=1'],
   ['/api/cron/sync', cronSync as CronRoute, '/api/cron/sync'],
   ['/api/cron/housekeeping', housekeeping as CronRoute, '/api/cron/housekeeping?scope=hourly'],
 ];

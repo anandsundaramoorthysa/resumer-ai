@@ -56,19 +56,19 @@ One page. Longer reference: `docs/production/OPERATIONS.md`. Health: `GET /api/h
 ## Monitoring setup
 
 - **UptimeRobot** (free): HTTP(s) monitor on `https://<site>/api/health?shallow=1` (no database touch: a 5-minute monitor on the full check keeps Neon compute awake 24/7 and exhausted the free plan, 2026-10-27, error 53000), 5-minute interval, keyword `"status":"ok"`, alert contact = your email/phone.
-- **Healthchecks.io** (free): create checks `draft-alerts` (period 1h, grace 15m), `housekeeping` (1 day, grace 2h), `daily-sync` (1 day, grace 2h). Set Netlify env `HEARTBEAT_URL_DRAFT_ALERTS`, `HEARTBEAT_URL_HOUSEKEEPING`, `HEARTBEAT_URL_DAILY_SYNC` to each ping URL (or one `HEALTHCHECKS_BASE_URL=https://hc-ping.com/<project-ping-key>` and name the checks by slug). The functions ping on 2xx and `/fail` otherwise.
+- **Healthchecks.io** (free): create checks `housekeeping` (1 day, grace 2h), `daily-sync` (1 day, grace 2h). Set Netlify env `HEARTBEAT_URL_HOUSEKEEPING`, `HEARTBEAT_URL_DAILY_SYNC` to each ping URL (or one `HEALTHCHECKS_BASE_URL=https://hc-ping.com/<project-ping-key>` and name the checks by slug). The functions ping on 2xx and `/fail` otherwise.
 - **Sentry** alert rules (Project -> Alerts): see OPERATIONS.md "Sentry alert rules".
-- Emails go to `ALERT_EMAIL`: draft failures hourly; credits low (< `SERP_LOW_CREDITS`, default 25), stuck radar runs, database down - each at most once per 24 h per condition.
+- The app no longer sends its own ops-alert emails (draft failures, credits low, stuck radar runs, database down): removed 2026-11-22 at the owner's request. External monitoring is the owner's choice; check `/api/health` and the detail check above by hand.
 
 ## Capacity limits
 
 | Resource | Limit (free tier, check current plan) | Guard in the app |
 |---|---|---|
-| SerpApi | 250 searches/month, 50/hour | `lib/serp/budget.ts` blocks below 10 left or at 45 searches in an hour and drops to replay (labelled); if the guard's storage is down radar says "temporarily unavailable"; email alert below 25 left; an empty search is still billed |
+| SerpApi | 250 searches/month, 50/hour | `lib/serp/budget.ts` blocks below 10 left or at 45 searches in an hour and drops to replay (labelled); if the guard's storage is down radar says "temporarily unavailable"; an empty search is still billed |
 | Groq / Gemini free | per-minute and per-day token limits (provider dashboard) | provider chain + cooldowns; `APP_DAILY_MAX_CALLS` (2000) / `APP_DAILY_MAX_TOKENS`; `MAX_AI_CALLS_PER_DAY` (400/user) |
 | Neon free | storage ~0.5 GB, compute auto-suspends (cold start ~0.5-2 s), connection cap | retention sweep; pooled URL; `max: 5` connections per instance |
 | Netlify free | functions 10 s (scheduled 30 s), 125k invocations/mo, 100 GB bandwidth, 300 build min | `MAX_DRAFT_SECONDS` 20 s clock; doorbell pattern |
-| Gmail SMTP | ~500 messages/day | email is low volume; alert emails de-duplicated |
+| Gmail SMTP | ~500 messages/day | email is low volume |
 
 ## Contact
 

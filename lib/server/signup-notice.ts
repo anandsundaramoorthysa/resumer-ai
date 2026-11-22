@@ -24,7 +24,7 @@ export const NOTIFY_CEILING = 10;
 export async function notifyOwnerOfSignup(user: { id: string; email?: string | null; name?: string | null }, method: string): Promise<void> {
   try {
     if ((await ownerUserIds()).includes(user.id)) return;
-    const to = [...ownerEmails()][0] ?? process.env.ALERT_EMAIL?.trim();
+    const to = [...ownerEmails()][0];
     if (!to) return;
     const [{ n }] = await db
       .select({ n: sql<number>`count(*)::int` })

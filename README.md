@@ -270,10 +270,9 @@ what's still needed when you load it, so you can do this one piece at a time.
 | `TOKEN_ENC_KEY` | Every draft, and stored tokens | `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. The fit check in front of every draft is sealed with it. |
 | At least one AI key | Generation | Fireworks, Groq, Together, DeepInfra, or Gemini |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Google sign-in | Optional. [Google Cloud console](https://console.cloud.google.com/apis/credentials). |
-| `SMTP_USER` / `SMTP_PASS` | Sign-up, password reset, alerts | A Gmail address and a 16-character app password, stored **without spaces**. Without them links are logged, not sent. |
+| `SMTP_USER` / `SMTP_PASS` | Sign-up, password reset | A Gmail address and a 16-character app password, stored **without spaces**. Without them links are logged, not sent. |
 | `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_SLUG` | Reading a private portfolio | Optional but recommended: replaces the `repo` OAuth scope with per-repository `contents: read`. |
 | `CRON_SECRET` | Scheduled jobs, `/api/health` detail | Any long random string. Without it the cron routes refuse every request. |
-| `ALERT_EMAIL` | Failure alerts | Where the hourly draft-failure email goes. |
 | `MAX_DRAFT_SECONDS` / `MAX_ASSESS_SECONDS` / `AI_ATTEMPT_TIMEOUT_MS` | Host time limits | Optional. Defaults suit a 30-second function; see `lib/ai/budget.ts`. |
 | `APP_DAILY_MAX_CALLS` / `APP_DAILY_MAX_TOKENS` | Cost ceiling for everyone together | Optional; defaults 2,000 calls and 20M tokens a day. |
 | `OWNER_EMAILS` | The owner's account | Your own address. No daily quota and outside the shared pool; still bound by a burst limit of 240 AI requests per 10 minutes (60 for every other account), and a separate one for connecting and syncing a portfolio: 600 per 10 minutes (300 for everyone else), 1,200 per connection (600), with a Sentry alert past `OWNER_ALERT_CALLS` (1,000) a day. |
@@ -372,9 +371,9 @@ npm run dev
   bodies, cookies and query strings removed, tokens, emails and phone numbers redacted.
 - **Logs** are one JSON line per event (`lib/log.ts`), scrubbed with the same redactor.
 - **Scheduled jobs** (Netlify, UTC): housekeeping daily 03:30 (retention sweep), portfolio
-  freshness 04:15, draft alerts hourly at :05. Each can ping a dead-man's-switch
-  (`HEARTBEAT_URL_*` or `HEALTHCHECKS_BASE_URL`). Alert emails go to `ALERT_EMAIL`: failed
-  drafts, SerpApi credits low, stuck radar runs, database down.
+  freshness 04:15. Each can ping a dead-man's-switch (`HEARTBEAT_URL_*` or
+  `HEALTHCHECKS_BASE_URL`). The app's own ops-alert emails were removed on 2026-11-22 at the
+  owner's request; external monitoring is the owner's choice.
 
 Procedures: [`RUNBOOK.md`](./RUNBOOK.md). Reference: [`docs/production/OPERATIONS.md`](./docs/production/OPERATIONS.md).
 

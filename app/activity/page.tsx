@@ -4,6 +4,7 @@ import { AppHeader } from '@/components/app-header';
 import { getActivity } from '@/lib/server/activity';
 import { effectiveRunStatus } from '@/lib/server/draft-run';
 import { formatDateTime } from '@/lib/format';
+import { ownerEmails } from '@/lib/ai/daily-budget';
 
 export const metadata = { title: 'Activity' };
 export const dynamic = 'force-dynamic';
@@ -31,9 +32,7 @@ export default async function ActivityPage() {
   const { runs, summary, usage, dailyLimit, changes } = await getActivity(session.user.id);
   // The stored error detail is for the operator (lib/db/schema.ts says so): it can carry a
   // provider's or the database's own words. Everyone else sees what kind of failure it was.
-  const operator = Boolean(
-    process.env.ALERT_EMAIL && session.user.email?.toLowerCase() === process.env.ALERT_EMAIL.trim().toLowerCase(),
-  );
+  const operator = Boolean(session.user.email && ownerEmails().has(session.user.email.toLowerCase()));
   const today = usage[0];
 
   return (

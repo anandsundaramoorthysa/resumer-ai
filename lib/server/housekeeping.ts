@@ -1,7 +1,7 @@
 /**
  * Retention: deleting what is finished with.
  *
- * Two entry points, one function. `scope: 'hourly'` (called by /api/cron/alerts) is the
+ * Two entry points, one function. `scope: 'hourly'` (`/api/cron/housekeeping?scope=hourly`) is the
  * original cheap pass: expired auth rows and old sync jobs. `scope: 'daily'` (the default,
  * /api/cron/housekeeping at 03:30 UTC) adds the full retention table:
  *
@@ -314,7 +314,7 @@ export async function runHousekeeping(
   return out;
 }
 
-/* ------------------------------------------------------------------ heartbeats & ops alerts ---- */
+/* ------------------------------------------------------------------ heartbeats ---- */
 
 /** Stamp "this scheduled job just ran" into app_setting (key `hb:<name>`). Never throws. */
 export async function recordHeartbeat(name: string): Promise<void> {
@@ -336,110 +336,4 @@ export async function lastHeartbeats(): Promise<Record<string, string>> {
   } catch {
     return {};
   }
-}
-
-/**
- * True for the first caller in each window, false after: an atomic upsert on app_setting,
- * so concurrent doorbells cannot both send the same alert. Fails OPEN (true) when the
- * table is unreachable - a duplicate email is better than a silent outage.
- */
-export async function claimAlert(kind: string, windowMs = DAY): Promise<boolean> {
-  try {
-    const rows = rowsOf(
-      await db.execute(
-        sql`insert into app_setting (key, value, updated_at) values (${`alert:${kind}`}, 'sent', now())
-            on conflict (key) do update set updated_at = now()
-              where app_setting.updated_at < now() - ${`${Math.floor(windowMs / 1000)} seconds`}::interval
-            returning key`,
-      ),
-    );
-    return rows.length > 0;
-  } catch {
-    return true;
-  }
-}
-
-/** Gives the 24h window back (the mail was not sent, so the next run must try again). */
-export async function releaseAlert(kind: string): Promise<void> {
-  try {
-    await db.execute(sql`delete from app_setting where key = ${`alert:${kind}`}`);
-  } catch {
-    /* the window then simply runs out on its own */
-  }
-}
-
-export interface OpsMailer {
-  /** Recipient (ALERT_EMAIL) and whether SMTP is set up; without both nothing is claimed. */
-  to: string | undefined;
-  configured: boolean;
-  send(to: string, subject: string, text: string): Promise<{ ok: boolean; error?: string }>;
-}
-
-/**
- * Claim -> send -> release on failure. A finding's 24h window is only spent by a mail that
- * actually went out; with no recipient/SMTP, or a failed send, the next hourly run tries again.
- */
-export async function dispatchOpsAlerts(
-  all: OpsFinding[],
-  o: { dryRun: boolean; mailer: OpsMailer; footer?: string },
-): Promise<{ findings: OpsFinding[]; sent: boolean }> {
-  const { mailer } = o;
-  if (o.dryRun || !mailer.to || !mailer.configured) return { findings: all, sent: false };
-  const fresh: OpsFinding[] = [];
-  for (const f of all) if (await claimAlert(f.kind)) fresh.push(f);
-  const mail = composeOpsAlert(fresh);
-  if (!mail) return { findings: all, sent: false };
-  const result = await mailer
-    .send(mailer.to, mail.subject, o.footer ? `${mail.text}\n\n${o.footer}` : mail.text)
-    .catch((err) => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
-  if (!result.ok) for (const f of fresh) await releaseAlert(f.kind);
-  return { findings: all, sent: result.ok };
-}
-
-export interface OpsFinding {
-  kind: 'credits-low' | 'stuck-runs' | 'db-error';
-  detail: string;
-}
-
-export const LOW_CREDITS_AT = Number(process.env.SERP_LOW_CREDITS ?? 25);
-export const STUCK_RUN_MINUTES = 30;
-
-/** Credits low, radar runs stuck, database unreachable. Each check is independently guarded. */
-export async function collectOpsFindings(): Promise<OpsFinding[]> {
-  const found: OpsFinding[] = [];
-  try {
-    await db.execute(sql`select 1`);
-  } catch (err) {
-    return [{ kind: 'db-error', detail: err instanceof Error ? err.message.slice(0, 120) : 'query failed' }];
-  }
-  try {
-    const mod = await import('@/lib/serp/client').catch(() => null);
-    const s = mod?.creditStatus ? await mod.creditStatus() : null;
-    if (s && s.left >= 0 && s.left < LOW_CREDITS_AT) {
-      found.push({ kind: 'credits-low', detail: `${s.left} SerpApi searches left (alert below ${LOW_CREDITS_AT}); radar falls back to replay at zero.` });
-    }
-  } catch {
-    /* credits are optional */
-  }
-  try {
-    const n = countOf(
-      await db.execute(
-        sql`select count(*)::int as n from agent_run
-            where status in ('running', 'awaiting')
-              and updated_at < now() - ${`${STUCK_RUN_MINUTES} minutes`}::interval`,
-      ),
-    );
-    if (n > 0) found.push({ kind: 'stuck-runs', detail: `${n} radar run(s) have not moved for over ${STUCK_RUN_MINUTES} minutes.` });
-  } catch {
-    /* radar tables may not exist */
-  }
-  return found;
-}
-
-export function composeOpsAlert(findings: OpsFinding[]): { subject: string; text: string } | null {
-  if (findings.length === 0) return null;
-  return {
-    subject: `Resumer AI: ${findings.map((f) => f.kind).join(', ')}`,
-    text: [...findings.map((f) => `- ${f.kind}: ${f.detail}`), '', 'See RUNBOOK.md, "Incident checklist".'].join('\n'),
-  };
 }

@@ -76,7 +76,7 @@ export function sendTemplatedEmail(to: string, email: { subject: string; text: s
   return deliver(to, email.subject, email.text, email.html);
 }
 
-/** A plain-text notice to the site operator — draft-failure alerts (lib/server/draft-alerts.ts). */
+/** A plain-text notice to the site operator — sign-up notices (lib/server/signup-notice.ts). */
 export function sendOperatorEmail(to: string, subject: string, text: string): Promise<MailResult> {
   return deliver(to, subject, text);
 }
