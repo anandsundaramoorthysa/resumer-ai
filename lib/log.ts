@@ -4,7 +4,7 @@
  *
  *   import { log, withRequestId } from '@/lib/log';
  *   log.info('swept', { count: 3 });                   // {"ts":..,"level":"info","msg":"swept","count":3}
- *   const l = log.child({ route: '/api/cron/alerts' });
+ *   const l = log.child({ route: '/api/cron/housekeeping' });
  *   await withRequestId(id, () => handler());          // every line inside carries requestId
  *
  * Free text is scrubbed (emails, phones, bearer tokens, api_key=..., long tokens) because

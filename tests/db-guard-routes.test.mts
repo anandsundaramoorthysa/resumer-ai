@@ -1,6 +1,6 @@
 /**
  * The request guard on every state-changing route (lib/server/request-guard.ts), NUL/odd ids,
- * the webhook body cap, the consent->403 mapping, keepRecord's audit, and the ops-alert claim.
+ * the webhook body cap, the consent->403 mapping, keepRecord's audit.
  * Routes are called directly with `new Request`; `@/auth` is tests/db/auth-stub.mts.
  */
 import { createHmac } from 'node:crypto';
@@ -25,7 +25,6 @@ import { POST as webhook } from '../app/api/webhook/github/route';
 import { GET as exportSnapshot } from '../app/api/export/[snapshotId]/route';
 import { GET as selftest } from '../app/api/dev/selftest/route';
 import { POST as e2eDraft } from '../app/api/dev/e2e-draft/route';
-import { dispatchOpsAlerts, type OpsFinding } from '../lib/server/housekeeping';
 import { keepRecord } from '../app/profile/actions';
 import { BudgetExceededError } from '../lib/ai/budget';
 
@@ -225,47 +224,6 @@ await suiteAsync('keepRecord audits only a row it actually updated', async () =>
   await testAsync('the own record is audited once', async () => {
     await call(typeof rec2 === 'string' ? rec2 : (rec2 as { id: string }).id);
     assert.equal(await audits(u), 1);
-  });
-});
-
-await suiteAsync('ops alerts: the 24h window is spent only by a mail that went out', async () => {
-  const findings: OpsFinding[] = [{ kind: 'credits-low', detail: 'low' }];
-  const window = async () => one(pg, `select key from app_setting where key='alert:credits-low'`);
-  const mailer = (ok: boolean, sent: string[]) => ({
-    to: 'ops@example.test',
-    configured: true,
-    send: async (_to: string, subject: string) => (sent.push(subject), { ok, error: ok ? undefined : 'smtp down' }),
-  });
-  await testAsync('no recipient or SMTP: nothing claimed, nothing sent', async () => {
-    const r = await dispatchOpsAlerts(findings, { dryRun: false, mailer: { to: undefined, configured: true, send: async () => ({ ok: true }) } });
-    assert.equal(r.sent, false);
-    assert.equal(await window(), undefined);
-    const r2 = await dispatchOpsAlerts(findings, { dryRun: false, mailer: { to: 'a@b.test', configured: false, send: async () => ({ ok: true }) } });
-    assert.equal(r2.sent, false);
-    assert.equal(await window(), undefined);
-  });
-  await testAsync('a failed send releases the claim, so the next run retries', async () => {
-    const sent: string[] = [];
-    const r = await dispatchOpsAlerts(findings, { dryRun: false, mailer: mailer(false, sent) });
-    assert.equal(r.sent, false);
-    assert.equal(sent.length, 1);
-    assert.equal(await window(), undefined);
-    const again: string[] = [];
-    const r2 = await dispatchOpsAlerts(findings, { dryRun: false, mailer: mailer(true, again) });
-    assert.equal(r2.sent, true);
-    assert.equal(again.length, 1);
-  });
-  await testAsync('a delivered mail holds the window: the next run sends nothing', async () => {
-    assert.ok(await window());
-    const sent: string[] = [];
-    const r = await dispatchOpsAlerts(findings, { dryRun: false, mailer: mailer(true, sent) });
-    assert.equal(r.sent, false);
-    assert.equal(sent.length, 0);
-  });
-  await testAsync('dry run claims nothing', async () => {
-    await pg.query(`delete from app_setting where key='alert:credits-low'`);
-    await dispatchOpsAlerts(findings, { dryRun: true, mailer: mailer(true, []) });
-    assert.equal(await window(), undefined);
   });
 });
 

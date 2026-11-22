@@ -96,7 +96,7 @@ Each `advanceRadar` claims the step with a lease (`leased_until`, `attempts` inc
 ## Guardrails
 
 - **Grounding:** the tailor's grounding guard rejects any rewrite with a number or proper noun not in the user's records. Radar adds no model-written claims about the user.
-- **Budgets:** 3 runs per user per day and 12 credits per run (a call is skipped with a warning when it would exceed the cap), counted from SQL reservations so a failed or killed run still counts; 1 h / 24 h cache; block below 10 searches left or at 45 attempts in the hour; low-credit alert at `SERP_LOW_CREDITS` (default 25); planner under the daily AI allowance. A draft is capped at `MAX_AI_CALLS_PER_DRAFT` (default 40) calls.
+- **Budgets:** 3 runs per user per day and 12 credits per run (a call is skipped with a warning when it would exceed the cap), counted from SQL reservations so a failed or killed run still counts; 1 h / 24 h cache; block below 10 searches left or at 45 attempts in the hour; planner under the daily AI allowance. A draft is capped at `MAX_AI_CALLS_PER_DRAFT` (default 40) calls.
 - **Caps:** at most 3 queries, 30 postings kept, 120-character queries, 60 events.
 - **Idempotency:** each commit is `UPDATE ... WHERE id AND step = expectStep AND status IN (...)`; a lost race returns whatever won. Single-flight shares one upstream search between identical concurrent requests.
 - **Approval gates:** queries before any credit is spent; posting selection before handoff. Never auto-applies.

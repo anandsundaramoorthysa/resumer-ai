@@ -2,6 +2,8 @@
 
 ## Status as of 2026-10-08
 
+> **2026-11-22:** the app's own ops-alert system (hourly draft-alerts function, `/api/cron/alerts`, `ALERT_EMAIL`, credits-low / stuck-run / db-error / failed-draft emails) was removed at the owner's request. References to it below are historical; external monitoring is the owner's choice.
+
 > Superseded by `READINESS-REVERIFY.md` (re-checked 2026-10-09): R07 uptime monitor, R08 alerting and R16 cron heartbeats are now VERIFIED-DONE, and the first Neon PITR restore drill is logged at `RUNBOOK.md:72`. Rows below are the original 2026-10-06 audit and are left unedited.
 
 Re-checked against the code (grep or read; nothing was run). The register below is the original 2026-10-06 audit and is left unedited. DONE = implemented in code; PARTIAL = implemented in part or needs an owner action; OPEN = not addressed; UNVERIFIABLE = lives outside the repo. "Done" means present in code, not that it has been reviewed by counsel or deployed.
@@ -52,9 +54,9 @@ Re-checked against the code (grep or read; nothing was run). The register below 
 | R05 platform limits | OPEN | still Netlify free |
 | R06 email | OPEN | still a Gmail app password |
 | R07 uptime monitor | PARTIAL | `/api/health` and setup steps documented; whether a monitor is configured is UNVERIFIABLE |
-| R08 alerting | PARTIAL | `/api/cron/alerts` (credits low, stuck radar runs, DB down), failed-draft email, Sentry rule list in `OPERATIONS.md` |
+| R08 alerting | PARTIAL | (app alert emails removed 2026-11-22), Sentry rule list in `OPERATIONS.md` |
 | R09 AI capacity | PARTIAL | breaker, cooldowns, model-gone bench; providers are still free tiers |
-| R10 SerpApi quota | PARTIAL | 3 runs a day and 12 credits a run per user, credit reservations, low-credit alert; no per-user monthly quota |
+| R10 SerpApi quota | PARTIAL | 3 runs a day and 12 credits a run per user, credit reservations; no per-user monthly quota |
 | R11 billing | OPEN | |
 | R12 support channel | DONE | `/contact` (address is personal Gmail) |
 | R13 structured logs | PARTIAL | `lib/log.ts` adopted in health, cron and Netlify functions; many bare `console.*` calls remain |
@@ -196,7 +198,7 @@ Severity: P0 blocker (no real users until fixed) / P1 must-have before real user
 | R05 | Platform | Netlify free: 30 s limit forces 20 s draft clock and fewer iterations; `maxDuration=300` is ineffective on this plan; plan ToS for commercial use unverified | Quality and reliability capped by plan | `netlify.toml:1-14`; `app/api/draft/route.ts:29` | P1 | M | Background functions (15 min) or paid plan; re-measure; check plan terms | yes (paid) |
 | R06 | Email | Mail via personal Gmail app password: ~500/day, not domain-aligned, plain text, no bounce handling | Verification/reset land in spam or throttle; sign-up funnel breaks | `.env.example:89-101`; `lib/auth/smtp.ts`, `lib/auth/mail.ts` | P1 | M | Own domain + Resend/Postmark/SES; SPF, DKIM, DMARC; bounce webhook | yes (domain, vendor) |
 | R07 | Monitoring | No uptime monitor or status page | Outages found by users | `/api/health` exists but nothing polls it | P1 | S | External monitor on `/api/health` + status page | no |
-| R08 | Alerting | Only alert is hourly draft-failure email; none for 5xx rate, DB down, missed cron, all-providers-down, budget exhausted, SMTP failing | Silent failure (ten failed deploys went unnoticed per `netlify.toml` comment) | `netlify/functions/draft-alerts.mts`; Sentry DSN optional, no alert rules in repo | P1 | M | Sentry alert rules; Netlify deploy-failed notify; dead-man's switch | no |
+| R08 | Alerting | Only alert is hourly draft-failure email; none for 5xx rate, DB down, missed cron, all-providers-down, budget exhausted, SMTP failing | Silent failure (ten failed deploys went unnoticed per `netlify.toml` comment) | (draft-alerts removed 2026-11-22); Sentry DSN optional, no alert rules in repo | P1 | M | Sentry alert rules; Netlify deploy-failed notify; dead-man's switch | no |
 | R09 | AI capacity | All providers free/low tier; Gemini quota already exhausted; order tuned for latency not capacity | Rate limits under concurrent users; fallback exhaustion = outage | `lib/ai/models.ts` header; `APP_DAILY_MAX_CALLS` default 2000 (`lib/ai/daily-budget.ts`) | P1 | M | One paid primary + one paid fallback with DPA/ZDR; load test | yes |
 | R10 | Cost | SerpApi 250/month free credits shared by all users; no per-user radar quota; owner pays all | One user burns the month; surprise bills | `lib/serp/budget.ts` (global guard), `app/api/radar/route.ts` (`assertBurst` only) | P1 | S | Per-user monthly quota; low-credit banner; spend dashboard | yes |
 | R11 | Billing | No pricing, plans, payments or invoicing | Not sustainable; cannot gate heavy users | absent: no payment SDK in `package.json` | P1 | L | Decide model; Razorpay/Stripe; plan limits on `ai_usage_daily` | yes |
@@ -204,7 +206,7 @@ Severity: P0 blocker (no real users until fixed) / P1 must-have before real user
 | R13 | Logging | Unstructured `console.*` (72 call sites), no request id; Sentry errors only | Hard to debug multi-step runs | grep; `lib/sentry-options.ts` header | P2 | M | JSON logger with requestId; Sentry sampling (no replay) | no |
 | R14 | SLOs | No SLIs/SLOs, error budget or dashboard | Cannot say ready or degraded | absent | P2 | S | e.g. draft success >= 95% in 30 s, 99.5% availability from `draft_run` | yes (targets) |
 | R15 | Runbooks | No runbooks, on-call, severity matrix, postmortem template | One person at 3 am | absent (comments only) | P2 | M | `RUNBOOK.md`: provider outage, DB restore, key leak, mail failure, quota exhaustion | no |
-| R16 | Cron | Scheduled triggers always return 200; no heartbeat | Missed sync/alerts unnoticed | `netlify/functions/draft-alerts.mts`, `daily-sync.mts` | P2 | S | Heartbeat monitor; alert on misses | no |
+| R16 | Cron | Scheduled triggers always return 200; no heartbeat | Missed sync/alerts unnoticed | `daily-sync.mts` | P2 | S | Heartbeat monitor; alert on misses | no |
 | R17 | Config | No central env validation; silent behaviour change when vars missing | Misconfig = outage or silent degradation | `.env.example` (278 lines); `app/api/health/route.ts` is the only check | P2 | S | `lib/env.ts` zod schema, fail fast in prod | no |
 | R18 | Rollout | No feature flags or kill switches (`tests/flags.test.mts` is regression tests, not flags); no canary | Cannot disable Radar/import quickly | grep lib = none | P2 | S | Env kill switches (radar, import, sign-up) | no |
 | R19 | Rollback | Netlify rollback exists but schema is not reversible | Rolling code back past a `db:push` breaks | see R02 | P2 | S | Expand/contract rule in CONTRIBUTING | no |

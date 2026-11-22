@@ -24,7 +24,6 @@ export const REQUIRED_VARS = [
 /** Missing -> a feature is off or degraded, listed as a warning. */
 export const OPTIONAL_VARS = [
   'CRON_SECRET', // scheduled jobs refuse to run without it
-  'ALERT_EMAIL', // alerts have nowhere to go
   'SMTP_USER',
   'SMTP_PASS', // no email: verification, reset, approval notices all silently drop
   'OWNER_EMAILS', // nobody can open /admin/*

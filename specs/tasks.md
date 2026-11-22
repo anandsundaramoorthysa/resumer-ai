@@ -123,7 +123,7 @@ Checkable work items grouped by phase (matching `PLAN.md`'s roadmap). Each task 
 
 - [x] 9.1 Implement audit-log entries on all profile record changes — *REQ-10.1*
 - [x] 9.2 Add uptime/error alerting on the sync job and AI-provider fallback chain — *REQ-10.2*
-  - Hourly email of failed runs (`netlify/functions/draft-alerts.mts`), the `/activity` page, and Sentry for errors.
+  - The `/activity` page and Sentry for errors. (The hourly failed-run email was removed 2026-11-22 at the owner's request.)
 - [x] 9.3 Surface failed pipeline stages as visible errors in the live panel, never a silent hang — *REQ-10.2*
 - [~] 9.4 Encrypt PII and GitHub OAuth token at rest; audit minimum-scope token usage — *REQ-10.3, NFR-5*
   - Done: GitHub tokens are AES-256-GCM encrypted (`lib/auth/secret-box.ts`), and repository access moved to a GitHub App with read-only, selected-repo installs. Not done: profile personal details are stored in plain columns.

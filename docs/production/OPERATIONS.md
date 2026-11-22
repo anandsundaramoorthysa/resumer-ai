@@ -2,6 +2,8 @@
 
 Companion to `RUNBOOK.md` (the one-page procedures). This is the reference: environment matrix, scheduled jobs, retention, SQL order, Sentry rules, dashboard queries.
 
+> **2026-11-22:** the app's own ops-alert emails (failed drafts, credits low, stuck radar runs, DB down) were removed at the owner's request; external monitoring is the owner's choice. The `app_setting` keys `alert:*` and `hb:alerts` may remain in the database as unused rows (no migration written).
+
 > External-provider work that this file only documents the ingredients for (heartbeat checks, uptime monitor, Neon PITR drill, Sentry alert rules) is walked through step by step in `ALERTING-RUNBOOK.md`.
 
 > Status 2026-10-09: all four external items are done — heartbeats (Healthchecks.io + `HEARTBEAT_URL_*`), the `/api/health` UptimeRobot monitor, the first Neon PITR drill (`RUNBOOK.md:72`), and the five Sentry alert rules (§5 below). Release health / the Sentry DPA are intentionally skipped (no session data; legal). `SERPAPI_API_KEY` is not set, so the budget-crush alert is not armed.
@@ -19,7 +21,7 @@ Validated by `validateEnv()` in `lib/env.ts` (zod; returns names only, never thr
 | `NEXT_PUBLIC_SITE_URL` | **required** | wrong canonical/sitemap/links |
 | one of `GROQ_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `FIREWORKS_API_KEY`, `TOGETHER_API_KEY`, `DEEPINFRA_API_KEY` | **required (at least one)** | no AI |
 | `CRON_SECRET` | optional (warns) | every scheduled job and the health detail refuse |
-| `ALERT_EMAIL`, `SMTP_USER`, `SMTP_PASS` | optional (warns) | no alert / verification / approval emails |
+| `SMTP_USER`, `SMTP_PASS` | optional (warns) | no verification / reset / approval emails |
 | `OWNER_EMAILS` | optional (warns) | nobody can open `/admin/*` |
 | `NEXT_PUBLIC_SENTRY_DSN` (+ `SENTRY_AUTH_TOKEN` at build) | optional | no error reports / source maps |
 | `SERPAPI_API_KEY` | optional | radar runs in replay mode |
@@ -28,13 +30,12 @@ Validated by `validateEnv()` in `lib/env.ts` (zod; returns names only, never thr
 
 Also optional: `SIGNUP_MODE` (`invite` default | `open` | `manual`), `AUTO_APPROVE_DAILY_QUOTA` (default 20 per IST day), `SERP_MODE` (`replay` | `live` | `record`), `RADAR_PUBLIC_DEMO` (`1` allows `/radar?demo=1` in production), `AI_DISABLED_PROVIDERS`, `AI_PII_PROVIDERS`, `AI_BREAKER_THRESHOLD` (3), `AI_BREAKER_OPEN_MS` (30000), `AI_MODEL_GONE_COOLDOWN_MS` (6 h), `AI_DEFAULT_MAX_OUTPUT_TOKENS` (4000), `MAX_AI_CALLS_PER_DRAFT` (default 40). `.env.example` lists every variable.
 
-Also optional: `FLAG_<KEY>` (kill-switch overrides), `HEARTBEAT_URL_DRAFT_ALERTS|HOUSEKEEPING|DAILY_SYNC` or `HEALTHCHECKS_BASE_URL`, `SERP_LOW_CREDITS` (default 25), `LOG_LEVEL` (debug|info|warn|error, default info), `SENTRY_TRACES_SAMPLE_RATE` / `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` (default 0), `COMMIT_REF` / `CONTEXT` (set by Netlify; used as Sentry release/environment).
+Also optional: `FLAG_<KEY>` (kill-switch overrides), `HEARTBEAT_URL_HOUSEKEEPING|DAILY_SYNC` or `HEALTHCHECKS_BASE_URL`, `LOG_LEVEL` (debug|info|warn|error, default info), `SENTRY_TRACES_SAMPLE_RATE` / `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` (default 0), `COMMIT_REF` / `CONTEXT` (set by Netlify; used as Sentry release/environment).
 
 ## 2. Scheduled jobs (UTC)
 
 | Function (`netlify/functions`) | Schedule | Route it rings | Does |
 |---|---|---|---|
-| `draft-alerts.mts` | `5 * * * *` | `/api/cron/alerts` | failed-draft email; ops alerts (credits low, stuck radar runs, DB down; 24 h de-dupe); light purge (auth attempts/tokens, sync jobs) |
 | `housekeeping.mts` | `30 3 * * *` | `/api/cron/housekeeping` | full retention sweep (section 3); `?scope=hourly` = light pass |
 | `daily-sync.mts` | `15 4 * * *` | `/api/cron/sync` | portfolio SHA freshness check |
 

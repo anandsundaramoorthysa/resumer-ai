@@ -1,10 +1,11 @@
-# Alerting, monitoring and DR runbook
+# Monitoring and DR runbook (external, owner's choice)
+
 
 External-provider hardening that has no runtime code in this repo: heartbeat checks, an uptime monitor, a Neon point-in-time-restore drill, and the Sentry alert rules. Everything below is a **dashboard action** on external accounts - none of it can be done from this repository alone. What the repo already provides (code and endpoints) is listed first so the manual work is only the account side.
 
 Current state (checked 2026-10-09, code merged in PR #9; later commits are docs only):
 
-- **Done (§1 heartbeats):** Healthchecks.io checks `draft-alerts` (1 h), `housekeeping` (1 d), `daily-sync` (1 d) created; `HEARTBEAT_URL_DRAFT_ALERTS`/`_HOUSEKEEPING`/`_DAILY_SYNC` set on Netlify (scope all) and deployed; `draft-alerts` pings hourly at :05 UTC, the others daily. Ping URLs are capability links - keep them out of the repo and out of logs.
+- **Heartbeats (§1, set up 2026-10-09):** Healthchecks.io checks `housekeeping` (1 d), `daily-sync` (1 d); `HEARTBEAT_URL_HOUSEKEEPING`/`_DAILY_SYNC` on Netlify. The former `draft-alerts` check is obsolete: delete it in Healthchecks.io.
 - **Done (§2 uptime):** UptimeRobot HTTP(S) monitor on `https://resumeraiapp.netlify.app/api/health` (10 min, email, default 2xx/3xx=up); its built-in 3x retries absorb the single Neon cold-start 503.
 - **Done (§3 Neon PITR drill):** first drill run 2026-10-09, logged at the "Restore-drill log" in `RUNBOOK.md` — branch restored from a past point-in-time on free, reference counts matched production, branch deleted.
 - **Done (§4 Sentry alert rules, 2026-10-09):** issue alerts `new-issue`, `regression`, and metric Monitors `spike` (errors >10 in 1 h), `draft-pipeline-errors` (>3 in 15 m, `message:*draft*`), `providers-failed` (>3 in 15 m, `message:*all-providers-failed*`), each emailing `the owner alert address`. `SENTRY_AUTH_TOKEN` is unset (only needed for source-map uploads, not for alerting). Release health and the DPA are intentionally skipped (no session data; legal).
@@ -13,16 +14,15 @@ Current state (checked 2026-10-09, code merged in PR #9; later commits are docs 
 
 Neon free suspends an idle database; the first `/api/health` probe after idle pays the resume and returns 503 `{"status":"degraded"}`. Every monitor below must therefore use **two consecutive failures** before alerting, or an interval short enough that a 503 (resume) or 200 (warm) is fine either way. See `OPERATIONS.md` §9. Do not set a monitor to alert on the first non-200.
 
-## 1. Heartbeat checks (dead-man's switch for the three cron jobs) — DONE 2026-10-09
+## 1. Heartbeat checks (dead-man's switch for the cron jobs) — DONE 2026-10-09
 
 Provider: **Healthchecks.io** (free) is the best fit because the repo already follows its convention (`/fail` on failure). BetterStack heartbeats work too but have no fail-endpoint convention - a missed ping is the only signal there.
 
-1. Sign up at healthchecks.io (free plan covers 20 checks) and set the **Integrations** email to `ALERT_EMAIL` (`the owner alert address`).
-2. Create three checks, period = the schedule, grace large enough that a Netlify deploy tick or cold function start does not page:
+1. Sign up at healthchecks.io (free plan covers 20 checks) and set the **Integrations** email to your own address.
+2. Create two checks, period = the schedule, grace large enough that a Netlify deploy tick or cold function start does not page:
 
    | Check | Period | Grace |
    |---|---|---|
-   | `draft-alerts` | 60 m | 360 m |
    | `housekeeping` | 1440 m (24 h) | 90 m |
    | `daily-sync` | 1440 m (24 h) | 90 m |
 
@@ -31,7 +31,6 @@ Provider: **Healthchecks.io** (free) is the best fit because the repo already fo
 4. In Netlify: Site > Configuration > Environment variables. Add, with scope **All** (Builds, Functions, Runtime):
 
    ```
-   HEARTBEAT_URL_DRAFT_ALERTS=<ping-url>
    HEARTBEAT_URL_HOUSEKEEPING=<ping-url>
    HEARTBEAT_URL_DAILY_SYNC=<ping-url>
    ```
@@ -40,8 +39,6 @@ Provider: **Healthchecks.io** (free) is the best fit because the repo already fo
 5. Redeploy production (env changes apply on the next build): push to `main` (CI runs, Netlify builds) or Netlify > Deploys > Trigger deploy > Clear cache and deploy site.
 6. Verify without waiting for the clock:
    - Ring each route yourself with the cron secret; the function sends the ping then the route answers:
-     `Invoke-WebRequest -Uri 'https://resumeraiapp.netlify.app/api/cron/alerts' -Headers @{'x-cron-secret'=...}`
-   - Healthchecks.io should show a green ping with timestamp seconds ago for `draft-alerts`.
    - Confirm `hb:` rows are recorded: `GET https://resumeraiapp.netlify.app/api/health` with `x-cron-secret` shows `deep.heartbeats`.
 7. Confirm a **missed** ping alerts: Healthchecks flip-alert to email is on by default; you can also check one check's "grace" behavior by toggling its status from the API during the drill.
 
@@ -53,7 +50,7 @@ Provider: UptimeRobot free or a second Healthchecks.io HTTP check. BetterStack =
 - Expect: HTTP 200. Treat 503 as "down only if it repeats".
 - Interval: 10-15 min. Anything tighter defeats Neon's scale-to-zero and spends the free compute-hour budget on probes.
 - **Two consecutive failures** before alerting (cold-start 503 - prereq above). UptimeRobot "Trigger count: 2".
-- Alert channel: email to `ALERT_EMAIL`.
+- Alert channel: your own email.
 - The endpoint needs no auth, so the monitor needs no secret. `x-cron-secret` is only for the health *detail* view.
 
 ## 3. Neon point-in-time restore (PITR) drill
@@ -81,23 +78,11 @@ All rules: environment filter = `production`. Create in Sentry > Alerts > Create
 
 `NEXT_PUBLIC_SENTRY_DSN` is already set and errors are captured today; the five alert rules are configured (see OPERATIONS.md §5). Optional follow-up if you want source maps + a release tag: set `SENTRY_AUTH_TOKEN` (build scope) in Netlify; `COMMIT_REF`/`CONTEXT` already arrive from Netlify.
 
-## 5. One-time cleanup observed during verification
-
-The 2026-10-09 dry-run reported one `stuck-runs` finding ("1 radar run(s) have not moved for over 30 minutes"). It is a leftover test/abandoned run in `agent_run` (status `running`/`awaiting`), not user-facing and harmless to the product; the hourly alert would email about it until it ages out of the stuck check. Owner may leave it (no automated emails until the 24 h de-dupe claims it) or clear it in the Neon SQL editor after confirming the `id` and `user_id` are a test:
-
-```sql
-update agent_run
-   set status = 'killed', updated_at = now()
- where status = 'running' and updated_at < now() - interval '30 minutes';
-```
-
-(`agent_run.radar_search` ledger is untouched by this - it only records SerpApi reservations.)
-
-## 6. After completing this runbook
+## 5. After completing this runbook
 
 Update the readiness rows (dates + who ran them):
 
-- `READINESS-REVERIFY.md`: R07 (uptime monitor) -> DONE, R08 (alerting) -> DONE with `?dryRun=1` result, R16 (cron heartbeats) -> DONE with check names, R01 (Neon backups) -> PARTIAL with drill date.
+- `READINESS-REVERIFY.md`: R07 (uptime monitor) -> DONE, R16 (cron heartbeats) -> DONE with check names, R01 (Neon backups) -> PARTIAL with drill date.
 - `OPERATIONS.md` §9: remove the "no uptime monitor" wording if one now exists; keep the cold-start note (it stays true forever).
 
 These four workstreams are the last open ops items before the site is self-watching. None of them are needed for the SerpApi hackathon submission.
