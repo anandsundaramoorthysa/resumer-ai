@@ -365,7 +365,7 @@ npm run dev
 
 ## Observability
 
-- **`GET /api/health`** returns `{"status":"ok"}` (200) or `degraded` (503) from a `select 1`.
+- **`GET /api/health`** returns `{"status":"ok"}` without touching the database (so a 5-minute monitor cannot keep Neon awake); with `x-cron-secret` it runs the database and deep checks, `degraded` (503) when the database is down.
   With the `x-cron-secret` header it also reports env validation, tables present, stuck radar
   runs, cron heartbeats, provider order and SerpApi credits left. No secret value is returned.
 - **Sentry** is on only where `NEXT_PUBLIC_SENTRY_DSN` is set: errors only, no replay, request

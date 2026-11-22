@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import { connection } from 'next/server';
 import { getFlag } from '@/lib/server/flags';
 import { formatMaintenance } from './maintenance-text';
@@ -11,7 +12,11 @@ export async function MaintenanceBanner() {
   let text: string | null = null;
   try {
     await connection();
-    text = formatMaintenance(await getFlag('maintenance_message', ''));
+    // Anonymous visitors (and crawlers) see only the FLAG_MAINTENANCE_MESSAGE env value: reading
+    // the table on every public page view kept Neon compute awake. Visitors carrying an Auth.js
+    // session cookie get the table value too.
+    const signedIn = (await cookies()).getAll().some((c) => /authjs\.session-token/.test(c.name));
+    text = formatMaintenance(await getFlag('maintenance_message', '', { db: signedIn }));
   } catch {
     return null;
   }

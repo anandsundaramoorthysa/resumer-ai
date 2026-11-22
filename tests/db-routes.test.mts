@@ -145,26 +145,33 @@ await suiteAsync('cron/sync: what the freshness check does with its candidates',
 
 await suiteAsync('GET /api/health', async () => {
   const get = (headers: Record<string, string> = {}) => health(req('/api/health', { headers }));
-  await testAsync('public + database up -> 200 {status:"ok"} and nothing else', async () => {
-    const res = await get();
-    assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { status: 'ok' });
-    assert.equal(res.headers.get('cache-control'), 'no-store');
-  });
-  await testAsync('public + database failing -> 503 {status:"degraded"} and nothing else', async () => {
+  await testAsync('public never touches the database, even when it is down (Neon idle guard)', async () => {
     const real = (globalThis as { __testDb?: unknown }).__testDb;
-    setTestDb({ execute: () => Promise.reject(new Error('connection refused')) });
+    let calls = 0;
+    setTestDb(new Proxy({}, { get: () => { calls++; throw new Error('db touched'); } }));
     try {
-      const res = await get();
-      assert.equal(res.status, 503);
-      assert.deepEqual(await res.json(), { status: 'degraded' });
+      for (const qs of ['', '?shallow=1', '?db=1', '?deep=1']) {
+        const res = await health(req(`/api/health${qs}`));
+        assert.equal(res.status, 200);
+        assert.equal((await res.json()).status, 'ok');
+        assert.equal(res.headers.get('cache-control'), 'no-store');
+      }
+      const wrong = await health(req('/api/health', { headers: { 'x-cron-secret': 'nope' } }));
+      assert.equal(wrong.status, 200);
+      assert.equal(calls, 0, 'public /api/health must not query the database');
     } finally {
       setTestDb(real);
     }
   });
-  await testAsync('a wrong secret still gets only the shallow answer', async () => {
-    const body = await (await get({ 'x-cron-secret': 'nope' })).json();
-    assert.deepEqual(body, { status: 'ok' });
+  await testAsync('with the secret and ?shallow=1 it stays database-free', async () => {
+    const real = (globalThis as { __testDb?: unknown }).__testDb;
+    setTestDb({ execute: () => Promise.reject(new Error('db touched')) });
+    try {
+      const res = await get({ 'x-cron-secret': SECRET }).then(() => health(req('/api/health?shallow=1', { headers: { 'x-cron-secret': SECRET } })));
+      assert.deepEqual(await res.json(), { status: 'ok', shallow: true });
+    } finally {
+      setTestDb(real);
+    }
   });
   await testAsync('with the secret: detail, db up, and no secret values anywhere in it', async () => {
     const res = await get({ 'x-cron-secret': SECRET });
