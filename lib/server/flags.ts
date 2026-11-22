@@ -84,9 +84,10 @@ const envOverride = (key: string): string | undefined => {
   return v === undefined || v.trim() === '' ? undefined : v.trim();
 };
 
-export async function getFlag(key: string, def: string): Promise<string> {
+export async function getFlag(key: string, def: string, opts: { db?: boolean } = {}): Promise<string> {
   const fromEnv = envOverride(key);
   if (fromEnv !== undefined) return fromEnv;
+  if (opts.db === false) return def;
   const v = (await values()).get(key);
   return v === undefined ? def : v;
 }
