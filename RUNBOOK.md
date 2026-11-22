@@ -51,6 +51,7 @@ One page. Longer reference: `docs/production/OPERATIONS.md`. Health: `GET /api/h
 ## Incident log
 
 - **2026-10-27: database quota exhausted.** Every query failed with Neon error 53000 (free-plan quota) and `/api/health` returned 503. A 5-minute monitor on the full health check kept compute awake around the clock. Moved to a new Neon project (Singapore), built with `npm run db:migrate` (31 tables, all data from the old project was not carried over: users re-register, GitHub is reconnected, invites are recreated). Monitor now uses `/api/health?shallow=1`. The old project, its restore-drill branch and the PITR notes above refer to the retired database.
+- **2026-11-22: quota exhausted again on the new Neon project.** Root causes: the monitor URL was the plain `/api/health`, which ran `select 1` every 5 minutes (288 queries/day, compute never autosuspended); the root layout's maintenance banner also read the `app_setting` table on every public page render (crawlers, `/`, `/sign-in`); the hourly draft-alerts function added 24 wake-ups/day. Fix: public `/api/health` never touches the database (secret holders still get the deep check), the banner reads the table only for visitors with a session cookie (anonymous visitors see only `FLAG_MAINTENANCE_MESSAGE`), draft-alerts removed separately. Left: housekeeping 03:30 and daily-sync 04:15 UTC, about 2 wake-ups/day. Check Neon console > Monitoring > compute hours after a week.
 
 ## Monitoring setup
 

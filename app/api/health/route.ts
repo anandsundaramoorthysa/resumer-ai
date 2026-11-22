@@ -111,11 +111,11 @@ async function deepChecks() {
 }
 
 export async function GET(req: NextRequest) {
-  // Liveness only, no database touch. A 5-minute uptime monitor on the full check keeps the
-  // Neon compute awake around the clock and used up the free plan's monthly compute hours
-  // (every query then failed with 53000 quota exceeded). Point the monitor here; the hourly
-  // alerts cron still checks the database and emails when it is down.
-  if (req.nextUrl.searchParams.get('shallow') === '1') {
+  // Public callers get liveness only, no database touch, whatever the query string says. The
+  // owner's 5-minute uptime monitor hits this URL, and a query every 5 minutes defeats Neon's
+  // 5-minute autosuspend: compute stayed on 24/7 and used up the free plan twice (2026-10-27
+  // and 2026-11-22, error 53000). Only a CRON_SECRET holder gets the database and deep checks.
+  if (!cronAuthorized(req) || req.nextUrl.searchParams.get('shallow') === '1') {
     return Response.json({ status: 'ok', shallow: true }, { headers: NO_STORE });
   }
 
@@ -140,9 +140,6 @@ export async function GET(req: NextRequest) {
   const dbLatencyMs = Date.now() - t0;
   if (!dbUp) log.warn('health degraded: database unreachable', { route: '/api/health', latencyMs: dbLatencyMs });
 
-  if (!cronAuthorized(req)) {
-    return Response.json({ status: dbUp ? 'ok' : 'degraded' }, { status: dbUp ? 200 : 503, headers: NO_STORE });
-  }
   const deep = dbUp ? await deepChecks() : null;
 
   return Response.json({
